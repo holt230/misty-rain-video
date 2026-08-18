@@ -1,0 +1,48 @@
+:root {
+  /* 基础色彩 */
+  --bg-dark: #090a0e;
+  --bg-surface: #151722;
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.65);
+  --text-tertiary: rgba(255, 255, 255, 0.40);
+
+  /* Apple 液态玻璃 (Liquid Glass) 核心变量 */
+  --liquid-glass-bg: rgba(255, 255, 255, 0.05);
+  --liquid-glass-bg-hover: rgba(255, 255, 255, 0.09);
+  --liquid-glass-bg-active: rgba(255, 255, 255, 0.14);
+  --liquid-glass-border: rgba(255, 255, 255, 0.12);
+  --liquid-glass-border-highlight: rgba(255, 255, 255, 0.28);
+  --liquid-glass-blur: blur(28px) saturate(190%);
+  --liquid-glass-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.45), inset 0 1px 1px 0 rgba(255, 255, 255, 0.22);
+  --liquid-card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36), inset 0 1px 1px 0 rgba(255, 255, 255, 0.18);
+
+  /* 液态流光色彩 (Liquid Accents) */
+  --accent-cyan: #95a9ff;
+  --accent-blue: #7d91f6;
+  --accent-indigo: #818cf8;
+  --accent-purple: #a78bfa;
+  --accent-pink: #d29bea;
+  --accent-amber: #f59e0b;
+  --accent-emerald: #77d6aa;
+
+  /* 网盘品牌专色 */
+  --color-quark: #ff5722;
+  --color-aliyun: #ff6a00;
+  --color-baidu: #2932e1;
+  --color-xunlei: #0088ff;
+  --color-115: #ffcc00;
+  --color-uc: #ff9800;
+  --color-tianyi: #1890ff;
+
+  /* 动效阻尼 (Apple Spring Curve) */
+  --spring-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-base: all 0.3s var(--spring-ease);
+
+  /* 间距与圆角 */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-pill: 9999px;
+}

@@ -1,0 +1,52 @@
+services:
+  misty-rain-video:
+    image: ${IMAGE_NAME:-misty-rain-video}:${IMAGE_TAG:-latest}
+    container_name: misty-rain-video
+    restart: unless-stopped
+    init: true
+    ports:
+      - "5200:5173"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5173
+      TZ: ${TZ:-Asia/Shanghai}
+      QUARK_CONFIG_SECRET: ${QUARK_CONFIG_SECRET:-}
+      # 可替换为自建的兼容 HTTPS 令牌交换服务；不要使用 HTTP 地址。
+      TV_TOKEN_EXCHANGE_URL: ${TV_TOKEN_EXCHANGE_URL:-https://api.extscreen.com/quarkdrive/token}
+      APP_USERS_JSON: >-
+        [
+          {"username":"admin","password":"666666","role":"admin","folder":"admin"}
+        ]
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      APP_PROFILE_IDENTIFIER: ${APP_PROFILE_IDENTIFIER:-com.mistyrain.video}
+      AUTH_SESSION_DAYS: 30
+      LIBRARY_ROOT_FOLDER: 烟雨影视
+      LEGACY_LIBRARY_ROOT_FOLDER: 烟雨视频
+      # 阿里云直连 Telegram 容易超时，默认使用内置检索引擎的 HTTP 插件源。
+      RESOURCE_SEARCH_SOURCE: plugin
+      RESOURCE_SEARCH_URLS: http://127.0.0.1:8888/api/search,https://so.252035.xyz/api/search
+    volumes:
+      - misty-rain-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  misty-rain-data:
+    name: misty-rain-video-data

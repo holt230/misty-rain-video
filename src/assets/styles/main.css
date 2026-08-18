@@ -1,0 +1,383 @@
+/* ========================================================================
+   Misty Rain — midnight glass mobile design system
+   Green is deliberately reserved for success / availability. The primary
+   interaction colour is a calm periwinkle, so the library stays cinematic
+   instead of reading like a dashboard.
+   ======================================================================== */
+
+:root {
+  --app-viewport-height: 100vh;
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+
+  --liquid-canvas: #090a0e;
+  --liquid-canvas-subtle: #0d0f16;
+  --surface-1: #11131b;
+  --surface-2: #171a24;
+  --surface-3: #202431;
+  --surface-elevated: #252a38;
+
+  --text-primary: rgba(250, 250, 255, 0.96);
+  --text-secondary: rgba(232, 234, 244, 0.70);
+  --text-tertiary: rgba(218, 221, 233, 0.49);
+  --text-quaternary: rgba(206, 210, 225, 0.31);
+  --text-muted: var(--text-tertiary);
+
+  --accent-rgb: 169 183 255;
+  --liquid-accent: #a9b7ff;
+  --liquid-accent-strong: #7e8cf4;
+  --liquid-accent-hover: #c1cbff;
+  --liquid-accent-glow: rgb(var(--accent-rgb) / 0.22);
+  --liquid-accent-subtle: rgb(var(--accent-rgb) / 0.12);
+  --liquid-accent-muted: rgb(var(--accent-rgb) / 0.07);
+  --accent-ink: #11142b;
+
+  --success-rgb: 116 213 169;
+  --success: #74d5a9;
+  --success-subtle: rgb(var(--success-rgb) / 0.13);
+  --danger: #ff756e;
+
+  --glass-bg: rgb(18 20 29 / 0.66);
+  --glass-bg-hover: rgb(28 31 44 / 0.76);
+  --glass-bg-active: rgb(37 41 57 / 0.84);
+  --glass-blur: blur(22px) saturate(145%);
+  --glass-blur-heavy: blur(34px) saturate(155%);
+  --glass-border: 1px solid rgb(236 239 255 / 0.095);
+  --glass-border-strong: 1px solid rgb(241 243 255 / 0.17);
+  --glass-highlight-inner: inset 0 1px rgb(255 255 255 / 0.09);
+  --glass-shadow-sm: 0 8px 22px rgb(0 0 0 / 0.24);
+  --glass-shadow-md: 0 16px 42px rgb(0 0 0 / 0.33);
+  --glass-shadow-lg: 0 28px 72px rgb(0 0 0 / 0.48);
+
+  /* Compatibility aliases used by older component styles. */
+  --liquid-glass-bg: var(--glass-bg);
+  --liquid-glass-bg-hover: var(--glass-bg-hover);
+  --liquid-glass-bg-active: var(--glass-bg-active);
+  --liquid-glass-border: rgb(236 239 255 / 0.095);
+  --liquid-glass-border-highlight: rgb(241 243 255 / 0.17);
+  --liquid-glass-blur: var(--glass-blur);
+  --liquid-glass-shadow: var(--glass-shadow-md);
+  --liquid-card-shadow: var(--glass-shadow-sm);
+  --accent-cyan: var(--liquid-accent);
+  --transition-base: 0.2s ease;
+
+  --radius-xs: 7px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 28px;
+  --radius-pill: 9999px;
+  --mobile-gutter: 16px;
+  --mobile-content-bottom: calc(102px + var(--safe-area-bottom));
+  --spring-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: dark;
+}
+
+@supports (height: 100dvh) {
+  :root { --app-viewport-height: 100dvh; }
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html,
+body {
+  width: 100%;
+  min-height: var(--app-viewport-height);
+  overflow-x: hidden;
+  background: var(--liquid-canvas);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+}
+
+body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app { min-height: var(--app-viewport-height); }
+button, input, textarea, select { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { touch-action: manipulation; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--liquid-accent);
+  outline-offset: 2px;
+}
+
+/* A quiet, moving blue-violet mist. It sits behind content and is intentionally
+   low contrast so cover artwork remains the visual focus. */
+.liquid-spatial-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: var(--app-viewport-height);
+  min-height: var(--app-viewport-height);
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(82% 52% at 92% -14%, rgb(113 129 218 / 0.22), transparent 66%),
+    radial-gradient(68% 48% at -16% 48%, rgb(96 116 165 / 0.12), transparent 72%),
+    radial-gradient(62% 44% at 104% 88%, rgb(181 140 211 / 0.07), transparent 74%),
+    linear-gradient(180deg, #11131c 0%, #0a0b10 47%, #07080b 100%);
+}
+
+.liquid-spatial-canvas::before,
+.liquid-spatial-canvas::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+.liquid-spatial-canvas::before {
+  inset: -12%;
+  opacity: 0.72;
+  background:
+    linear-gradient(118deg, transparent 22%, rgb(255 255 255 / 0.02) 39%, transparent 57%),
+    radial-gradient(42% 27% at 74% 18%, rgb(167 184 255 / 0.07), transparent 76%),
+    radial-gradient(44% 30% at 18% 72%, rgb(132 150 207 / 0.07), transparent 78%);
+  filter: blur(12px);
+  animation: mist-field-drift 28s ease-in-out infinite alternate;
+}
+
+.liquid-spatial-canvas::after {
+  inset: 0;
+  opacity: 0.055;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='%23fff'%3E%3Ccircle cx='8' cy='14' r='.55' fill-opacity='.22'/%3E%3Ccircle cx='34' cy='7' r='.45' fill-opacity='.34'/%3E%3Ccircle cx='72' cy='20' r='.5' fill-opacity='.2'/%3E%3Ccircle cx='91' cy='43' r='.45' fill-opacity='.28'/%3E%3Ccircle cx='23' cy='50' r='.5' fill-opacity='.18'/%3E%3Ccircle cx='57' cy='62' r='.55' fill-opacity='.3'/%3E%3Ccircle cx='13' cy='87' r='.45' fill-opacity='.26'/%3E%3Ccircle cx='81' cy='84' r='.5' fill-opacity='.2'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 96px 96px;
+  mix-blend-mode: soft-light;
+}
+
+.liquid-light-blob {
+  position: absolute;
+  width: min(78vw, 760px);
+  aspect-ratio: 1.25;
+  border-radius: 48% 52% 58% 42% / 44% 55% 45% 56%;
+  opacity: 0.2;
+  filter: blur(62px);
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+
+.blob-1 {
+  top: -22%;
+  left: -30%;
+  background: radial-gradient(ellipse, rgb(123 142 238 / 0.72), rgb(66 79 150 / 0.3) 48%, transparent 72%);
+  animation: mist-blob-one 25s ease-in-out infinite alternate;
+}
+
+.blob-2 {
+  top: 24%;
+  right: -42%;
+  background: radial-gradient(ellipse, rgb(169 183 255 / 0.4), rgb(87 101 177 / 0.25) 50%, transparent 74%);
+  animation: mist-blob-two 30s ease-in-out infinite alternate;
+}
+
+.blob-3 {
+  bottom: -26%;
+  left: 6%;
+  background: radial-gradient(ellipse, rgb(185 142 215 / 0.26), rgb(96 77 133 / 0.17) 48%, transparent 72%);
+  animation: mist-blob-three 28s ease-in-out infinite alternate;
+}
+
+@keyframes mist-field-drift {
+  from { transform: translate3d(-2%, -1%, 0) scale(1); }
+  to { transform: translate3d(3%, 2%, 0) scale(1.05); }
+}
+@keyframes mist-blob-one {
+  from { transform: translate3d(-5%, -4%, 0) rotate(-8deg) scale(0.94); }
+  to { transform: translate3d(30%, 23%, 0) rotate(11deg) scale(1.1); }
+}
+@keyframes mist-blob-two {
+  from { transform: translate3d(10%, -8%, 0) rotate(4deg) scale(1.05); }
+  to { transform: translate3d(-31%, 22%, 0) rotate(-14deg) scale(0.94); }
+}
+@keyframes mist-blob-three {
+  from { transform: translate3d(-12%, 8%, 0) rotate(-6deg) scale(1); }
+  to { transform: translate3d(22%, -24%, 0) rotate(14deg) scale(1.13); }
+}
+
+.liquid-glass-panel {
+  border: var(--glass-border);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+::selection { color: var(--accent-ink); background: rgb(var(--accent-rgb) / 0.8); }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: rgb(255 255 255 / 0.14); }
+
+/* Shared sheets and dialogs. Individual layouts stay component-local; their
+   surfaces deliberately share one material to prevent visual drift. */
+.account-backdrop,
+.action-backdrop,
+.picker-backdrop,
+.confirm-backdrop,
+.drawer-backdrop,
+.liquid-dialog-backdrop,
+.player-backdrop {
+  background: rgb(3 4 8 / 0.76) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+
+.account-sheet,
+.action-sheet,
+.picker-sheet,
+.confirm-sheet,
+.liquid-drawer-modal,
+.liquid-dialog {
+  color: var(--text-primary) !important;
+  border: 1px solid rgb(238 240 255 / 0.11) !important;
+  background: rgb(16 18 27 / 0.96) !important;
+  box-shadow: 0 28px 72px rgb(0 0 0 / 0.52), inset 0 1px rgb(255 255 255 / 0.06) !important;
+  backdrop-filter: var(--glass-blur-heavy) !important;
+  -webkit-backdrop-filter: var(--glass-blur-heavy) !important;
+}
+
+.drag-handle { background: rgb(255 255 255 / 0.2) !important; }
+.close-button,
+.modal-close-btn,
+.drawer-close-btn,
+.btn-close-dialog {
+  border-color: rgb(255 255 255 / 0.08) !important;
+  color: var(--text-secondary) !important;
+  background: rgb(255 255 255 / 0.055) !important;
+  box-shadow: none !important;
+}
+
+.btn-accent,
+.btn-save,
+.btn-transfer,
+.btn-save-to-list,
+.primary-button,
+.empty-action {
+  color: var(--accent-ink) !important;
+  border-color: transparent !important;
+  background: linear-gradient(145deg, var(--liquid-accent), var(--liquid-accent-strong)) !important;
+  box-shadow: 0 8px 24px var(--liquid-accent-glow) !important;
+}
+
+.action-row,
+.action-list,
+.category-option,
+.quick-guide-card,
+.liquid-resource-row,
+.resource-card,
+.secondary-button,
+.cancel-button,
+.btn-cancel {
+  border-color: rgb(238 240 255 / 0.075) !important;
+  background: rgb(233 237 255 / 0.035) !important;
+  box-shadow: none !important;
+}
+
+.action-row:hover,
+.category-option:hover,
+.liquid-resource-row:hover,
+.resource-card:hover {
+  border-color: rgb(var(--accent-rgb) / 0.18) !important;
+  background: var(--liquid-accent-muted) !important;
+  transform: none !important;
+}
+
+.category-option.active,
+.dialog-tab.active,
+.drive-chip.active,
+.option-chip.active,
+.filter-chip.active,
+.cat-select-pill.active {
+  color: var(--liquid-accent) !important;
+  border-color: rgb(var(--accent-rgb) / 0.28) !important;
+  background: var(--liquid-accent-subtle) !important;
+  box-shadow: none !important;
+}
+
+/* Compatibility bridge for old, component-scoped emerald rules. New views
+   should consume the variables above instead of adding another colour family. */
+.action-item.update .action-icon,
+.action-item:not(.danger) .action-icon,
+.active .option-icon,
+.quality-tag.quality-4k,
+.target-type-chip,
+.searching-hint,
+.source-badge,
+.episode-item.active,
+.current-badge {
+  color: var(--liquid-accent) !important;
+}
+
+.action-item.update .action-icon,
+.action-item:not(.danger) .action-icon,
+.active .option-icon,
+.quality-tag.quality-4k,
+.target-type-chip,
+.episode-item.active,
+.current-badge {
+  border-color: rgb(var(--accent-rgb) / 0.22) !important;
+  background: var(--liquid-accent-subtle) !important;
+}
+
+.status-pill.ready {
+  color: var(--success) !important;
+  background: var(--success-subtle) !important;
+}
+.status-pill.ready .status-dot {
+  background: var(--success) !important;
+  box-shadow: 0 0 0 3px rgb(var(--success-rgb) / 0.12) !important;
+}
+.loading-wave i {
+  background: linear-gradient(180deg, #d9deff, var(--liquid-accent)) !important;
+  box-shadow: 0 0 14px var(--liquid-accent-glow) !important;
+}
+.setting-switch[aria-checked='true'] {
+  background: var(--liquid-accent-strong) !important;
+  box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / 0.16) !important;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --radius-xl: 20px;
+    --radius-2xl: 24px;
+    --mobile-content-bottom: calc(96px + var(--safe-area-bottom));
+  }
+
+  html { scroll-padding-bottom: var(--mobile-content-bottom); }
+  .account-sheet,
+  .action-sheet,
+  .picker-sheet,
+  .confirm-sheet,
+  .liquid-drawer-modal {
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    border-left: 0 !important;
+    border-radius: 24px 24px 0 0 !important;
+  }
+  .account-sheet,
+  .action-sheet,
+  .picker-sheet,
+  .confirm-sheet {
+    padding-right: calc(var(--mobile-gutter) + var(--safe-area-right)) !important;
+    padding-bottom: calc(var(--mobile-gutter) + var(--safe-area-bottom)) !important;
+    padding-left: calc(var(--mobile-gutter) + var(--safe-area-left)) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

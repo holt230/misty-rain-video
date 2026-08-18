@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.server.example
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.codegraph/
+.cursor/
+data/
+.playwright-mcp/
+/misty-*.png
+scripts/*.local.sh

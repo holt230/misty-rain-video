@@ -1,0 +1,34 @@
+{
+  "name": "misty-rain-video",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.28.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.31.0",
+    "hls.js": "^1.6.13",
+    "vue": "^3.5.13"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "start": "node server.js",
+    "probe:quark": "node scripts/quark-capability-probe.mjs",
+    "probe:quark-transfer": "node scripts/quark-transfer-probe.mjs",
+    "import:quark": "node scripts/import-quark-library.mjs",
+    "verify:quark": "node scripts/verify-quark-library.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.1",
+    "vue-tsc": "^2.1.10"
+  }
+}
