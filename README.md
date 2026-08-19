@@ -385,6 +385,25 @@ APP_PUBLIC_URL=https://example.com/misty-rain/
 
 修改反向代理或环境变量后需要重新加载 Nginx 并重建容器；只修改网盘目录内容不需要重启，网页会重新扫描片库。
 
+### GitHub Actions 自动发布镜像
+
+仓库内置 `.github/workflows/publish-image.yml`。代码推送到 `main` 分支后，GitHub Actions 会自动构建 `linux/amd64` 主镜像并发布为：
+
+```text
+ghcr.io/holt230/misty-rain-video:amd64
+```
+
+工作流也支持在 GitHub 的 Actions 页面手动运行。发布使用仓库自带的 `GITHUB_TOKEN`，不需要在代码或 Secrets 中保存个人访问令牌。构建过程仍会读取 `search-amd64` 中的内置检索程序，但服务器部署只需运行最终的 `amd64` 主镜像。
+
+如果现有 GHCR Package 尚未授权此仓库写入，需要在 Package 的 **Settings → Manage Actions access** 中添加 `holt230/misty-rain-video` 并授予 `Write` 权限。Package 应保持 `Public`，服务器才能免登录拉取。
+
+镜像发布完成不会自动重启服务器容器。服务器仍需执行：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
 ### 自行构建和发布镜像
 
 开发机需要 Docker Buildx。下面示例构建 `linux/amd64` 主镜像，并使用官方检索基础镜像：
