@@ -11,7 +11,6 @@ fi
 IMAGE_TAG=${1:-${IMAGE_TAG:-amd64}}
 IMAGE_REF="${IMAGE_NAME}:${IMAGE_TAG}"
 PLATFORM=${PLATFORM:-linux/amd64}
-RESOURCE_SEARCH_IMAGE=${RESOURCE_SEARCH_IMAGE:-${IMAGE_NAME}:search-amd64}
 REGISTRY_HOST=${REGISTRY_HOST:-${IMAGE_NAME%%/*}}
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
@@ -26,7 +25,6 @@ echo "正在构建并推送 ${IMAGE_REF}（${PLATFORM}）..."
 docker buildx build \
   --platform "${PLATFORM}" \
   --pull \
-  --build-arg "RESOURCE_SEARCH_IMAGE=${RESOURCE_SEARCH_IMAGE}" \
   --provenance=false \
   --sbom=false \
   --tag "${IMAGE_REF}" \

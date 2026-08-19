@@ -16,7 +16,6 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/misty-rain-video
-  RESOURCE_SEARCH_IMAGE: ghcr.io/${{ github.repository_owner }}/misty-rain-video:search-amd64
 
 jobs:
   publish:
@@ -48,7 +47,6 @@ jobs:
           sbom: false
           build-args: |
             APP_BASE_PATH=/misty-rain/
-            RESOURCE_SEARCH_IMAGE=${{ env.RESOURCE_SEARCH_IMAGE }}
           tags: ${{ env.IMAGE_NAME }}:amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max

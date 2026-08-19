@@ -1,5 +1,4 @@
 ARG NODE_IMAGE=node:22-alpine
-ARG RESOURCE_SEARCH_IMAGE=misty-rain-video-search:amd64
 
 FROM ${NODE_IMAGE} AS base
 ENV PNPM_HOME=/pnpm
@@ -17,7 +16,7 @@ ARG APP_BASE_PATH=/misty-rain/
 COPY . .
 RUN APP_BASE_PATH="$APP_BASE_PATH" pnpm build
 
-FROM ${RESOURCE_SEARCH_IMAGE} AS resource-search
+FROM ghcr.io/holt230/misty-rain-video:search-amd64 AS resource-search
 
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
