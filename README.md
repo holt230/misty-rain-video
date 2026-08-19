@@ -49,9 +49,8 @@
 | 镜像 | 平台 | 用途 |
 | --- | --- | --- |
 | `ghcr.io/holt230/misty-rain-video:amd64` | `linux/amd64` | 可直接运行的主应用镜像，已包含前端、API 和检索程序 |
-| `ghcr.io/holt230/misty-rain-video:search-amd64` | `linux/amd64` | 构建主镜像时使用的检索基础镜像，不需要也不应该单独启动 |
 
-ARM64 服务器不能直接原生运行当前镜像；需要自行构建 ARM64 检索基础镜像和主应用镜像，或启用平台模拟。生产环境建议使用 x86_64 Linux。
+ARM64 服务器不能直接原生运行当前镜像；需要自行构建 ARM64 主应用镜像，或启用平台模拟。生产环境建议使用 x86_64 Linux。
 
 ## Docker Compose 快速启动
 
@@ -69,13 +68,25 @@ QUARK_CONFIG_SECRET=
 
 直接通过 `http://服务器IP:5200` 访问时可暂时留空 `APP_PUBLIC_URL`；配置域名和反向代理后，应改为实际的完整 HTTPS 地址。
 
-如果 GHCR Package 设置为公开，无需登录即可拉取；如果是私有镜像，先使用具有 `read:packages` 权限的 GitHub Token 登录：
+官方 GHCR 主应用镜像已公开，无需登录即可拉取。如果服务器以前使用无效 Token 登录过 GHCR，可先清除旧凭证：
 
 ```bash
-docker login ghcr.io -u <github-username>
+docker logout ghcr.io
 ```
 
-启动服务：
+确认 Compose 最终解析出的镜像地址：
+
+```bash
+docker compose config | grep 'image:'
+```
+
+正常应显示：
+
+```text
+image: ghcr.io/holt230/misty-rain-video:amd64
+```
+
+然后启动服务：
 
 ```bash
 docker compose pull
@@ -239,7 +250,7 @@ pnpm start
 
 ## Docker 部署与运维
 
-主应用镜像已经包含前端静态文件、Node.js API 和资源检索程序。运行时只有一个容器，不需要单独启动 `search-amd64`，也不需要向公网开放检索端口。
+主应用镜像已经包含前端静态文件、Node.js API 和资源检索程序。运行时只有一个容器，不需要单独启动检索服务，也不需要向公网开放检索端口。
 
 ### 更新与日志
 
@@ -262,6 +273,37 @@ docker compose down
 ./scripts/server.sh update   # 拉取最新镜像并滚动到新版本
 ./scripts/server.sh stop     # 停止并移除容器，保留 data 数据
 ```
+
+### 镜像拉取故障排查
+
+如果错误地址包含 `registry-1.docker.io`，说明 Compose 没有使用 GHCR 镜像，通常是服务器上的 `docker-compose.yml` 仍是旧版，或者 shell/`.env` 中的 `IMAGE_NAME` 覆盖了默认值：
+
+```bash
+unset IMAGE_NAME IMAGE_TAG
+docker compose config | grep 'image:'
+```
+
+更新为仓库最新的 `docker-compose.yml` 后，解析结果必须是：
+
+```text
+ghcr.io/holt230/misty-rain-video:amd64
+```
+
+如果 GHCR 返回 `unauthorized`，官方镜像本身不要求授权，优先清除服务器上已经失效的旧登录凭证：
+
+```bash
+docker logout ghcr.io
+docker pull ghcr.io/holt230/misty-rain-video:amd64
+```
+
+如果返回连接超时、TLS 或 `connection reset`，则属于服务器到 GHCR 的网络、DNS、防火墙或代理问题，不是账号权限问题。可以分别检查：
+
+```bash
+curl -I https://ghcr.io/v2/
+docker info
+```
+
+`https://ghcr.io/v2/` 返回 `401 Unauthorized` 是 Registry 未携带令牌时的标准响应，不代表公开镜像无法拉取；最终应以 `docker pull` 结果为准。
 
 ### 直接使用 Docker 启动
 
@@ -303,6 +345,17 @@ docker run -d \
 data/quark_config.json
 data/.quark_key
 ```
+
+`misty-rain-video-data` 是当前应用唯一使用的命名数据卷，升级和重建容器时必须保留。资源检索缓存也保存在该数据卷的 `/app/data/search-cache` 目录中。
+
+只有确定要彻底初始化系统、永久删除 Cookie、密钥、片库元数据和播放历史时，才可以执行：
+
+```bash
+docker compose down
+docker volume rm misty-rain-video-data
+```
+
+`misty-rain-video-data` 删除后无法恢复。正常更新项目时不要删除该数据卷。
 
 ### Nginx 子路径代理
 

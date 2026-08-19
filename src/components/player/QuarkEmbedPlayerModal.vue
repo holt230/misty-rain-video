@@ -1105,7 +1105,7 @@ defineExpose({ retry });
               controls
               controlslist="nodownload noremoteplayback"
               playsinline
-              preload="metadata"
+              :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
               crossorigin="anonymous"
               :poster="isMobilePlaybackDevice ? undefined : media.poster"
               @play="resumeSoundEffect"
