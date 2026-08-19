@@ -262,6 +262,16 @@ const clearBufferingIndicator = (clearStartingState = true) => {
   if (clearStartingState && playbackHasStarted.value) playbackStarting.value = false;
 };
 
+const releaseSystemMediaSession = () => {
+  if (typeof navigator === 'undefined' || !navigator.mediaSession) return;
+  try {
+    navigator.mediaSession.playbackState = 'none';
+    navigator.mediaSession.metadata = null;
+  } catch {
+    // iOS 终止 WebClip 时可能已先回收系统媒体会话。
+  }
+};
+
 const stopVideo = (resetAudioOutput = false) => {
   if (resetAudioOutput) audioOutputNeedsReset = true;
   if (autoNextTimer !== null) {
@@ -277,6 +287,7 @@ const stopVideo = (resetAudioOutput = false) => {
   manualPlayRequired.value = false;
   playbackHasStarted.value = false;
   destroyPlaybackEngine();
+  releaseSystemMediaSession();
   if (!videoRef.value) return;
   videoRef.value.pause();
   videoRef.value.removeAttribute('src');
