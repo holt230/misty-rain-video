@@ -55,7 +55,9 @@ ARM64 服务器不能直接原生运行当前镜像；需要自行构建 ARM64 �
 
 ## Docker Compose 快速启动
 
-服务器只需要下载仓库中的 `docker-compose.yml`。在同一目录创建 `.env`：
+服务器只需要下载仓库中的 `docker-compose.yml`，默认会拉取 `ghcr.io/holt230/misty-rain-video:amd64`，无需额外创建 `.env`。
+
+如需覆盖镜像、时区、公开地址或固定加密密钥，可在同一目录创建可选的 `.env`：
 
 ```env
 IMAGE_NAME=ghcr.io/holt230/misty-rain-video

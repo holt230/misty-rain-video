@@ -1,6 +1,6 @@
 services:
   misty-rain-video:
-    image: ${IMAGE_NAME:-misty-rain-video}:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAME:-ghcr.io/holt230/misty-rain-video}:${IMAGE_TAG:-amd64}
     container_name: misty-rain-video
     restart: unless-stopped
     init: true
