@@ -30,6 +30,8 @@ const driveTabs: Array<{ key: DriveType | 'all'; label: string }> = [
   { key: 'tianyi', label: '天翼云盘' }
 ];
 
+const defaultSearchCover = `${import.meta.env.BASE_URL}app-icon-192.png`;
+
 const setDrive = (key: DriveType | 'all') => {
   emit('update:selectedDrive', key);
 };
@@ -45,7 +47,11 @@ const setDrive = (key: DriveType | 'all') => {
       <!-- 弹窗头部：目标影视元信息 -->
       <div class="drawer-header">
         <div class="target-media-summary">
-          <img :src="media.poster" :alt="media.title" class="target-cover-thumb" />
+          <img
+            :src="defaultSearchCover"
+            alt="烟雨影视默认封面"
+            class="target-cover-thumb"
+          />
           <div class="target-details">
             <div class="target-title-row">
               <h2 class="target-title">{{ media.title }}</h2>
@@ -189,8 +195,8 @@ const setDrive = (key: DriveType | 'all') => {
 
 .target-cover-thumb {
   width: 58px;
-  height: 78px;
-  border-radius: var(--radius-sm);
+  height: 58px;
+  border-radius: 16px;
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
@@ -388,7 +394,7 @@ const setDrive = (key: DriveType | 'all') => {
   .liquid-drawer-modal { max-height: 94dvh; border-radius: 20px 20px 0 0; }
   .drawer-header { padding: 14px var(--mobile-gutter) 12px; }
   .target-media-summary { gap: 12px; }
-  .target-cover-thumb { width: 50px; height: 68px; }
+  .target-cover-thumb { width: 52px; height: 52px; border-radius: 15px; }
   .target-title { font-size: 1.08rem; }
   .drive-filter-bar { padding: 8px var(--mobile-gutter); }
   .drive-chip { min-height: 44px; padding: 5px 12px; }
