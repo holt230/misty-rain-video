@@ -1,6 +1,97 @@
 # 烟雨影视
 
-移动优先的个人云端影视片库与站内播放器。片库以个人网盘目录为唯一事实来源；网页只补充海报等元信息，不把本地 JSON 当作影视列表。系统使用 Docker Compose 配置的本地账号登录，不提供注册入口。
+烟雨影视是一个移动优先的个人云端影视片库与站内播放器。它把个人网盘中的电视剧、电影、综艺和动漫整理为统一片库，支持资源检索、转存、剧集更新、播放历史、画质/音轨/字幕切换，以及 iPhone Web Clip 桌面入口。
+
+片库以个人网盘目录为唯一事实来源，网页只保存海报、分类、播放历史等辅助元数据。系统使用 Docker Compose 配置的本地账号登录，不提供公开注册入口，也不内置或售卖任何影视内容。请只管理和播放自己有权使用的资源。
+
+## 免责声明
+
+本项目仅供个人学习、技术研究和非商业用途，不提供、存储、上传、分发或销售任何影视作品及网盘资源，也不鼓励以任何方式获取或传播未经授权的内容。
+
+- 使用者应遵守所在国家或地区的法律法规、著作权规定，以及相关网盘、数据源和第三方服务的用户协议。
+- 使用者必须确保其检索、转存、管理和播放的内容已经获得合法授权；因使用者导入、转存、播放或传播内容产生的版权及其他法律责任，由使用者自行承担。
+- 本项目的开源许可证只适用于本项目自身代码，不授予任何影视作品、海报、字幕、音频、商标、服务名称或第三方数据的版权及使用许可。
+- 项目中涉及的第三方名称、接口和服务，其权利归相应权利人所有。本项目与相关平台、影视出品方及版权方不存在隶属、合作或授权关系。
+- 第三方接口可能随时变更、限制或停止服务。本项目按“现状”提供，不承诺功能持续可用，也不对数据丢失、账号限制、服务中断或其他使用后果提供保证。
+- 如你认为本项目中的代码、说明或相关内容侵犯了合法权益，请通过仓库 Issue 提供权利证明和具体信息，维护者核实后会及时处理。
+
+下载、部署或使用本项目，即表示使用者已经阅读并同意自行承担相应风险。本说明不构成法律意见；对版权或合规要求存在疑问时，应咨询专业法律人士。
+
+## 主要能力
+
+- 移动端优先的片库、搜索、账户和全屏播放器界面。
+- 搜索分享资源并转存到每个用户独立的网盘目录。
+- 自动扫描真实剧集、识别最新集数并过滤非视频文件。
+- HLS 同源代理播放，支持高清、超高清、4K、音轨和字幕切换。
+- 播放历史、自动续播、片头片尾跳过和自动下一集。
+- 自动匹配影视宣传海报，并在服务端持久化缓存。
+- 多用户登录和目录隔离；管理员统一维护播放认证。
+- Docker 单容器部署，内置资源检索程序，对外只暴露一个端口。
+
+## 运行环境
+
+推荐使用 Docker Compose 部署，服务器不需要安装 Node.js 或 pnpm。
+
+| 项目 | 要求 |
+| --- | --- |
+| 操作系统 | Linux；生产环境主要面向阿里云 Linux 等常见发行版 |
+| CPU 架构 | `linux/amd64`（x86_64） |
+| Docker | Docker Engine 24+，并安装 Docker Compose v2 |
+| 建议资源 | 1 核 CPU、1 GB 内存、至少 2 GB 可用磁盘 |
+| 服务端口 | 容器内 `5173`，Compose 默认映射为主机 `5200` |
+| 持久化 | 必须持久化 `/app/data` |
+| 公网访问 | 推荐配置 HTTPS；iPhone 描述文件和安全会话也建议使用 HTTPS |
+
+服务器需要能够访问 GHCR、网盘接口、资源检索源，以及海报匹配所需的豆瓣/Bangumi 服务。若服务器存在防火墙或出口代理，需要允许相关 HTTPS 请求。
+
+## 官方镜像
+
+| 镜像 | 平台 | 用途 |
+| --- | --- | --- |
+| `ghcr.io/holt230/misty-rain-video:amd64` | `linux/amd64` | 可直接运行的主应用镜像，已包含前端、API 和检索程序 |
+| `ghcr.io/holt230/misty-rain-video:search-amd64` | `linux/amd64` | 构建主镜像时使用的检索基础镜像，不需要也不应该单独启动 |
+
+ARM64 服务器不能直接原生运行当前镜像；需要自行构建 ARM64 检索基础镜像和主应用镜像，或启用平台模拟。生产环境建议使用 x86_64 Linux。
+
+## Docker Compose 快速启动
+
+服务器只需要下载仓库中的 `docker-compose.yml`。在同一目录创建 `.env`：
+
+```env
+IMAGE_NAME=ghcr.io/holt230/misty-rain-video
+IMAGE_TAG=amd64
+TZ=Asia/Shanghai
+APP_PUBLIC_URL=
+QUARK_CONFIG_SECRET=
+```
+
+直接通过 `http://服务器IP:5200` 访问时可暂时留空 `APP_PUBLIC_URL`；配置域名和反向代理后，应改为实际的完整 HTTPS 地址。
+
+如果 GHCR Package 设置为公开，无需登录即可拉取；如果是私有镜像，先使用具有 `read:packages` 权限的 GitHub Token 登录：
+
+```bash
+docker login ghcr.io -u <github-username>
+```
+
+启动服务：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+curl http://127.0.0.1:5200/api/health
+```
+
+默认访问地址为 `http://服务器IP:5200`。正式开放访问前，请修改 `docker-compose.yml` 中 `APP_USERS_JSON` 的默认密码；默认示例账号仅用于首次启动：
+
+```text
+账号：admin
+密码：666666
+```
+
+首次登录后，进入“我的 → 播放认证”，提交已登录网盘网页的 Cookie，然后执行片库更新。Cookie 只会在服务端加密保存，不会写入镜像或浏览器存储。
+
+> 不要把 Cookie、GitHub Token、真实密码或 `data/` 目录提交到 Git。项目已默认忽略这些运行数据。
 
 ## 登录与用户隔离
 
@@ -120,7 +211,10 @@ https://example.com/misty-rain/install/ios.mobileconfig
 
 ## 本地开发
 
+源码开发环境建议使用 Node.js 22 和 pnpm 10；项目锁定的 pnpm 版本为 `10.28.1`。
+
 ```bash
+corepack enable
 pnpm install
 pnpm dev --host 127.0.0.1
 ```
@@ -141,19 +235,11 @@ pnpm build
 pnpm start
 ```
 
-## Docker
+## Docker 部署与运维
 
-服务器只需要复制 `docker-compose.yml`。搜索服务已集成到主应用容器。如果镜像仓库为私有仓库，先登录，然后直接启动：
+主应用镜像已经包含前端静态文件、Node.js API 和资源检索程序。运行时只有一个容器，不需要单独启动 `search-amd64`，也不需要向公网开放检索端口。
 
-```bash
-export IMAGE_NAME=registry.example.com/your-namespace/misty-rain-video
-docker login registry.example.com
-docker compose up -d
-```
-
-服务器不需要源码、Dockerfile、Node、pnpm 或启动脚本。Compose 会直接拉取 `IMAGE_NAME` 指定的镜像，并使用 `misty-rain-video-data` 命名卷持久化登录密钥、播放认证、加密密钥和用户片库元数据。默认访问地址为 `http://服务器IP:5200`。
-
-更新和运维：
+### 更新与日志
 
 ```bash
 docker compose pull
@@ -163,9 +249,9 @@ docker compose logs -f --tail=200
 docker compose down
 ```
 
-`docker compose down` 不会删除数据卷。除非确认要清空认证和元数据，否则不要执行 `docker compose down -v`。
+`docker compose down` 只删除容器和网络，不会删除命名数据卷。除非明确要清空认证、片库元数据和播放历史，否则不要执行 `docker compose down -v`。
 
-服务器管理命令：
+如果服务器同时保存了仓库脚本，也可以使用：
 
 ```bash
 ./scripts/server.sh status   # 查看状态
@@ -175,7 +261,48 @@ docker compose down
 ./scripts/server.sh stop     # 停止并移除容器，保留 data 数据
 ```
 
-Compose 默认使用本地镜像 `misty-rain-video:latest`。生产部署应通过 `.env` 或环境变量设置 `IMAGE_NAME`、`IMAGE_TAG`、`APP_PUBLIC_URL`；配置文件不包含任何个人域名或私有仓库地址。Compose 使用只读根文件系统、移除 Linux capabilities、限制日志大小，并只把命名数据卷挂载为可写目录。
+### 直接使用 Docker 启动
+
+推荐使用 Compose。若只做临时测试，也可以直接运行主镜像：
+
+```bash
+docker run -d \
+  --name misty-rain-video \
+  --restart unless-stopped \
+  --init \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  -p 5200:5173 \
+  -e TZ=Asia/Shanghai \
+  -e HOST=0.0.0.0 \
+  -e PORT=5173 \
+  -e LIBRARY_ROOT_FOLDER=烟雨影视 \
+  -e 'APP_USERS_JSON=[{"username":"admin","password":"请修改密码","role":"admin","folder":"admin"}]' \
+  -v misty-rain-video-data:/app/data \
+  ghcr.io/holt230/misty-rain-video:amd64
+```
+
+直接运行和 Compose 使用同一个 `misty-rain-video-data` 命名卷；不要同时启动两个占用 `5200` 端口的实例。
+
+### 数据持久化
+
+所有运行数据都保存在 `/app/data`，Compose 将其映射为 `misty-rain-video-data` 命名卷，包括：
+
+- 登录会话签名密钥；
+- 加密后的播放认证与对应加密密钥；
+- 每个用户的片库分类和播放历史；
+- 海报、检索及短效播放缓存。
+
+更新或重建容器不会清空命名卷。迁移服务器时必须备份整个数据卷，而不是只复制某一个 JSON 文件。认证至少依赖以下两个文件，缺一不可：
+
+```text
+data/quark_config.json
+data/.quark_key
+```
+
+### Nginx 子路径代理
 
 生产镜像默认按 `/misty-rain/` 子路径构建。Nginx 反向代理使用前缀剥离，并把公开前缀传给播放器：
 
@@ -185,29 +312,33 @@ location = /misty-rain {
 }
 
 location ^~ /misty-rain/ {
-    proxy_pass http://host.docker.internal:5200/;
+    proxy_pass http://127.0.0.1:5200/;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Prefix /misty-rain;
+    proxy_http_version 1.1;
+    proxy_read_timeout 300s;
 }
 ```
 
-开发机发布 AMD64 与 ARM64 多架构镜像：
+同时将 `.env` 中的公开地址设置为完整 HTTPS 子路径：
+
+```env
+APP_PUBLIC_URL=https://example.com/misty-rain/
+```
+
+修改反向代理或环境变量后需要重新加载 Nginx 并重建容器；只修改网盘目录内容不需要重启，网页会重新扫描片库。
+
+### 自行构建和发布镜像
+
+开发机需要 Docker Buildx。下面示例构建 `linux/amd64` 主镜像，并使用官方检索基础镜像：
 
 ```bash
-export IMAGE_NAME=registry.example.com/your-namespace/misty-rain-video
-export RESOURCE_SEARCH_IMAGE=registry.example.com/your-namespace/misty-rain-video:search-amd64
-docker login registry.example.com
-./scripts/publish-image.sh latest
+export IMAGE_NAME=ghcr.io/<your-github-name>/misty-rain-video
+export RESOURCE_SEARCH_IMAGE=ghcr.io/holt230/misty-rain-video:search-amd64
+docker login ghcr.io
+./scripts/publish-image.sh amd64
 ```
 
-登录时请使用镜像仓库提供的访问凭据，不要把密码写进 `.env`、脚本或提交记录。`RESOURCE_SEARCH_IMAGE` 是包含内置检索程序的构建依赖，默认使用同一镜像仓库的 `search-amd64` 标签。
-
-迁移已经认证过的环境时，必须备份整个 `misty-rain-video-data` 数据卷。夸克认证至少依赖以下两个文件，缺一不可：
-
-```text
-data/quark_config.json
-data/.quark_key
-```
-
-修改程序代码后先在开发机运行 `./scripts/publish-image.sh latest`，再在服务器运行 `./scripts/server.sh update`。修改认证密钥环境变量后需要重启服务；只修改夸克目录内容不需要重启，网页会定时重新扫描片库。
+`IMAGE_NAME` 是你自己的目标仓库；`RESOURCE_SEARCH_IMAGE` 只是构建依赖。GHCR 登录使用具有 `write:packages` 权限的 GitHub Token，不要把 Token、Cookie 或密码写进 `.env`、脚本和提交记录。
