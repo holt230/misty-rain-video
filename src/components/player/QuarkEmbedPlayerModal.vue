@@ -59,6 +59,7 @@ const statusMessage = ref('');
 const playbackStarting = ref(false);
 const manualPlayRequired = ref(false);
 const playbackHasStarted = ref(false);
+const visualLandscapeFullscreen = ref(false);
 const detectedAudioTracks = ref<PlaybackAudioTrack[]>([]);
 const selectedAudioIndex = ref(-1);
 const playbackAutomationStorageKey = 'misty_rain_playback_automation';
@@ -782,6 +783,7 @@ const handlePageHide = () => {
   backgroundResumeAt = video && Number.isFinite(video.currentTime) ? video.currentTime : backgroundResumeAt;
   void persistProgress(true, false, true);
   pageWasHidden = true;
+  visualLandscapeFullscreen.value = false;
   stopVideo(true);
   resetSoundEffectGraph(true);
 };
@@ -994,30 +996,38 @@ const handleNativeVideoFullscreen = () => {
   orientation?.lock?.('landscape').catch(() => {});
 };
 
-type IOSFullscreenVideoElement = HTMLVideoElement & {
-  webkitEnterFullscreen?: () => void;
-  webkitSupportsFullscreen?: boolean;
-};
-
 const requestNativeVideoFullscreen = async () => {
-  const video = videoRef.value as IOSFullscreenVideoElement | null;
+  const video = videoRef.value;
   if (!video) return;
+  if (visualLandscapeFullscreen.value) {
+    visualLandscapeFullscreen.value = false;
+    announce('已退出横屏全屏');
+    return;
+  }
+
+  const orientation = screen.orientation as LockableOrientation | undefined;
   try {
-    if (typeof video.webkitEnterFullscreen === 'function' && video.webkitSupportsFullscreen !== false) {
-      video.webkitEnterFullscreen();
+    if (video.requestFullscreen && orientation?.lock) {
+      await video.requestFullscreen();
+      await orientation.lock('landscape');
       return;
     }
-    if (video.requestFullscreen) await video.requestFullscreen();
-    handleNativeVideoFullscreen();
   } catch {
-    announce('当前系统未允许进入全屏，请再轻触一次');
+    if (document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen().catch(() => {});
+    }
   }
+
+  // iOS Web Clip 无法绕过系统竖屏锁，使用旋转后的全视口播放器兜底。
+  visualLandscapeFullscreen.value = true;
+  announce('已进入横屏全屏');
 };
 
 const close = () => {
   void persistProgress(true, false, true);
   phase.value = 'idle';
   requestSequence += 1;
+  visualLandscapeFullscreen.value = false;
   stopVideo(true);
   resetSoundEffectGraph(true);
   emit('close');
@@ -1035,6 +1045,7 @@ watch(
     else {
       phase.value = 'idle';
       requestSequence += 1;
+      visualLandscapeFullscreen.value = false;
       stopVideo();
     }
   },
@@ -1059,6 +1070,7 @@ watch(playbackAutomation, value => {
 onBeforeUnmount(() => {
   void persistProgress(true, false, true);
   phase.value = 'idle';
+  visualLandscapeFullscreen.value = false;
   stopVideo(true);
   resetSoundEffectGraph();
   document.body.style.overflow = previousBodyOverflow;
@@ -1108,7 +1120,7 @@ defineExpose({ retry });
 
       <div class="player-layout" :class="{ 'single-column': !episodes.length }">
         <main class="video-column">
-          <div class="video-stage">
+          <div class="video-stage" :class="{ 'visual-landscape-fullscreen': visualLandscapeFullscreen }">
             <video
               :key="videoInstanceKey"
               ref="videoRef"
@@ -1146,7 +1158,7 @@ defineExpose({ retry });
               v-if="isIOSPlaybackDevice && phase === 'ready'"
               type="button"
               class="ios-native-fullscreen-hitbox"
-              aria-label="横屏全屏播放"
+              :aria-label="visualLandscapeFullscreen ? '退出横屏全屏' : '横屏全屏播放'"
               @click="requestNativeVideoFullscreen"
             ></button>
 
@@ -2449,6 +2461,51 @@ defineExpose({ retry });
     background: linear-gradient(145deg, #c0caff, var(--liquid-accent-strong));
   }
   .episode-number { background: transparent; }
+}
+
+@media (max-width: 820px) {
+  .video-stage.visual-landscape-fullscreen {
+    position: fixed;
+    z-index: 2400;
+    min-width: 0;
+    min-height: 0;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: auto;
+    background: #000;
+  }
+
+  .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox {
+    top: auto;
+    right: auto;
+    bottom: 0;
+    left: 0;
+  }
+}
+
+@media (max-width: 820px) and (orientation: portrait) {
+  .video-stage.visual-landscape-fullscreen {
+    top: 50%;
+    left: 50%;
+    width: 100dvh;
+    height: 100dvw;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center;
+  }
+}
+
+@media (max-width: 820px) and (orientation: landscape) {
+  .video-stage.visual-landscape-fullscreen {
+    inset: 0;
+    width: 100dvw;
+    height: 100dvh;
+    transform: none;
+  }
+
+  .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox {
+    top: 0;
+    bottom: auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
