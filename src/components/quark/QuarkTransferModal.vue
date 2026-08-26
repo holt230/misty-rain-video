@@ -11,7 +11,6 @@ const props = defineProps<{
   media: MediaItem | null;
   currentCategory: CategoryType;
   quarkResources: ResourceItem[];
-  allResources: ResourceItem[];
   searchError?: string;
   searchKeyword?: string;
 }>();
@@ -19,13 +18,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'transfer', res: ResourceItem): void;
-  (e: 'copy', res: ResourceItem): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem): void;
 }>();
 
-const activeTab = ref<'quark' | 'other'>('quark');
 const targetCategory = ref<CategoryType>('tv');
 type ResultFilter = 'recommended' | 'latest' | '4k' | 'complete';
 const resultFilter = ref<ResultFilter>('recommended');
@@ -49,9 +46,10 @@ const titleKey = (title: string) => cleanTitle(title)
   .toLocaleLowerCase('zh-CN')
   .replace(/[\s\p{P}\p{S}]+/gu, '');
 
-const dedupeTitleKey = (title: string) => titleKey(title)
-  .replace(/(?:更新至|更至|更新|第|ep|e)0*\d{1,4}集?/gi, '')
-  .replace(/s0*\d{1,2}e?0*\d{1,4}/gi, match => match.replace(/e0*\d+$/i, ''));
+const canonicalShareUrl = (url: string) => {
+  const match = url.match(/^https:\/\/pan\.quark\.cn\/s\/([a-zA-Z0-9]+)/i);
+  return match ? `https://pan.quark.cn/s/${match[1]}` : '';
+};
 
 const episodeNumber = (title: string) => {
   const numbers = [...title.matchAll(/(?:更(?:新)?至?|第|e(?:p)?)[\s_-]*0*(\d{1,4})/ig)]
@@ -73,17 +71,19 @@ const isNonVideoResource = (resource: ResourceItem) => {
 const resourceScore = (resource: ResourceItem) => {
   const title = cleanTitle(resource.title);
   const keyword = props.searchKeyword?.trim() || props.media?.title.trim() || '';
+  const normalizedTitle = titleKey(title);
+  const normalizedKeyword = titleKey(keyword);
   let score = 0;
-  if (title === keyword) score += 45;
-  else if (title.startsWith(keyword)) score += 75;
-  else if (title.includes(keyword)) score += 50;
+  if (normalizedTitle === normalizedKeyword) score += 120;
+  else if (normalizedTitle.startsWith(normalizedKeyword)) score += 90;
+  else if (normalizedTitle.includes(normalizedKeyword)) score += 65;
+  else score -= 80;
   if (resource.is4k || /4k/i.test(title)) score += 30;
   if (/hdr|dv|杜比视界/i.test(title)) score += 10;
   if (/60\s*(?:fps|帧)/i.test(title)) score += 8;
   if (/dts|杜比|5\.1/i.test(title)) score += 5;
   if (/全集|完结|全\s*\d+\s*集/i.test(title)) score += 14;
   if (/flac|mp3|片尾曲|原声带|音乐/i.test(title)) score -= 160;
-  if (title.length <= keyword.length + 2 && !resource.is4k) score -= 28;
   const timestamp = Date.parse(resource.datetime);
   if (Number.isFinite(timestamp)) {
     const year = new Date(timestamp).getFullYear();
@@ -102,7 +102,8 @@ const rankAndDedupe = (resources: ResourceItem[]) => {
   });
   const seen = new Set<string>();
   return sorted.filter(resource => {
-    const key = dedupeTitleKey(resource.title) || resource.url;
+    const key = canonicalShareUrl(resource.url);
+    if (!key) return false;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -112,14 +113,8 @@ const rankAndDedupe = (resources: ResourceItem[]) => {
 const rankedQuarkResources = computed(() => rankAndDedupe(
   props.quarkResources.filter(resource => /pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(resource.url))
 ));
-const rankedOtherResources = computed(() => rankAndDedupe(
-  props.allResources.filter(resource => resource.driveType !== 'quark')
-));
-const activeResources = computed(() => activeTab.value === 'quark'
-  ? rankedQuarkResources.value
-  : rankedOtherResources.value);
 const filteredResources = computed(() => {
-  const resources = activeResources.value.filter(resource => {
+  const resources = rankedQuarkResources.value.filter(resource => {
     const title = cleanTitle(resource.title);
     if (resultFilter.value === '4k') return resource.is4k || /4k/i.test(title);
     if (resultFilter.value === 'complete') return /全集|完结|全\s*\d+\s*集/i.test(title);
@@ -140,7 +135,7 @@ watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
   if (isOpen) searchQuery.value = keyword || props.media?.title || '';
 }, { immediate: true });
 
-watch([() => props.isOpen, () => props.media?.id, activeTab, resultFilter], () => {
+watch([() => props.isOpen, () => props.media?.id, resultFilter], () => {
   visibleCount.value = batchSize;
 });
 
@@ -251,25 +246,10 @@ const handleBodyScroll = (event: Event) => {
         </button>
       </form>
 
-      <!-- 选项卡 -->
-      <div class="dialog-tabs">
-        <button
-          class="dialog-tab"
-          :class="{ active: activeTab === 'quark' }"
-          @click="activeTab = 'quark'"
-        >
-          <span>云端网盘</span>
-          <span class="tab-badge">{{ rankedQuarkResources.length }}</span>
-        </button>
-
-        <button
-          class="dialog-tab"
-          :class="{ active: activeTab === 'other' }"
-          @click="activeTab = 'other'"
-        >
-          <span>其他网盘</span>
-          <span class="tab-badge">{{ rankedOtherResources.length }}</span>
-        </button>
+      <div v-if="!isAnalyzing" class="result-summary" aria-live="polite">
+        <span>找到</span>
+        <strong>{{ rankedQuarkResources.length }}</strong>
+        <span>条可用资源</span>
       </div>
 
       <div v-if="!isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
@@ -303,14 +283,13 @@ const handleBodyScroll = (event: Event) => {
             <div
               v-for="(res, index) in visibleResources"
               :key="res.id"
-              v-memo="[res.id, index === 0, activeTab]"
+              v-memo="[res.id, index === 0]"
               class="liquid-resource-row"
             >
               <div class="row-left">
-                <div v-if="activeTab === 'other'" class="drive-badge">{{ res.driveType.toUpperCase() }}</div>
                 <div class="row-info">
                   <div class="row-title" :title="cleanTitle(res.title)">
-                    <span v-if="activeTab === 'quark' && res.id === bestQuarkResource?.id" class="recommended-badge">
+                    <span v-if="res.id === bestQuarkResource?.id" class="recommended-badge">
                       <Check aria-hidden="true" />推荐
                     </span>
                     {{ cleanTitle(res.title) }}
@@ -326,14 +305,10 @@ const handleBodyScroll = (event: Event) => {
 
               <div class="row-right">
                 <button
-                  v-if="activeTab === 'quark'"
                   class="btn-action btn-transfer"
                   @click="emit('save-to-cards', media, targetCategory, res)"
                 >
                   选用并加入
-                </button>
-                <button v-else class="btn-action btn-copy" @click="emit('copy', res)">
-                  复制链接
                 </button>
               </div>
             </div>
@@ -525,15 +500,6 @@ const handleBodyScroll = (event: Event) => {
 }
 .btn-close-dialog svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
-.dialog-tabs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 20px;
-  background: rgba(0, 0, 0, 0.18);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
 .result-search {
   display: grid;
   min-height: 52px;
@@ -568,32 +534,6 @@ const handleBodyScroll = (event: Event) => {
 .submit-search-button { min-height: 42px; padding: 0 15px; border-radius: 11px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .78rem; font-weight: 700; }
 .clear-search-button:disabled,
 .submit-search-button:disabled { opacity: .45; cursor: default; }
-
-.dialog-tab {
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-pill);
-  padding: 5px 14px;
-  color: var(--text-tertiary);
-  font-size: 0.82rem;
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-}
-.dialog-tab.active {
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
-  color: #fff;
-}
-.tab-badge {
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 0.7rem;
-  padding: 1px 5px;
-  border-radius: var(--radius-pill);
-}
 
 .result-filters {
   display: flex;
@@ -877,10 +817,6 @@ const handleBodyScroll = (event: Event) => {
     flex: 0 0 44px;
   }
 
-  .dialog-tabs {
-    padding: 8px 12px;
-  }
-
   .result-search {
     min-height: 54px;
     grid-template-columns: 20px minmax(0, 1fr) 38px auto;
@@ -896,14 +832,6 @@ const handleBodyScroll = (event: Event) => {
   }
 
   .filter-chip { min-height: 40px; padding: 0 14px; touch-action: manipulation; }
-
-  .dialog-tab {
-    min-height: 44px;
-    flex: 1;
-    justify-content: center;
-    padding: 0 10px;
-    touch-action: manipulation;
-  }
 
   .dialog-body {
     padding: 12px 10px calc(16px + env(safe-area-inset-bottom));
@@ -944,13 +872,10 @@ const handleBodyScroll = (event: Event) => {
 
 <style scoped>
 .liquid-dialog { border-radius: 24px; }
-.dialog-header,
-.dialog-tabs { border-color: rgba(255, 255, 255, 0.075); background: rgba(255, 255, 255, 0.018); }
+.dialog-header { border-color: rgba(255, 255, 255, 0.075); background: rgba(255, 255, 255, 0.018); }
 .dialog-poster { border-color: rgba(255, 255, 255, 0.08); box-shadow: none; }
-.cat-select-pill,
-.dialog-tab { min-height: 36px; border-color: transparent; background: transparent; }
-.cat-select-pill.active,
-.dialog-tab.active { color: var(--liquid-accent); border-color: rgba(46, 230, 166, 0.24); background: rgba(46, 230, 166, 0.1); box-shadow: none; }
+.cat-select-pill { min-height: 36px; border-color: transparent; background: transparent; }
+.cat-select-pill.active { color: var(--liquid-accent); border-color: rgba(46, 230, 166, 0.24); background: rgba(46, 230, 166, 0.1); box-shadow: none; }
 .btn-save-to-list,
 .btn-transfer { background: var(--liquid-accent); box-shadow: 0 8px 20px rgba(46, 230, 166, 0.14); }
 .btn-save-to-list:hover,
@@ -971,8 +896,6 @@ const handleBodyScroll = (event: Event) => {
   .dialog-poster { width: 38px; height: 52px; }
   .cat-selector-row { gap: 4px; }
   .cat-select-pill { min-height: 44px; border-radius: 12px; }
-  .dialog-tabs { gap: 5px; padding: 6px var(--mobile-gutter); }
-  .dialog-tab { min-height: 44px; border-radius: 12px; }
   .result-filters { padding-right: calc(var(--mobile-gutter) + var(--safe-area-right)); padding-left: calc(var(--mobile-gutter) + var(--safe-area-left)); }
   .dialog-body { padding: 10px var(--mobile-gutter) calc(16px + var(--safe-area-bottom)); }
   .liquid-resource-row { gap: 10px; padding: 12px; }
@@ -987,15 +910,12 @@ const handleBodyScroll = (event: Event) => {
   box-shadow: 0 28px 74px rgb(0 0 0 / .58), 0 0 44px rgb(var(--accent-rgb) / .05);
 }
 .dialog-header,
-.dialog-tabs,
 .result-filters { border-color: rgb(239 241 255 / 0.07); background: rgb(237 240 255 / 0.018); }
 .dialog-poster { border-color: rgb(239 241 255 / 0.10); }
 .cat-label { color: var(--text-tertiary); }
 .cat-select-pill,
-.dialog-tab,
 .filter-chip { color: var(--text-tertiary); background: rgb(237 240 255 / 0.035); }
 .cat-select-pill.active,
-.dialog-tab.active,
 .filter-chip.active {
   border-color: rgb(var(--accent-rgb) / 0.25);
   color: var(--liquid-accent);
@@ -1014,11 +934,13 @@ const handleBodyScroll = (event: Event) => {
 .load-more-button { border-color: rgb(239 241 255 / 0.08); background: rgb(237 240 255 / 0.035); }
 .retry-search-button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; padding: 0 14px; border: 1px solid rgb(var(--accent-rgb) / 0.20); border-radius: 12px; color: var(--liquid-accent); background: var(--liquid-accent-muted); font-size: .8rem; font-weight: 650; cursor: pointer; }
 .retry-search-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.result-summary { display: flex; align-items: baseline; gap: 4px; padding: 11px 20px 3px; color: var(--text-tertiary); font-size: .78rem; }
+.result-summary strong { color: var(--text-primary); font-size: .94rem; font-weight: 720; }
 
 @media (max-width: 640px) {
   .liquid-dialog { background: var(--liquid-canvas) !important; }
   .dialog-header { background: linear-gradient(180deg, rgb(24 28 43 / .94), rgb(10 11 16 / .98)); }
-  .dialog-tabs { background: rgb(237 240 255 / 0.018); }
+  .result-summary { padding-right: calc(var(--mobile-gutter) + var(--safe-area-right)); padding-left: calc(var(--mobile-gutter) + var(--safe-area-left)); }
   .dialog-body { background: radial-gradient(90% 38% at 50% 0%, rgb(var(--accent-rgb) / .05), transparent 74%); }
   .liquid-resource-row { border-radius: 16px; }
 }

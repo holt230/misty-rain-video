@@ -58,15 +58,12 @@ const {
   isAnalyzing,
   currentMedia: selectedMedia,
   quarkResources,
-  allResources,
   searchError,
   searchKeyword,
   openTransferModal,
   closeTransferModal,
   retrySearch,
-  searchResources,
-  transferToQuark,
-  copyResource
+  refreshResources
 } = useQuarkTransfer();
 
 const navbarRef = ref<InstanceType<typeof Navbar> | null>(null);
@@ -539,14 +536,11 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     :media="selectedMedia"
     :current-category="currentCategory"
     :quark-resources="quarkResources"
-    :all-resources="allResources"
     :search-error="searchError"
     :search-keyword="searchKeyword"
     @close="closeTransferPanel"
-    @transfer="transferToQuark"
-    @copy="copyResource"
     @retry-search="retrySearch"
-    @search="searchResources"
+    @search="refreshResources"
     @save-to-cards="handleSaveCard"
     />
 

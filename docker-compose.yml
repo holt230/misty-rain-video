@@ -22,8 +22,8 @@ services:
       AUTH_SESSION_DAYS: 30
       LIBRARY_ROOT_FOLDER: 烟雨影视
       LEGACY_LIBRARY_ROOT_FOLDER: 烟雨视频
-      # 阿里云直连 Telegram 容易超时，默认使用内置检索引擎的 HTTP 插件源。
-      RESOURCE_SEARCH_SOURCE: plugin
+      # all 表示合并多个检索渠道；cloud_types 始终由服务端锁定为 quark。
+      RESOURCE_SEARCH_SOURCE: all
       RESOURCE_SEARCH_URLS: http://127.0.0.1:8888/api/search,https://so.252035.xyz/api/search
     volumes:
       - misty-rain-data:/app/data

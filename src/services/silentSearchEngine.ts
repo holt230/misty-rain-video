@@ -1,38 +1,45 @@
-import type { ResourceItem, SearchResult, DriveType } from '../types/search';
+import type { ResourceItem, SearchResult } from '../types/search';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 
 const SEARCH_THROTTLE_MS = 300;
 const REQUEST_TIMEOUT_MS = 28_000;
-const DIRECT_FALLBACK_DELAY_MS = 650;
 const DIRECT_FALLBACK_TIMEOUT_MS = 10_000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_SEARCH_CACHE_ENTRIES = 40;
 const PUBLIC_FALLBACK_ENDPOINTS = [
   'https://so.252035.xyz/api/search'
 ];
 
 /**
  * =========================================================================
- * 夸克与全网网盘聚合检索引擎 (SilentSearchEngine)
+ * 夸克资源聚合检索引擎 (SilentSearchEngine)
  * =========================================================================
  */
 export class SilentSearchEngine {
-  private cache: Map<string, SearchResult> = new Map();
+  private cache: Map<string, { createdAt: number; data: SearchResult }> = new Map();
   private inFlight: Map<string, Promise<SearchResult>> = new Map();
   private lastRequestTime: number = 0;
 
-  async search(keyword: string): Promise<SearchResult> {
-    const cleanKw = keyword.replace(/[《》\(\)\s]/g, '').trim();
+  async search(keyword: string, options: { force?: boolean } = {}): Promise<SearchResult> {
+    const cleanKw = keyword
+      .normalize('NFKC')
+      .replace(/[《》()（）]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!cleanKw) {
       return { success: false, total: 0, items: [], quarkItems: [], source: 'error' };
     }
 
-    if (this.cache.has(cleanKw)) {
-      const cached = this.cache.get(cleanKw)!;
-      return { ...cached, fromCache: true };
+    const cacheKey = cleanKw.toLocaleLowerCase('zh-CN');
+    const cached = this.cache.get(cacheKey);
+    if (!options.force && cached && Date.now() - cached.createdAt <= SEARCH_CACHE_TTL_MS) {
+      return { ...cached.data, fromCache: true };
     }
 
-    if (this.inFlight.has(cleanKw)) {
-      return this.inFlight.get(cleanKw)!;
+    const requestKey = options.force ? `${cacheKey}:refresh` : cacheKey;
+    if (this.inFlight.has(requestKey)) {
+      return this.inFlight.get(requestKey)!;
     }
 
     const now = Date.now();
@@ -41,79 +48,57 @@ export class SilentSearchEngine {
     }
     this.lastRequestTime = Date.now();
 
-    const task = this.executeResilientFetch(cleanKw);
-    this.inFlight.set(cleanKw, task);
+    const task = this.executeResilientFetch(cleanKw, Boolean(options.force));
+    this.inFlight.set(requestKey, task);
 
     try {
       const result = await task;
       if (result.success && result.items.length > 0) {
-        this.cache.set(cleanKw, result);
+        this.cache.delete(cacheKey);
+        this.cache.set(cacheKey, { createdAt: Date.now(), data: result });
+        while (this.cache.size > MAX_SEARCH_CACHE_ENTRIES) {
+          const oldestKey = this.cache.keys().next().value;
+          if (oldestKey === undefined) break;
+          this.cache.delete(oldestKey);
+        }
       }
       return result;
     } catch (error) {
       return this.getEmptyResult(error instanceof Error ? error.message : '资源检索失败，请稍后重试');
     } finally {
-      this.inFlight.delete(cleanKw);
+      this.inFlight.delete(requestKey);
     }
   }
 
-  private async executeResilientFetch(keyword: string): Promise<SearchResult> {
-    const fallbackController = new AbortController();
-    let backendEmptyResult: SearchResult | null = null;
-    let fallbackEmptyResult: SearchResult | null = null;
+  private async executeResilientFetch(keyword: string, force: boolean): Promise<SearchResult> {
+    let backendResult: SearchResult | null = null;
     let backendError: unknown = null;
-
-    const requireResources = (result: SearchResult, recordEmpty: (value: SearchResult) => void): Promise<SearchResult> => {
-      if (result.items.length > 0) return Promise.resolve(result);
-      recordEmpty(result);
-      return Promise.reject(new Error('empty search result'));
-    };
-
-    const backend = this.executeBackendFetch(keyword)
-      .then(result => requireResources(result, value => { backendEmptyResult = value; }))
-      .catch(error => {
-        backendError = error;
-        throw error;
-      });
-    const directFallback = new Promise<void>(resolve => setTimeout(resolve, DIRECT_FALLBACK_DELAY_MS))
-      .then(() => {
-        if (fallbackController.signal.aborted) throw new DOMException('Search fallback cancelled', 'AbortError');
-        return this.executePublicFallback(keyword, fallbackController.signal);
-      })
-      .then(result => requireResources(result, value => { fallbackEmptyResult = value; }));
-
     try {
-      const result = await new Promise<SearchResult>((resolve, reject) => {
-        let rejected = 0;
-        let settled = false;
-        let lastError: unknown = null;
-        const resolveFirst = (value: SearchResult) => {
-          if (settled) return;
-          settled = true;
-          resolve(value);
-        };
-        const rejectWhenExhausted = (error: unknown) => {
-          if (settled) return;
-          rejected += 1;
-          lastError = error;
-          if (rejected === 2) reject(lastError);
-        };
-        backend.then(resolveFirst, rejectWhenExhausted);
-        directFallback.then(resolveFirst, rejectWhenExhausted);
-      });
-      fallbackController.abort();
-      return result;
-    } catch {
-      fallbackController.abort();
-      if (backendEmptyResult) return backendEmptyResult;
-      if (fallbackEmptyResult) return fallbackEmptyResult;
-      if (backendError instanceof Error) throw backendError;
-      throw new Error('资源检索服务暂时不可用');
+      backendResult = await this.executeBackendFetch(keyword, force);
+      if (backendResult.items.length > 0) return backendResult;
+    } catch (error) {
+      backendError = error;
     }
+
+    const fallbackController = new AbortController();
+    try {
+      const fallbackResult = await this.executePublicFallback(keyword, fallbackController.signal);
+      if (fallbackResult.items.length > 0 || !backendResult) return fallbackResult;
+    } catch (fallbackError) {
+      if (!backendResult) {
+        if (backendError instanceof Error) throw backendError;
+        throw fallbackError;
+      }
+    }
+    if (backendResult) return backendResult;
+    if (backendError instanceof Error) throw backendError;
+    throw new Error('资源检索服务暂时不可用');
   }
 
-  private async executeBackendFetch(keyword: string): Promise<SearchResult> {
-    const targetUrl = `${apiUrl('/api/resource-search')}?kw=${encodeURIComponent(keyword)}`;
+  private async executeBackendFetch(keyword: string, force: boolean): Promise<SearchResult> {
+    const params = new URLSearchParams({ kw: keyword });
+    if (force) params.set('refresh', '1');
+    const targetUrl = `${apiUrl('/api/resource-search')}?${params.toString()}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
@@ -149,7 +134,7 @@ export class SilentSearchEngine {
         const url = new URL(endpoint);
         url.searchParams.set('kw', keyword);
         url.searchParams.set('res', 'merge');
-        url.searchParams.set('src', 'plugin');
+        url.searchParams.set('src', 'all');
         url.searchParams.set('cloud_types', 'quark');
         const response = await fetch(url, {
           method: 'GET',
@@ -177,44 +162,45 @@ export class SilentSearchEngine {
 
   private normalizeResponse(data: any, sourceMode: 'direct' | 'cors_proxy'): SearchResult {
     const items: ResourceItem[] = [];
-    const merged = data.merged_by_type || {};
-
-    const driveTypes: DriveType[] = ['quark', 'aliyun', 'baidu', 'xunlei', '115', 'uc', 'tianyi', 'mobile'];
-    driveTypes.forEach(type => {
-      const list = merged[type] || [];
-      list.forEach((raw: any) => {
-        items.push(this.parseSingleItem(raw, type));
-      });
+    const seen = new Set<string>();
+    const list = Array.isArray(data?.merged_by_type?.quark) ? data.merged_by_type.quark : [];
+    list.forEach((raw: any) => {
+      const item = this.parseSingleItem(raw);
+      if (!item || seen.has(item.url)) return;
+      seen.add(item.url);
+      items.push(item);
     });
 
     items.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
-    const quarkItems = items.filter(i => i.driveType === 'quark');
 
     return {
       success: true,
-      total: data.total || items.length,
+      total: items.length,
       items,
-      quarkItems,
+      quarkItems: items,
       source: sourceMode
     };
   }
 
-  private parseSingleItem(raw: any, driveType: DriveType): ResourceItem {
-    const note = raw.note || raw.title || '高清完整版资源';
+  private parseSingleItem(raw: any): ResourceItem | null {
+    const note = String(raw.note || raw.title || '可用影视资源');
+    const match = String(raw.url || '').match(/^https:\/\/pan\.quark\.cn\/s\/([a-zA-Z0-9]+)/i);
+    if (!match) return null;
+    const canonicalUrl = `https://pan.quark.cn/s/${match[1]}`;
     const is4k = /4k|2160p|uhd|杜比|hdr/i.test(note);
     const is1080p = /1080p|fhd|蓝光/i.test(note);
-    const quality = is4k ? '4K 杜比臻彩' : (is1080p ? '1080P 高清' : '全集完结');
+    const quality = is4k ? '4K 超高清' : (is1080p ? '1080P 超清' : '清晰度待解析');
     const rawDatetime = String(raw.datetime || '').trim();
     const parsedDatetime = Date.parse(rawDatetime);
     const year = Number.isFinite(parsedDatetime) ? new Date(parsedDatetime).getFullYear() : 0;
     const datetime = year >= 2001 ? rawDatetime.substring(0, 10) : '近期收录';
 
     return {
-      id: Math.random().toString(36).substring(2, 9),
+      id: `quark-${match[1]}`,
       title: note,
-      url: raw.url || `https://pan.quark.cn/s/search?kw=${encodeURIComponent(note)}`,
+      url: canonicalUrl,
       password: raw.password || '',
-      driveType,
+      driveType: 'quark',
       datetime,
       source: raw.source || 'PanSou 聚合分析',
       quality,

@@ -245,7 +245,8 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/resource-search' && request.method === 'GET') {
       const keyword = url.searchParams.get('kw');
-      sendSuccess(response, await context.resourceSearch.search(keyword));
+      const force = url.searchParams.get('refresh') === '1';
+      sendSuccess(response, await context.resourceSearch.search(keyword, { force }));
       return true;
     }
 

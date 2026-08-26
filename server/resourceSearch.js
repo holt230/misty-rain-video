@@ -4,14 +4,15 @@ const DEFAULT_SEARCH_URLS = [
   'https://so.252035.xyz/api/search'
 ];
 const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_SEARCH_SOURCE = 'plugin';
-const FRESH_CACHE_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_SEARCH_SOURCE = 'all';
+const RESULT_AGGREGATION_WINDOW_MS = 1_800;
+const FRESH_CACHE_TTL_MS = 5 * 60 * 1000;
 const STALE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const EMPTY_CACHE_TTL_MS = 90 * 1000;
 const ENDPOINT_FAILURE_BASE_COOLDOWN_MS = 8 * 1000;
 const ENDPOINT_FAILURE_MAX_COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 120;
-const MAX_RESULTS = 60;
+const MAX_RESULTS = 100;
 
 const createSearchError = (message, code, statusCode) => {
   const error = new Error(message);
@@ -22,7 +23,8 @@ const createSearchError = (message, code, statusCode) => {
 
 const normalizeKeyword = value => String(value || '')
   .normalize('NFKC')
-  .replace(/[《》()（）\s]+/g, '')
+  .replace(/[《》()（）]/g, ' ')
+  .replace(/\s+/g, ' ')
   .trim()
   .slice(0, 80);
 
@@ -96,6 +98,32 @@ const normalizePayload = payload => {
   };
 };
 
+const mergePayloads = payloads => {
+  const merged = new Map();
+  for (const payload of payloads) {
+    for (const item of payload?.merged_by_type?.quark || []) {
+      const existing = merged.get(item.url);
+      if (!existing) {
+        merged.set(item.url, item);
+      } else if (item.note.length > existing.note.length) {
+        merged.set(item.url, {
+          ...item,
+          password: item.password || existing.password,
+          datetime: item.datetime || existing.datetime,
+          source: item.source || existing.source
+        });
+      }
+      if (merged.size >= MAX_RESULTS) break;
+    }
+    if (merged.size >= MAX_RESULTS) break;
+  }
+  const items = [...merged.values()];
+  return {
+    total: items.length,
+    merged_by_type: { quark: items }
+  };
+};
+
 export class ResourceSearchService {
   constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), timeoutMs = requestTimeoutMs() } = {}) {
     this.fetchImpl = fetchImpl;
@@ -106,7 +134,7 @@ export class ResourceSearchService {
     this.endpointHealth = new Map();
   }
 
-  async search(rawKeyword) {
+  async search(rawKeyword, { force = false } = {}) {
     const keyword = normalizeKeyword(rawKeyword);
     if (!keyword) {
       throw createSearchError('请输入有效片名', 'RESOURCE_SEARCH_KEYWORD_REQUIRED', 400);
@@ -114,12 +142,13 @@ export class ResourceSearchService {
 
     const cacheKey = keyword.toLocaleLowerCase('zh-CN');
     const cached = this.cache.get(cacheKey);
-    if (cached && this.#isFreshCache(cached)) return cached.data;
-    if (this.inFlight.has(cacheKey)) return this.inFlight.get(cacheKey);
+    if (!force && cached && this.#isFreshCache(cached)) return cached.data;
+    const requestKey = force ? `${cacheKey}:refresh` : cacheKey;
+    if (this.inFlight.has(requestKey)) return this.inFlight.get(requestKey);
 
-    const task = this.#searchUpstreams(keyword, cached)
-      .finally(() => this.inFlight.delete(cacheKey));
-    this.inFlight.set(cacheKey, task);
+    const task = this.#searchUpstreams(keyword, force ? null : cached)
+      .finally(() => this.inFlight.delete(requestKey));
+    this.inFlight.set(requestKey, task);
     return task;
   }
 
@@ -130,27 +159,33 @@ export class ResourceSearchService {
     }
     const controller = new AbortController();
     const failures = [];
-    let emptyResult = null;
+    const payloads = [];
 
     const outcome = await new Promise(resolve => {
       let completed = 0;
       let settled = false;
-      const finish = result => {
+      let aggregationTimer = null;
+      const finish = () => {
         if (settled) return;
         settled = true;
-        resolve(result);
+        if (aggregationTimer) clearTimeout(aggregationTimer);
+        controller.abort();
+        resolve({
+          data: mergePayloads(payloads),
+          hasResponses: payloads.length > 0,
+          hasResults: payloads.some(data => data.merged_by_type.quark.length > 0)
+        });
       };
 
       for (const endpoint of endpoints) {
         this.#fetchEndpointWithRetry(endpoint, keyword, controller.signal)
           .then(data => {
             this.#recordEndpointSuccess(endpoint);
+            payloads.push(data);
             if (data.merged_by_type.quark.length) {
-              controller.abort();
-              finish({ data, hasResults: true });
-              return;
+              if (endpoints.length === 1) finish();
+              else if (!aggregationTimer) aggregationTimer = setTimeout(finish, RESULT_AGGREGATION_WINDOW_MS);
             }
-            emptyResult = data;
           })
           .catch(error => {
             if (!controller.signal.aborted || !settled) {
@@ -162,7 +197,7 @@ export class ResourceSearchService {
           })
           .finally(() => {
             completed += 1;
-            if (completed === endpoints.length && !settled) finish({ data: emptyResult, hasResults: false });
+            if (completed === endpoints.length && !settled) finish();
           });
       }
     });
@@ -172,7 +207,7 @@ export class ResourceSearchService {
       return outcome.data;
     }
     if (cached && !cached.isEmpty && Date.now() - cached.createdAt <= STALE_CACHE_TTL_MS) return cached.data;
-    if (outcome?.data) {
+    if (outcome?.hasResponses && outcome.data) {
       this.#remember(keyword, outcome.data);
       return outcome.data;
     }
