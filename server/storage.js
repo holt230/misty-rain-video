@@ -57,12 +57,14 @@ export class MediaRepository {
     return cards;
   }
 
-  removeTitle(title) {
-    const normalized = normalizeLibraryTitle(title);
-    const cards = this.all().filter(card => normalizeLibraryTitle(card.title) !== normalized);
+  removeFid(quarkFid) {
+    const fid = String(quarkFid || '').trim();
+    if (!fid) return this.all();
+    const cards = this.all().filter(card => String(card.quarkFid || '').trim() !== fid);
     writeJson(this.filePath, cards, 0o644);
     return cards;
   }
+
 }
 
 const normalizeLibraryTitle = value => String(value || '')
@@ -283,6 +285,14 @@ export class PlaybackHistoryRepository {
 
   remove(id) {
     const entries = this.all().filter(entry => entry.id !== id);
+    writeJson(this.filePath, { version: 1, entries }, 0o600);
+    return entries;
+  }
+
+  removeByMediaFid(quarkFid) {
+    const fid = String(quarkFid || '').trim();
+    if (!fid) return this.all();
+    const entries = this.all().filter(entry => String(entry?.media?.quarkFid || '').trim() !== fid);
     writeJson(this.filePath, { version: 1, entries }, 0o600);
     return entries;
   }

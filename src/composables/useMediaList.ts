@@ -70,9 +70,12 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   /** 保存影视到当前账户的片库。 */
   const saveMedia = async (item: MediaItem) => {
     try {
-      toast.show(`正在转存《${item.title}》到云端片库...`, '↻', 2200);
-      allMediaList.value = await MediaStore.saveMedia(item);
-      toast.show(`已转存并加入片库《${item.title}》`, '✓', 3000);
+      toast.show(item.quarkFid
+        ? `正在验证《${item.title}》的新片源...`
+        : `正在转存《${item.title}》到云端片库...`, '↻', 2200);
+      const result = await MediaStore.saveMedia(item);
+      allMediaList.value = result.items;
+      toast.show(result.message, '✓', 3200);
     } catch (error) {
       toast.show(error instanceof Error ? error.message : '转存失败', '!', 3500);
       throw error;

@@ -13,6 +13,8 @@ const props = defineProps<{
   quarkResources: ResourceItem[];
   searchError?: string;
   searchKeyword?: string;
+  isSaving?: boolean;
+  savingResourceId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -140,12 +142,13 @@ watch([() => props.isOpen, () => props.media?.id, resultFilter], () => {
 });
 
 const loadMore = () => {
+  if (props.isSaving) return;
   visibleCount.value = Math.min(filteredResources.value.length, visibleCount.value + batchSize);
 };
 
 const submitSearch = () => {
   const keyword = searchQuery.value.trim();
-  if (!keyword || props.isAnalyzing) return;
+  if (!keyword || props.isAnalyzing || props.isSaving) return;
   emit('search', keyword);
 };
 
@@ -153,15 +156,19 @@ const handleBodyScroll = (event: Event) => {
   const target = event.currentTarget as HTMLElement;
   if (hasMoreResources.value && target.scrollTop + target.clientHeight >= target.scrollHeight - 180) loadMore();
 };
+
+const requestClose = () => {
+  if (!props.isSaving) emit('close');
+};
 </script>
 
 <template>
   <div
     class="liquid-dialog-backdrop"
     :class="{ active: isOpen }"
-    @click.self="emit('close')"
+    @click.self="requestClose"
   >
-    <div class="liquid-dialog" v-if="media">
+    <div class="liquid-dialog" v-if="media" :aria-busy="isSaving || isAnalyzing">
       <!-- 弹窗顶栏 -->
       <div class="dialog-header">
         <div class="media-meta-row">
@@ -178,6 +185,7 @@ const handleBodyScroll = (event: Event) => {
                 <button
                   class="cat-select-pill"
                   :class="{ active: targetCategory === 'tv' }"
+                  :disabled="isSaving"
                   @click="targetCategory = 'tv'"
                 >
                   电视剧
@@ -185,6 +193,7 @@ const handleBodyScroll = (event: Event) => {
                 <button
                   class="cat-select-pill"
                   :class="{ active: targetCategory === 'movie' }"
+                  :disabled="isSaving"
                   @click="targetCategory = 'movie'"
                 >
                   电影
@@ -192,6 +201,7 @@ const handleBodyScroll = (event: Event) => {
                 <button
                   class="cat-select-pill"
                   :class="{ active: targetCategory === 'variety' }"
+                  :disabled="isSaving"
                   @click="targetCategory = 'variety'"
                 >
                   综艺
@@ -199,6 +209,7 @@ const handleBodyScroll = (event: Event) => {
                 <button
                   class="cat-select-pill"
                   :class="{ active: targetCategory === 'anime' }"
+                  :disabled="isSaving"
                   @click="targetCategory = 'anime'"
                 >
                   动漫
@@ -209,7 +220,7 @@ const handleBodyScroll = (event: Event) => {
         </div>
 
         <div class="dialog-top-actions">
-          <button class="btn-close-dialog" type="button" aria-label="关闭资源选择" @click="emit('close')">
+          <button class="btn-close-dialog" type="button" aria-label="关闭资源选择" :disabled="isSaving" @click="requestClose">
             <X aria-hidden="true" />
           </button>
         </div>
@@ -225,14 +236,14 @@ const handleBodyScroll = (event: Event) => {
           autocomplete="off"
           aria-label="重新输入片名搜索资源"
           placeholder="修改片名重新搜索"
-          :disabled="isAnalyzing"
+          :disabled="isAnalyzing || isSaving"
         />
         <button
           v-if="searchQuery"
           type="button"
           class="clear-search-button"
           aria-label="清空搜索内容"
-          :disabled="isAnalyzing"
+          :disabled="isAnalyzing || isSaving"
           @click="searchQuery = ''"
         >
           <X aria-hidden="true" />
@@ -240,7 +251,7 @@ const handleBodyScroll = (event: Event) => {
         <button
           type="submit"
           class="submit-search-button"
-          :disabled="isAnalyzing || !searchQuery.trim()"
+          :disabled="isAnalyzing || isSaving || !searchQuery.trim()"
         >
           {{ isAnalyzing ? '检索中' : '搜索' }}
         </button>
@@ -262,6 +273,7 @@ const handleBodyScroll = (event: Event) => {
           :class="{ active: resultFilter === option.value }"
           role="radio"
           :aria-checked="resultFilter === option.value"
+          :disabled="isSaving"
           @click="resultFilter = option.value"
         >
           {{ option.label }}
@@ -306,21 +318,23 @@ const handleBodyScroll = (event: Event) => {
               <div class="row-right">
                 <button
                   class="btn-action btn-transfer"
+                  :class="{ 'is-saving': isSaving && savingResourceId === res.id }"
+                  :disabled="isSaving"
                   @click="emit('save-to-cards', media, targetCategory, res)"
                 >
-                  选用并加入
+                  {{ isSaving && savingResourceId === res.id ? '正在验证并转存…' : '选用并加入' }}
                 </button>
               </div>
             </div>
 
-            <button v-if="hasMoreResources" type="button" class="load-more-button" @click="loadMore">
+            <button v-if="hasMoreResources" type="button" class="load-more-button" :disabled="isSaving" @click="loadMore">
               加载更多 · 还有 {{ filteredResources.length - visibleResources.length }} 条
             </button>
           </div>
 
           <div v-else class="empty-notice">
             <span>{{ searchError || (resultFilter === 'recommended' ? '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
-            <button v-if="searchError" type="button" class="retry-search-button" @click="emit('retry-search')">
+            <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
               重新检索
             </button>
@@ -934,8 +948,29 @@ const handleBodyScroll = (event: Event) => {
 .load-more-button { border-color: rgb(239 241 255 / 0.08); background: rgb(237 240 255 / 0.035); }
 .retry-search-button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; padding: 0 14px; border: 1px solid rgb(var(--accent-rgb) / 0.20); border-radius: 12px; color: var(--liquid-accent); background: var(--liquid-accent-muted); font-size: .8rem; font-weight: 650; cursor: pointer; }
 .retry-search-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.cat-select-pill:disabled,
+.filter-chip:disabled,
+.btn-close-dialog:disabled,
+.btn-transfer:disabled,
+.load-more-button:disabled,
+.retry-search-button:disabled { cursor: default; opacity: .46; }
+.btn-transfer.is-saving:disabled { opacity: 1; }
+.btn-transfer.is-saving::before {
+  width: 13px;
+  height: 13px;
+  margin-right: 6px;
+  border: 2px solid rgb(4 18 17 / .32);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin .75s linear infinite;
+  content: '';
+}
 .result-summary { display: flex; align-items: baseline; gap: 4px; padding: 11px 20px 3px; color: var(--text-tertiary); font-size: .78rem; }
 .result-summary strong { color: var(--text-primary); font-size: .94rem; font-weight: 720; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-transfer.is-saving::before { animation: none; }
+}
 
 @media (max-width: 640px) {
   .liquid-dialog { background: var(--liquid-canvas) !important; }

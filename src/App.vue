@@ -73,6 +73,8 @@ const deletingMedia = ref<MediaItem | null>(null);
 const isDeletingMedia = ref(false);
 const categoryMedia = ref<MediaItem | null>(null);
 const isSavingCategory = ref(false);
+const isSavingTransfer = ref(false);
+const savingResourceId = ref('');
 const actionMedia = ref<MediaItem | null>(null);
 type MobileTab = MobileDockTab | 'search';
 const mobileTab = ref<MobileTab>('library');
@@ -135,6 +137,8 @@ watch(user, () => {
   categoryMedia.value = null;
   actionMedia.value = null;
   selectedHistoryEntry.value = null;
+  isSavingTransfer.value = false;
+  savingResourceId.value = '';
   autoCheckedUsername = '';
   setMobileHistoryLayer('library', true);
 });
@@ -253,6 +257,7 @@ const handleSearchMedia = (kw: string) => {
 
 // 保存片单
 const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRes?: ResourceItem) => {
+  if (isSavingTransfer.value) return;
   const cat = targetCat || media.category || currentCategory.value;
   const cardToSave: MediaItem = {
     ...media,
@@ -262,12 +267,17 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
     quarkShareUrl: bestRes?.url || media.quarkShareUrl,
     quarkPasscode: bestRes?.password || media.quarkPasscode
   };
+  isSavingTransfer.value = true;
+  savingResourceId.value = bestRes?.id || 'direct';
   try {
     await saveMedia(cardToSave);
     mobileTab.value = 'library';
     requestLayerClose('transfer', closeTransferModal);
   } catch {
     // 错误已由 useMediaList 在当前系统内提示，保留面板供用户换源重试。
+  } finally {
+    isSavingTransfer.value = false;
+    savingResourceId.value = '';
   }
 };
 
@@ -538,6 +548,8 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     :quark-resources="quarkResources"
     :search-error="searchError"
     :search-keyword="searchKeyword"
+    :is-saving="isSavingTransfer"
+    :saving-resource-id="savingResourceId"
     @close="closeTransferPanel"
     @retry-search="retrySearch"
     @search="refreshResources"

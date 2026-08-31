@@ -50,7 +50,7 @@ export class MediaStore {
   /**
    * 保存/新增影片卡片到服务端持久化数据库
    */
-  static async saveMedia(item: MediaItem): Promise<MediaItem[]> {
+  static async saveMedia(item: MediaItem): Promise<{ items: MediaItem[]; message: string }> {
     const resp = await authFetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -60,15 +60,18 @@ export class MediaStore {
     if (!resp.ok || json.code !== 0 || !Array.isArray(json.data)) {
       throw new Error(json.message || '转存到云端片库失败');
     }
-    const items = hydrateMedia(json.data);
-    return items;
+    return {
+      items: hydrateMedia(json.data),
+      message: String(json.message || (item.quarkFid ? '新片源已完成替换' : '已转存到云端片库'))
+    };
   }
 
   /**
    * 从服务端持久化数据库删除指定卡片
    */
   static async removeMedia(media: MediaItem): Promise<MediaItem[]> {
-    const params = new URLSearchParams({ id: media.id, title: media.title });
+    const params = new URLSearchParams({ id: media.id });
+    if (media.quarkFid) params.set('quarkFid', media.quarkFid);
     const resp = await authFetch(`${API_URL}?${params}`, { method: 'DELETE' });
     const json = await resp.json().catch(() => ({}));
     if (!resp.ok || json.code !== 0) {

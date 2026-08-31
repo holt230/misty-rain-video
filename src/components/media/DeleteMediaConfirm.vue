@@ -42,7 +42,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
           <p>
             影片目录将移入云盘回收站，可在回收站内恢复。
             <template v-if="(media.duplicateCount || 1) > 1">
-              检测到 {{ media.duplicateCount }} 个同名目录，本次会一并移除，避免重复卡片再次出现。
+              检测到 {{ media.duplicateCount }} 个同名目录，本次只移除当前目录；其余同名内容仍会保留。
             </template>
           </p>
         </div>

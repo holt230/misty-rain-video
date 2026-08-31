@@ -280,8 +280,19 @@ export const handleApiRequest = async (request, response, context) => {
         }
         if (/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(item.quarkShareUrl || '')) {
           const imported = await context.quarkGateway.importShare(item, user);
+          if (imported.replacedFid) {
+            userData.mediaRepository.removeFid(imported.replacedFid);
+            userData.playbackHistory.removeByMediaFid(imported.replacedFid);
+          }
           userData.mediaRepository.save({ ...item, ...imported.item, poster: persistablePoster(item.poster) });
-          sendSuccess(response, await readLibrary(context, user, userData), imported.transferredCount ? '已转存到云端片库' : '片库中已存在该内容');
+          const message = imported.replacedFid
+            ? imported.cleanupPending
+              ? '换源完成；旧目录已保留为隐藏备份，可在网盘确认后清理'
+              : '新片源已验证并完成替换'
+            : imported.transferredCount
+              ? '已转存到云端片库'
+              : '片库中已存在该内容';
+          sendSuccess(response, await readLibrary(context, user, userData), message);
         } else {
           userData.mediaRepository.save(item);
           sendSuccess(response, await readLibrary(context, user, userData), '元数据已保存');
@@ -289,17 +300,20 @@ export const handleApiRequest = async (request, response, context) => {
         return true;
       }
       if (request.method === 'DELETE') {
-        const title = url.searchParams.get('title');
         const id = url.searchParams.get('id');
-        if (!title && !id) {
-          const error = new Error('缺少片名或卡片标识');
+        const explicitFid = String(url.searchParams.get('quarkFid') || '').trim();
+        const fidFromId = String(id || '').startsWith('quark:') ? String(id).slice('quark:'.length).trim() : '';
+        const quarkFid = explicitFid || fidFromId;
+        if (!quarkFid && !id) {
+          const error = new Error('缺少影片目录或卡片标识');
           error.statusCode = 400;
           throw error;
         }
-        if (title) {
-          const result = await context.quarkGateway.trashLibraryTitle(title, user);
-          userData.mediaRepository.removeTitle(title);
-          sendSuccess(response, result, result.deletedCount > 1 ? '同名目录已全部移入回收站' : '已移入回收站');
+        if (quarkFid) {
+          const result = await context.quarkGateway.trashLibraryItem(quarkFid, user);
+          userData.mediaRepository.removeFid(quarkFid);
+          userData.playbackHistory.removeByMediaFid(quarkFid);
+          sendSuccess(response, result, '当前影片目录已移入回收站');
         } else {
           userData.mediaRepository.remove(id);
           sendSuccess(response, { deletedCount: 1 }, '已从片单移除');
@@ -405,6 +419,10 @@ export const handleApiRequest = async (request, response, context) => {
     if (pathname === '/api/library/import' && request.method === 'POST') {
       const item = await readRequestBody(request);
       const imported = await context.quarkGateway.importShare(item, user);
+      if (imported.replacedFid) {
+        userData.mediaRepository.removeFid(imported.replacedFid);
+        userData.playbackHistory.removeByMediaFid(imported.replacedFid);
+      }
       userData.mediaRepository.save({
         ...item,
         ...imported.item,
@@ -415,7 +433,13 @@ export const handleApiRequest = async (request, response, context) => {
         transferredCount: imported.transferredCount,
         reusedCount: imported.reusedCount,
         library: await readLibrary(context, user, userData)
-      }, imported.transferredCount ? '已转存并加入云端片库' : '片库中已存在该内容');
+      }, imported.replacedFid
+        ? imported.cleanupPending
+          ? '换源完成；旧目录已保留为隐藏备份，可在网盘确认后清理'
+          : '新片源已验证并完成替换'
+        : imported.transferredCount
+          ? '已转存并加入云端片库'
+          : '片库中已存在该内容');
       return true;
     }
 

@@ -16,6 +16,7 @@ const MEDIA_REQUEST_ATTEMPTS = 2;
 const DIRECTORY_EPISODE_CACHE_MS = 10 * 60 * 1000;
 const LIBRARY_UPDATE_CACHE_MS = 5 * 60 * 1000;
 const DIRECTORY_SCAN_CONCURRENCY = 6;
+const RESERVED_LIBRARY_FOLDER_PREFIX = '_烟雨系统_';
 const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 const QUARK_DESKTOP_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.14.2 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch';
 
@@ -46,6 +47,97 @@ export class QuarkApiError extends Error {
     this.details = options.details;
   }
 }
+
+const isTransientLibraryReadError = error => {
+  const code = String(error?.code || '');
+  const statusCode = Number(error?.statusCode) || 0;
+  return statusCode >= 500 && [
+    'QUARK_NETWORK_ERROR',
+    'QUARK_INVALID_RESPONSE',
+    'QUARK_HTTP_ERROR',
+    'QUARK_DRIVE_LIST_FAILED'
+  ].includes(code);
+};
+
+export const waitForVideoEpisodes = async ({
+  scan,
+  attempts = 5,
+  delay = attempt => new Promise(resolve => setTimeout(resolve, 350 * attempt))
+}) => {
+  const maxAttempts = Math.max(1, Math.min(10, Number(attempts) || 5));
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const episodes = await scan();
+      lastError = null;
+      if (episodes.length) return episodes;
+    } catch (error) {
+      if (!isTransientLibraryReadError(error)) throw error;
+      lastError = error;
+    }
+    if (attempt < maxAttempts) await delay(attempt);
+  }
+  if (lastError) throw lastError;
+  return [];
+};
+
+export const acquireLibraryMutationLocks = (locks, keys) => {
+  const normalizedKeys = [...new Set(keys.map(value => String(value || '').trim()).filter(Boolean))];
+  if (normalizedKeys.some(key => locks.has(key))) {
+    throw new QuarkApiError('该影片正在转存、换源或删除，请等待当前操作完成', {
+      code: 'LIBRARY_MUTATION_IN_PROGRESS',
+      statusCode: 409
+    });
+  }
+  for (const key of normalizedKeys) locks.add(key);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const key of normalizedKeys) locks.delete(key);
+  };
+};
+
+export const switchLibrarySourceFolders = async ({
+  replacementFid,
+  stagedFid,
+  mediaTitle,
+  backupName,
+  renameItem,
+  trashItems
+}) => {
+  await renameItem(replacementFid, backupName);
+  try {
+    await renameItem(stagedFid, mediaTitle);
+  } catch (switchError) {
+    try {
+      await renameItem(replacementFid, mediaTitle);
+    } catch (rollbackError) {
+      throw new QuarkApiError('换源切换失败且旧目录自动恢复失败，请暂时不要继续操作并前往网盘检查目录', {
+        code: 'LIBRARY_REPLACEMENT_ROLLBACK_FAILED',
+        statusCode: 502,
+        details: {
+          switchError: switchError instanceof Error ? switchError.message : String(switchError),
+          rollbackError: rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+        }
+      });
+    }
+    throw new QuarkApiError('新片源切换失败，旧片源已自动恢复', {
+      code: 'LIBRARY_REPLACEMENT_FAILED',
+      statusCode: 502,
+      details: { cause: switchError instanceof Error ? switchError.message : String(switchError) }
+    });
+  }
+
+  let cleanupPending = false;
+  try {
+    await trashItems([replacementFid]);
+  } catch {
+    // 新目录已经正式生效，不能因为旧备份清理失败而回滚成功的换源。
+    cleanupPending = true;
+  }
+  return { cleanupPending };
+};
 
 const createAuthError = (message = '播放认证已失效，请重新认证', details) => new QuarkApiError(message, {
   code: 'QUARK_AUTH_REQUIRED',
@@ -257,6 +349,10 @@ const normalizeLibraryTitle = value => sanitizeFolderName(value)
   .toLowerCase()
   .replace(/[\s·•:：—_.,，。!！?？《》“”'"【】\[\]()（）-]+/g, '');
 
+const libraryTitleMutationKey = (principal, category, title) =>
+  `title:${principal.username}:${category}:${normalizeLibraryTitle(title)}`;
+const libraryFidMutationKey = (principal, fid) => `fid:${principal.username}:${String(fid || '').trim()}`;
+
 const genericMediaTitlePattern = /^(?:烟雨视频|我的网盘库|待识别片名|未命名影片|网盘影视资源)$/i;
 
 const resolveMediaTitle = (requestedTitle, shareTitle) => {
@@ -370,6 +466,7 @@ export class QuarkGateway {
     this.libraryAccessCache = new Map();
     this.driveEpisodeCache = new Map();
     this.libraryUpdateCache = new Map();
+    this.libraryMutationLocks = new Set();
     this.cleanupTimer = setInterval(() => this.#cleanupSessions(), 10 * 60 * 1000);
     this.cleanupTimer.unref?.();
   }
@@ -484,6 +581,7 @@ export class QuarkGateway {
         const mediaFolders = await this.#listDriveFolder(categoryFolder.fid, cookie);
         for (const folder of mediaFolders) {
           if (folder.file_type !== 0 && !folder.dir) continue;
+          if (String(folder.file_name || '').startsWith(RESERVED_LIBRARY_FOLDER_PREFIX)) continue;
           items.push({
             id: `quark:${folder.fid}`,
             quarkFid: folder.fid,
@@ -507,41 +605,43 @@ export class QuarkGateway {
     return unique;
   }
 
-  async trashLibraryTitle(title, user = SYSTEM_USER) {
+  async trashLibraryItem(quarkFid, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
-    const normalizedTitle = normalizeLibraryTitle(title);
-    if (!normalizedTitle) {
-      throw new QuarkApiError('片名无效，无法删除', { code: 'INVALID_MEDIA_TITLE', statusCode: 400 });
+    const fid = String(quarkFid || '').trim();
+    if (!fid || fid.length > 240) {
+      throw new QuarkApiError('影片目录标识无效，无法删除', { code: 'INVALID_MEDIA_FID', statusCode: 400 });
     }
 
-    const matches = (await this.listLibrary(user)).filter(item => normalizeLibraryTitle(item.title) === normalizedTitle);
-    if (!matches.length) {
-      throw new QuarkApiError('云端片库中未找到该影片，可能已被删除', {
-        code: 'MEDIA_FOLDER_NOT_FOUND',
-        statusCode: 404
-      });
-    }
-
-    const fids = [...new Set(matches.map(item => item.quarkFid).filter(Boolean))];
-    for (let offset = 0; offset < fids.length; offset += 50) {
-      const batch = fids.slice(offset, offset + 50);
-      const result = await this.#requestJson(`${API_HOST}/file/delete?pr=ucpro&fr=pc`, {
-        method: 'POST',
-        cookie,
-        body: { action_type: 2, filelist: batch, exclude_fids: [] }
-      });
-      if (result?.code !== 0) {
-        throw new QuarkApiError(result?.message || '移入回收站失败，请稍后重试', {
-          code: 'MEDIA_TRASH_FAILED',
-          statusCode: 502
-        });
+    const releaseMutation = acquireLibraryMutationLocks(this.libraryMutationLocks, [
+      libraryFidMutationKey(principal, fid)
+    ]);
+    try {
+      await this.#assertLibraryAccess(fid, principal);
+      await this.#trashDriveFids([fid], cookie);
+      this.driveEpisodeCache.delete(fid);
+      this.libraryAccessCache.delete(principal.username);
+      this.libraryUpdateCache.clear();
+      for (const [sessionId, session] of this.sessions.entries()) {
+        if (session.ownerUsername === principal.username && session.kind === 'drive' && session.driveFid === fid) {
+          this.sessions.delete(sessionId);
+        }
       }
+      return { deletedCount: 1, deletedFid: fid };
+    } finally {
+      releaseMutation();
     }
-    for (const fid of fids) this.driveEpisodeCache.delete(fid);
-    return { deletedCount: fids.length };
   }
 
-  async importShare({ shareUrl, quarkShareUrl, title, category, passcode = '', quarkPasscode = '' }, user = SYSTEM_USER) {
+  async importShare({
+    shareUrl,
+    quarkShareUrl,
+    title,
+    category,
+    passcode = '',
+    quarkPasscode = '',
+    quarkFid: replaceQuarkFid = ''
+  }, user = SYSTEM_USER) {
     const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
     const resourceShareUrl = shareUrl || quarkShareUrl;
@@ -565,56 +665,73 @@ export class QuarkGateway {
       cookie
     });
     const mediaTitle = resolveMediaTitle(title, share.title);
-    const userRoot = await this.#getUserRoot(cookie, principal, true);
-    const categoryFolder = await this.#ensureDriveFolder(userRoot.fid, folderName, cookie);
-    const mediaFolder = await this.#ensureDriveFolder(categoryFolder.fid, mediaTitle, cookie);
-    const shareItems = await this.#listShareFolder({
-      pwdId: share.pwdId,
-      stoken: share.stoken,
-      parentFid: '0',
-      cookie
-    });
-    if (!shareItems.length) {
-      throw new QuarkApiError('分享目录为空，无法转存', { code: 'QUARK_SHARE_EMPTY', statusCode: 422 });
+    const replacementFid = String(replaceQuarkFid || '').trim();
+    if (replacementFid.length > 240) {
+      throw new QuarkApiError('原影片目录标识无效，无法换源', {
+        code: 'INVALID_MEDIA_FID',
+        statusCode: 400
+      });
     }
+    const mutationKeys = [libraryTitleMutationKey(principal, category, mediaTitle)];
+    if (replacementFid) mutationKeys.push(libraryFidMutationKey(principal, replacementFid));
+    const releaseMutation = acquireLibraryMutationLocks(this.libraryMutationLocks, mutationKeys);
 
-    const existing = await this.#listDriveFolder(mediaFolder.fid, cookie);
-    const missing = shareItems.filter(item => !existing.some(saved => saved.file_name === item.file_name
-      && (item.file_type === 0 || Number(saved.size) === Number(item.size))));
-    let savedFids = [];
-    if (missing.length) {
-      for (let offset = 0; offset < missing.length; offset += 50) {
-        const batch = await this.#saveSharedItems({
-          pwdId: share.pwdId,
-          stoken: share.stoken,
-          parentFid: '0',
-          items: missing.slice(offset, offset + 50),
-          targetFolderFid: mediaFolder.fid,
-          cookie,
-          passcode: resourcePasscode
-        });
-        savedFids.push(...batch);
+    try {
+      const userRoot = await this.#getUserRoot(cookie, principal, true);
+      const categoryFolder = await this.#ensureDriveFolder(userRoot.fid, folderName, cookie);
+      const shareItems = await this.#listShareFolder({
+        pwdId: share.pwdId,
+        stoken: share.stoken,
+        parentFid: '0',
+        cookie
+      });
+      if (!shareItems.length) {
+        throw new QuarkApiError('分享目录为空，无法转存', { code: 'QUARK_SHARE_EMPTY', statusCode: 422 });
       }
-    }
-    this.driveEpisodeCache.delete(mediaFolder.fid);
 
-    return {
-      item: {
-        id: `quark:${mediaFolder.fid}`,
-        quarkFid: mediaFolder.fid,
-        title: mediaTitle,
-        category,
-        tag: '云端片库',
-        status: '已入库',
-        desc: `已转存至云端网盘 · ${folderName}`,
-        poster: '',
-        quarkShareUrl: `https://pan.quark.cn/s/${share.pwdId}`,
-        quarkQuality: ''
-      },
-      transferredCount: missing.length,
-      reusedCount: shareItems.length - missing.length,
-      savedFids
-    };
+      if (replacementFid) {
+        return await this.#replaceLibrarySource({
+          principal,
+          cookie,
+          category,
+          categoryFolder,
+          folderName,
+          mediaTitle,
+          replacementFid,
+          share,
+          shareItems,
+          resourcePasscode
+        });
+      }
+
+      const mediaFolder = await this.#ensureDriveFolder(categoryFolder.fid, mediaTitle, cookie);
+      const existing = await this.#listDriveFolder(mediaFolder.fid, cookie);
+      const missing = shareItems.filter(item => !existing.some(saved => saved.file_name === item.file_name
+        && (item.file_type === 0 || Number(saved.size) === Number(item.size))));
+      const savedFids = await this.#transferSharedItems({
+        share,
+        items: missing,
+        targetFolderFid: mediaFolder.fid,
+        cookie,
+        passcode: resourcePasscode
+      });
+      this.driveEpisodeCache.delete(mediaFolder.fid);
+
+      return {
+        item: this.#libraryItem({
+          fid: mediaFolder.fid,
+          mediaTitle,
+          category,
+          folderName,
+          pwdId: share.pwdId
+        }),
+        transferredCount: missing.length,
+        reusedCount: shareItems.length - missing.length,
+        savedFids
+      };
+    } finally {
+      releaseMutation();
+    }
   }
 
   async checkLibraryUpdates(cards, user = SYSTEM_USER, { force = false } = {}) {
@@ -1241,6 +1358,157 @@ export class QuarkGateway {
     return folder || null;
   }
 
+  #libraryItem({ fid, mediaTitle, category, folderName, pwdId }) {
+    return {
+      id: `quark:${fid}`,
+      quarkFid: fid,
+      title: mediaTitle,
+      category,
+      tag: '云端片库',
+      status: '已入库',
+      desc: `已转存至云端网盘 · ${folderName}`,
+      poster: '',
+      quarkShareUrl: `https://pan.quark.cn/s/${pwdId}`,
+      quarkQuality: ''
+    };
+  }
+
+  async #transferSharedItems({ share, items, targetFolderFid, cookie, passcode }) {
+    const savedFids = [];
+    for (let offset = 0; offset < items.length; offset += 50) {
+      const batch = await this.#saveSharedItems({
+        pwdId: share.pwdId,
+        stoken: share.stoken,
+        parentFid: '0',
+        items: items.slice(offset, offset + 50),
+        targetFolderFid,
+        cookie,
+        passcode
+      });
+      savedFids.push(...batch);
+    }
+    return savedFids;
+  }
+
+  async #replaceLibrarySource({
+    principal,
+    cookie,
+    category,
+    categoryFolder,
+    folderName,
+    mediaTitle,
+    replacementFid,
+    share,
+    shareItems,
+    resourcePasscode
+  }) {
+    await this.#assertLibraryAccess(replacementFid, principal);
+    const targetItems = await this.#listDriveFolder(categoryFolder.fid, cookie);
+    const conflictingFolder = targetItems.find(item => (item.file_type === 0 || item.dir)
+      && item.file_name === mediaTitle
+      && item.fid !== replacementFid);
+    if (conflictingFolder) {
+      throw new QuarkApiError('目标分类中已经存在另一个同名目录，请先处理该目录后再换源', {
+        code: 'LIBRARY_REPLACEMENT_CONFLICT',
+        statusCode: 409
+      });
+    }
+
+    const operationId = createOpaqueId().slice(0, 8);
+    const stagedName = sanitizeFolderName(`${RESERVED_LIBRARY_FOLDER_PREFIX}换源_${operationId}_${mediaTitle}`);
+    const backupName = sanitizeFolderName(`${RESERVED_LIBRARY_FOLDER_PREFIX}备份_${operationId}_${mediaTitle}`);
+    const stagedFolder = await this.#ensureDriveFolder(categoryFolder.fid, stagedName, cookie);
+    let switched = false;
+
+    try {
+      const savedFids = await this.#transferSharedItems({
+        share,
+        items: shareItems,
+        targetFolderFid: stagedFolder.fid,
+        cookie,
+        passcode: resourcePasscode
+      });
+      const activeCookie = this.#requireCookie();
+      const episodes = await this.#waitForVideoEpisodes(stagedFolder.fid, activeCookie);
+      if (!episodes.length) {
+        throw new QuarkApiError('新片源中没有可播放的正片，旧片源保持不变', {
+          code: 'QUARK_VIDEO_NOT_FOUND',
+          statusCode: 422
+        });
+      }
+
+      const { cleanupPending } = await switchLibrarySourceFolders({
+        replacementFid,
+        stagedFid: stagedFolder.fid,
+        mediaTitle,
+        backupName,
+        renameItem: (fid, name) => this.#renameDriveItem(fid, name, activeCookie),
+        trashItems: fids => this.#trashDriveFids(fids, activeCookie)
+      });
+      switched = true;
+
+      this.driveEpisodeCache.delete(replacementFid);
+      this.driveEpisodeCache.delete(stagedFolder.fid);
+      this.libraryAccessCache.delete(principal.username);
+      this.libraryUpdateCache.clear();
+      for (const [sessionId, session] of this.sessions.entries()) {
+        if (session.ownerUsername === principal.username && session.kind === 'drive' && session.driveFid === replacementFid) {
+          this.sessions.delete(sessionId);
+        }
+      }
+
+      return {
+        item: this.#libraryItem({
+          fid: stagedFolder.fid,
+          mediaTitle,
+          category,
+          folderName,
+          pwdId: share.pwdId
+        }),
+        transferredCount: shareItems.length,
+        reusedCount: 0,
+        savedFids,
+        replacedFid: replacementFid,
+        cleanupPending
+      };
+    } catch (error) {
+      if (!switched) {
+        await this.#trashDriveFids([stagedFolder.fid], this.#requireCookie()).catch(() => {});
+      }
+      throw error;
+    }
+  }
+
+  async #waitForVideoEpisodes(folderFid, cookie) {
+    return waitForVideoEpisodes({
+      scan: () => this.#walkDriveDirectory(folderFid, cookie)
+    });
+  }
+
+  async #renameDriveItem(fid, fileName, cookie) {
+    const safeName = sanitizeFolderName(fileName);
+    if (!safeName) {
+      throw new QuarkApiError('目录名称无效，无法完成换源', {
+        code: 'INVALID_MEDIA_TITLE',
+        statusCode: 400
+      });
+    }
+    const { result } = await this.#requestJsonWithCookieRotation(createDriveOperationUrl('file/rename'), {
+      method: 'POST',
+      cookie,
+      authStage: '片源目录重命名',
+      userAgent: QUARK_DESKTOP_USER_AGENT,
+      body: { fid, file_name: safeName }
+    });
+    if (result?.code !== 0) {
+      throw new QuarkApiError(result?.message || '目录重命名失败，请稍后重试', {
+        code: 'QUARK_RENAME_FOLDER_FAILED',
+        statusCode: 502
+      });
+    }
+    return result.data || {};
+  }
+
   async #ensureDriveFolder(parentFid, folderName, cookie) {
     const items = await this.#listDriveFolder(parentFid, cookie);
     const existing = items.find(item => (item.file_type === 0 || item.dir) && item.file_name === folderName);
@@ -1257,6 +1525,26 @@ export class QuarkGateway {
       });
     }
     return result.data;
+  }
+
+  async #trashDriveFids(fids, cookie) {
+    const uniqueFids = [...new Set(fids.map(value => String(value || '').trim()).filter(Boolean))];
+    for (let offset = 0; offset < uniqueFids.length; offset += 50) {
+      const batch = uniqueFids.slice(offset, offset + 50);
+      const { result } = await this.#requestJsonWithCookieRotation(createDriveOperationUrl('file/delete'), {
+        method: 'POST',
+        cookie,
+        authStage: '片源目录删除',
+        userAgent: QUARK_DESKTOP_USER_AGENT,
+        body: { action_type: 2, filelist: batch, exclude_fids: [] }
+      });
+      if (result?.code !== 0) {
+        throw new QuarkApiError(result?.message || '移入回收站失败，请稍后重试', {
+          code: 'MEDIA_TRASH_FAILED',
+          statusCode: 502
+        });
+      }
+    }
   }
 
   async #listDriveFolder(parentFid, cookie) {
