@@ -11,7 +11,7 @@ const MEDIA_HOST = 'https://drive.quark.cn/1/clouddrive';
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 const ACCOUNT_CACHE_MS = 60 * 1000;
 const API_REQUEST_TIMEOUT_MS = 15_000;
-const MEDIA_REQUEST_TIMEOUT_MS = 8_000;
+const MEDIA_RESPONSE_HEADER_TIMEOUT_MS = 8_000;
 const MEDIA_REQUEST_ATTEMPTS = 2;
 const DIRECTORY_EPISODE_CACHE_MS = 10 * 60 * 1000;
 const LIBRARY_UPDATE_CACHE_MS = 5 * 60 * 1000;
@@ -47,6 +47,31 @@ export class QuarkApiError extends Error {
     this.details = options.details;
   }
 }
+
+export const fetchWithResponseHeaderTimeout = async (
+  fetcher,
+  input,
+  init = {},
+  timeoutMs = MEDIA_RESPONSE_HEADER_TIMEOUT_MS
+) => {
+  const timeoutController = new AbortController();
+  const timeoutError = Object.assign(new Error('等待媒体节点响应超时'), { name: 'TimeoutError' });
+  const timeout = setTimeout(() => timeoutController.abort(timeoutError), timeoutMs);
+  timeout.unref?.();
+
+  const externalSignal = init.signal;
+  const signal = externalSignal
+    ? AbortSignal.any([externalSignal, timeoutController.signal])
+    : timeoutController.signal;
+
+  try {
+    // fetch 在响应头到达后便会返回。此处随即清除定时器，使较大的媒体响应体
+    // 可以继续流式传输；客户端取消仍会通过 externalSignal 中止响应体。
+    return await fetcher(input, { ...init, signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 const isTransientLibraryReadError = error => {
   const code = String(error?.code || '');
@@ -1038,7 +1063,7 @@ export class QuarkGateway {
     return { session, asset };
   }
 
-  async fetchMedia(upstreamUrl, rangeHeader, requestProfile = 'web', requestCookie = '') {
+  async fetchMedia(upstreamUrl, rangeHeader, requestProfile = 'web', requestCookie = '', options = {}) {
     let currentUrl = this.#assertRemoteUrl(upstreamUrl);
     for (let redirect = 0; redirect < 4; redirect += 1) {
       const parsed = new URL(currentUrl);
@@ -1058,19 +1083,35 @@ export class QuarkGateway {
       let lastError;
       for (let attempt = 0; attempt < MEDIA_REQUEST_ATTEMPTS && !response; attempt += 1) {
         try {
-          response = await fetch(currentUrl, {
+          response = await fetchWithResponseHeaderTimeout(fetch, currentUrl, {
+            method: options.method === 'HEAD' ? 'HEAD' : 'GET',
             headers,
             redirect: 'manual',
-            signal: AbortSignal.timeout(MEDIA_REQUEST_TIMEOUT_MS)
-          });
+            signal: options.signal
+          }, MEDIA_RESPONSE_HEADER_TIMEOUT_MS);
         } catch (error) {
+          if (options.signal?.aborted) {
+            throw new QuarkApiError('播放请求已取消', {
+              code: 'STREAM_REQUEST_ABORTED',
+              statusCode: 499
+            });
+          }
           lastError = error;
+          // 同一个地址等待响应头超时后立即返回，让播放器按自身策略重试；
+          // 连续等待两次只会把一次失败从 8 秒放大为 16 秒以上。
+          if (error?.name === 'TimeoutError') break;
           if (attempt + 1 < MEDIA_REQUEST_ATTEMPTS) {
             await new Promise(resolve => setTimeout(resolve, 180 * (attempt + 1)));
           }
         }
       }
       if (!response) {
+        if (lastError?.name === 'TimeoutError') {
+          throw new QuarkApiError(`媒体节点响应超时（${parsed.hostname}）`, {
+            code: 'STREAM_HEADER_TIMEOUT',
+            statusCode: 504
+          });
+        }
         throw new QuarkApiError(`连接媒体节点失败（${parsed.hostname}）：${lastError?.cause?.code || lastError?.message || 'network error'}`, {
           code: 'STREAM_NETWORK_ERROR',
           statusCode: 502

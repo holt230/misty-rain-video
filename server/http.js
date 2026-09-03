@@ -24,7 +24,7 @@ export const readRequestBody = async (request, limitBytes = 1024 * 1024) => {
 };
 
 export const sendJson = (response, statusCode, payload) => {
-  if (response.headersSent) return;
+  if (response.headersSent || response.destroyed || response.writableEnded) return;
   const body = JSON.stringify(payload);
   response.statusCode = statusCode;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -69,25 +69,125 @@ export const copyProxyHeaders = (upstream, response) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
 };
 
-export const pipeWebResponse = async (upstream, response) => {
+const DEFAULT_PROXY_IDLE_TIMEOUT_MS = 30_000;
+
+const createProxyAbortError = message => Object.assign(new Error(message), {
+  name: 'AbortError',
+  code: 'STREAM_PROXY_ABORTED'
+});
+
+const readWithIdleTimeout = async (reader, idleTimeoutMs) => {
+  let timeout;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          const error = Object.assign(new Error('媒体分片长时间没有返回数据'), {
+            code: 'STREAM_IDLE_TIMEOUT',
+            statusCode: 504
+          });
+          reject(error);
+        }, idleTimeoutMs);
+        timeout.unref?.();
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const waitForDrain = response => new Promise((resolve, reject) => {
+  if (typeof response.once !== 'function') {
+    resolve();
+    return;
+  }
+  const cleanup = () => {
+    response.off?.('drain', handleDrain);
+    response.off?.('close', handleClose);
+    response.off?.('error', handleError);
+  };
+  const handleDrain = () => {
+    cleanup();
+    resolve();
+  };
+  const handleClose = () => {
+    cleanup();
+    reject(createProxyAbortError('客户端已断开'));
+  };
+  const handleError = error => {
+    cleanup();
+    reject(error);
+  };
+  response.once('drain', handleDrain);
+  response.once('close', handleClose);
+  response.once('error', handleError);
+});
+
+export const readWebResponseText = async (upstream, options = {}) => {
+  if (!upstream.body) return '';
+  const idleTimeoutMs = Math.max(1, Number(options.idleTimeoutMs) || DEFAULT_PROXY_IDLE_TIMEOUT_MS);
+  const maxBytes = Math.max(1, Number(options.maxBytes) || 2 * 1024 * 1024);
+  const reader = upstream.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await readWithIdleTimeout(reader, idleTimeoutMs);
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        throw Object.assign(new Error('媒体清单内容异常'), {
+          code: 'STREAM_MANIFEST_TOO_LARGE',
+          statusCode: 502
+        });
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, bytes).toString('utf8');
+  } catch (error) {
+    reader.cancel().catch(() => {});
+    throw error;
+  }
+};
+
+export const pipeWebResponse = async (upstream, response, options = {}) => {
   response.statusCode = upstream.status;
   copyProxyHeaders(upstream, response);
   if (!upstream.body) {
     response.end();
-    return;
+    return { bytes: 0, durationMs: 0 };
   }
+
+  const idleTimeoutMs = Math.max(1, Number(options.idleTimeoutMs) || DEFAULT_PROXY_IDLE_TIMEOUT_MS);
+  const startedAt = Date.now();
   const reader = upstream.body.getReader();
+  let bytes = 0;
+  let downstreamClosed = false;
+  const handleClose = () => {
+    if (response.writableEnded) return;
+    downstreamClosed = true;
+    reader.cancel(createProxyAbortError('客户端已断开')).catch(() => {});
+  };
+  response.once?.('close', handleClose);
+
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithIdleTimeout(reader, idleTimeoutMs);
       if (done) break;
+      if (downstreamClosed) break;
+      bytes += value.byteLength;
       if (!response.write(Buffer.from(value))) {
-        await new Promise(resolve => response.once('drain', resolve));
+        await waitForDrain(response);
       }
     }
-    response.end();
+    if (!downstreamClosed && !response.writableEnded) response.end();
+    return { bytes, durationMs: Date.now() - startedAt };
   } catch (error) {
     reader.cancel().catch(() => {});
-    if (!response.destroyed) response.destroy(error);
+    if (!downstreamClosed && !response.destroyed) response.destroy(error);
+    throw error;
+  } finally {
+    response.off?.('close', handleClose);
   }
 };

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readRequestBody, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
+import { readRequestBody, readWebResponseText, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
 import { AuthService } from './auth.js';
 import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, QuarkCredentialStore } from './storage.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
@@ -152,21 +152,51 @@ const isManifestResponse = (upstream, upstreamUrl, forceHls = false) => {
   return forceHls || /mpegurl|m3u8/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(upstreamUrl);
 };
 
-const proxyUpstream = async ({ request, response, gateway, session, upstreamUrl, forceHls = false, requestProfile = 'web', requestCookie = '' }) => {
-  const upstream = await gateway.fetchMedia(upstreamUrl, request.headers.range, requestProfile, requestCookie);
-  if (isManifestResponse(upstream, upstreamUrl, forceHls) && upstream.ok) {
-    const manifest = await upstream.text();
-    const rewritten = rewriteHlsManifest(manifest, upstreamUrl, session, gateway, forwardedPrefix(request), requestProfile, requestCookie);
-    response.statusCode = upstream.status;
-    response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-    response.setHeader('Cache-Control', 'no-store');
-    response.end(rewritten);
-    return;
-  }
-  await pipeWebResponse(upstream, response);
+const createProxyRequestController = (request, response) => {
+  const controller = new AbortController();
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+  const handleResponseClose = () => {
+    if (!response.writableEnded) abort();
+  };
+  request.once?.('aborted', abort);
+  response.once?.('close', handleResponseClose);
+  return {
+    signal: controller.signal,
+    cleanup() {
+      request.off?.('aborted', abort);
+      response.off?.('close', handleResponseClose);
+    }
+  };
 };
 
-const fetchStreamWithRefresh = async ({ gateway, sessionId, sourceId, source, range, user }) => {
+const proxyUpstream = async ({ request, response, gateway, session, upstreamUrl, forceHls = false, requestProfile = 'web', requestCookie = '' }) => {
+  const proxyRequest = createProxyRequestController(request, response);
+  try {
+    const upstream = await gateway.fetchMedia(
+      upstreamUrl,
+      request.headers.range,
+      requestProfile,
+      requestCookie,
+      { method: request.method, signal: proxyRequest.signal }
+    );
+    if (isManifestResponse(upstream, upstreamUrl, forceHls) && upstream.ok) {
+      const manifest = await readWebResponseText(upstream);
+      const rewritten = rewriteHlsManifest(manifest, upstreamUrl, session, gateway, forwardedPrefix(request), requestProfile, requestCookie);
+      response.statusCode = upstream.status;
+      response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+      response.setHeader('Cache-Control', 'no-store');
+      response.end(rewritten);
+      return;
+    }
+    await pipeWebResponse(upstream, response);
+  } finally {
+    proxyRequest.cleanup();
+  }
+};
+
+const fetchStreamWithRefresh = async ({ gateway, sessionId, sourceId, source, range, method, signal, user }) => {
   let currentSource = source;
   let refreshed = false;
   while (true) {
@@ -175,7 +205,8 @@ const fetchStreamWithRefresh = async ({ gateway, sessionId, sourceId, source, ra
         currentSource.upstreamUrl,
         range,
         currentSource.requestProfile,
-        currentSource.requestCookie
+        currentSource.requestCookie,
+        { method, signal }
       );
       // Media nodes also use 412 when a signed playback URL has expired or its
       // signature preconditions no longer match. Refresh the source once just
@@ -487,33 +518,40 @@ export const handleApiRequest = async (request, response, context) => {
       const sessionId = decodeURIComponent(streamMatch[1]);
       const sourceId = decodeURIComponent(streamMatch[2]);
       const { session, source } = context.quarkGateway.getStreamSource(sessionId, sourceId, user);
-      const refreshed = await fetchStreamWithRefresh({
-        gateway: context.quarkGateway,
-        sessionId,
-        sourceId,
-        source,
-        range: request.headers.range,
-        user
-      });
-      const upstream = refreshed.upstream;
-      const activeSource = refreshed.source;
+      const proxyRequest = createProxyRequestController(request, response);
+      try {
+        const refreshed = await fetchStreamWithRefresh({
+          gateway: context.quarkGateway,
+          sessionId,
+          sourceId,
+          source,
+          range: request.headers.range,
+          method: request.method,
+          signal: proxyRequest.signal,
+          user
+        });
+        const upstream = refreshed.upstream;
+        const activeSource = refreshed.source;
 
-      if (isManifestResponse(upstream, activeSource.upstreamUrl, activeSource.isHls) && upstream.ok) {
-        const manifest = await upstream.text();
-        response.statusCode = upstream.status;
-        response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-        response.setHeader('Cache-Control', 'no-store');
-        response.end(rewriteHlsManifest(
-          manifest,
-          activeSource.upstreamUrl,
-          session,
-          context.quarkGateway,
-          forwardedPrefix(request),
-          activeSource.requestProfile,
-          activeSource.requestCookie
-        ));
-      } else {
-        await pipeWebResponse(upstream, response);
+        if (isManifestResponse(upstream, activeSource.upstreamUrl, activeSource.isHls) && upstream.ok) {
+          const manifest = await readWebResponseText(upstream);
+          response.statusCode = upstream.status;
+          response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+          response.setHeader('Cache-Control', 'no-store');
+          response.end(rewriteHlsManifest(
+            manifest,
+            activeSource.upstreamUrl,
+            session,
+            context.quarkGateway,
+            forwardedPrefix(request),
+            activeSource.requestProfile,
+            activeSource.requestCookie
+          ));
+        } else {
+          await pipeWebResponse(upstream, response);
+        }
+      } finally {
+        proxyRequest.cleanup();
       }
       return true;
     }

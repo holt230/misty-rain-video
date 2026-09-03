@@ -112,6 +112,8 @@ let sourceAttachSequence = 0;
 let playAttemptSequence = 0;
 let autoNextTimer: number | null = null;
 let bufferingTimer: number | null = null;
+let hlsNetworkRetryTimer: number | null = null;
+let hlsNetworkRetryCount = 0;
 let lastPlaybackPosition = 0;
 let lastPlaybackProgressAt = 0;
 let lastAudibleVolume = Math.max(0.1, Math.min(1, Number(localStorage.getItem('misty_rain_player_volume')) || 1));
@@ -249,6 +251,11 @@ const resetSoundEffectGraph = (replaceVideo = false) => {
 };
 
 const destroyPlaybackEngine = () => {
+  if (hlsNetworkRetryTimer !== null) {
+    window.clearTimeout(hlsNetworkRetryTimer);
+    hlsNetworkRetryTimer = null;
+  }
+  hlsNetworkRetryCount = 0;
   hlsRef.value?.destroy();
   hlsRef.value = null;
   detectedAudioTracks.value = [];
@@ -561,10 +568,26 @@ const attachSource = async (
           channels: ''
         }));
       });
+      hls.on(HlsRuntime.Events.FRAG_LOADED, () => {
+        hlsNetworkRetryCount = 0;
+      });
       hls.on(HlsRuntime.Events.ERROR, (_event, data) => {
         if (!data.fatal || attachSequence !== sourceAttachSequence) return;
         if (data.type === HlsRuntime.ErrorTypes.NETWORK_ERROR) {
-          hls.startLoad();
+          if (hlsNetworkRetryTimer !== null) return;
+          if (hlsNetworkRetryCount < 3) {
+            const retryDelays = [600, 1_500, 3_000];
+            const retryDelay = retryDelays[hlsNetworkRetryCount++] ?? 3_000;
+            hlsNetworkRetryTimer = window.setTimeout(() => {
+              hlsNetworkRetryTimer = null;
+              if (attachSequence === sourceAttachSequence && hlsRef.value === hls) hls.startLoad();
+            }, retryDelay);
+            return;
+          }
+          playbackStarting.value = false;
+          errorMessage.value = '视频网络持续不稳定，请刷新当前剧集重试';
+          phase.value = 'error';
+          announce(errorMessage.value);
           return;
         }
         if (data.type === HlsRuntime.ErrorTypes.MEDIA_ERROR) {
