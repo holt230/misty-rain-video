@@ -2,6 +2,7 @@ import { ref, computed, onMounted, onUnmounted, watch, type Ref } from 'vue';
 import type { MediaItem, CategoryType, LibraryUpdateStatus } from '../types/media';
 import { MediaStore } from '../services/mediaStore';
 import { useToast } from './useToast';
+import { getLibrarySaveFeedback } from '../services/libraryFeedback';
 
 export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const toast = useToast();
@@ -9,6 +10,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const allMediaList = ref<MediaItem[]>([]);
   const libraryUpdates = ref<Record<string, LibraryUpdateStatus>>({});
   const isLoading = ref(false);
+  const loadError = ref('');
   const pollingIntervalMs = 90_000;
   let timer: ReturnType<typeof setInterval> | null = null;
   let mounted = false;
@@ -29,7 +31,9 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
       if (!silent) isLoading.value = true;
       const data = await MediaStore.getAllMedia();
       allMediaList.value = data;
+      loadError.value = '';
     } catch (err) {
+      loadError.value = '片库读取失败，请检查网络或片库认证后重试。';
       console.warn('[useMediaList] 刷新失败:', err);
     } finally {
       if (!silent) isLoading.value = false;
@@ -72,12 +76,14 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     try {
       toast.show(item.quarkFid
         ? `正在验证《${item.title}》的新片源...`
+        : item.title === '待识别片名' ? '正在验证分享链接并添加到片库…'
         : `正在转存《${item.title}》到云端片库...`, '↻', 2200);
       const result = await MediaStore.saveMedia(item);
       allMediaList.value = result.items;
+      loadError.value = '';
       toast.show(result.message, '✓', 3200);
     } catch (error) {
-      toast.show(error instanceof Error ? error.message : '转存失败', '!', 3500);
+      toast.show(getLibrarySaveFeedback(error).title, '!', 3500);
       throw error;
     }
   };
@@ -103,6 +109,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
       currentCategory.value = category;
     } catch (error) {
       toast.show(error instanceof Error ? error.message : '分类更新失败', '!', 3000);
+      throw error;
     }
   };
 
@@ -133,6 +140,8 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     stopPolling();
     if (!isEnabled()) {
       allMediaList.value = [];
+      loadError.value = '';
+      libraryUpdates.value = {};
       return;
     }
     if (isPaused() || !isDocumentVisible()) return;
@@ -180,6 +189,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     categoryCounts,
     categoryNames,
     isLoading,
+    loadError,
     refreshList,
     setLibraryUpdates,
     saveMedia,

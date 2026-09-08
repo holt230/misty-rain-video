@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ChevronDown, Ellipsis, Play, X } from '@lucide/vue';
+import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem } from '../../types/media';
 
 defineProps<{ media: MediaItem }>();
@@ -29,7 +30,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
       @click="emit('click-card', media)"
     >
       <span class="poster-viewport">
-        <img :src="media.poster" alt="" class="poster-image" loading="lazy" decoding="async" />
+<MediaPoster :src="media.poster" alt="" class="poster-image" loading="lazy" decoding="async" />
         <span class="poster-vignette" aria-hidden="true"></span>
         <span class="quality-tag">{{ media.tag || media.quarkQuality || '高清' }}</span>
 
@@ -91,189 +92,25 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 </template>
 
 <style scoped>
-.media-card {
-  position: relative;
-  min-width: 0;
-  padding: 5px 5px 10px;
-  border: 1px solid rgb(239 241 255 / 0.075);
-  border-radius: 18px;
-  background: rgb(237 240 255 / 0.025);
-  box-shadow: inset 0 1px rgb(255 255 255 / 0.035), 0 12px 28px rgb(0 0 0 / 0.16);
-  user-select: none;
-  transition: transform 220ms ease, border-color 220ms ease, background 220ms ease, box-shadow 220ms ease;
-}
-
-.media-card:hover {
-  border-color: rgb(var(--accent-rgb) / 0.18);
-  background: rgb(237 240 255 / 0.045);
-  box-shadow: 0 18px 38px rgb(0 0 0 / 0.28), 0 0 28px rgb(var(--accent-rgb) / 0.06);
-  transform: translateY(-3px);
-}
-
-.card-play-target {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  flex-direction: column;
-  gap: 9px;
-  padding: 0;
-  border: 0;
-  color: inherit;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.poster-viewport {
-  position: relative;
-  display: block;
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  overflow: hidden;
-  border-radius: 14px;
-  background: var(--surface-2);
-}
-
-.poster-image { width: 100%; height: 100%; object-fit: cover; transition: transform 360ms ease, filter 360ms ease; }
-.media-card:hover .poster-image { filter: saturate(1.06) brightness(1.02); transform: scale(1.035); }
-.poster-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgb(4 5 10 / .08), transparent 48%, rgb(4 5 10 / .86) 100%); }
-
-.quality-tag,
-.status-badge,
-.category-trigger,
-.card-action {
-  border: 1px solid rgb(239 241 255 / 0.12);
-  color: rgb(250 250 255 / 0.92);
-  background: rgb(9 10 16 / 0.72);
-  box-shadow: inset 0 1px rgb(255 255 255 / 0.055);
-  backdrop-filter: blur(14px) saturate(145%);
-  -webkit-backdrop-filter: blur(14px) saturate(145%);
-}
-
-.quality-tag {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2;
-  max-width: calc(100% - 54px);
-  overflow: hidden;
-  padding: 3px 8px;
-  border-radius: 9px;
-  font-size: 0.64rem;
-  font-weight: 680;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-badge {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  z-index: 2;
-  max-width: calc(100% - 16px);
-  overflow: hidden;
-  padding: 3px 8px;
-  border-radius: 9px;
-  color: var(--text-secondary);
-  font-size: 0.65rem;
-  font-weight: 580;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.status-badge.has-update {
-  border-color: rgb(var(--accent-rgb) / 0.26);
-  color: var(--liquid-accent);
-  background: rgb(27 32 57 / 0.82);
-  box-shadow: 0 0 18px rgb(var(--accent-rgb) / 0.10);
-}
-
-.card-caption { display: grid; min-width: 0; gap: 1px; padding: 0 5px; }
-.media-title { overflow: hidden; color: var(--text-primary); font-size: 0.91rem; font-weight: 650; line-height: 1.3; letter-spacing: -0.015em; text-overflow: ellipsis; white-space: nowrap; }
-.media-subtitle { color: var(--text-quaternary); font-size: 0.65rem; }
-
-.hover-play { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; opacity: 0; background: rgb(4 5 10 / 0.30); transition: opacity 180ms ease; }
-.media-card:hover .hover-play { opacity: 1; }
-.play-disk { display: grid; width: 50px; height: 50px; place-items: center; border-radius: 50%; color: var(--accent-ink); background: var(--liquid-accent); box-shadow: 0 10px 28px rgb(0 0 0 / .42), 0 0 24px var(--liquid-accent-glow); }
-.play-disk svg { width: 21px; height: 21px; }
-
-.category-trigger {
-  position: absolute;
-  top: 13px;
-  right: 13px;
-  z-index: 5;
-  display: inline-flex;
-  min-height: 27px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border-radius: 9px;
-  font-size: 0.66rem;
-  cursor: pointer;
-}
-.category-trigger svg { width: 13px; height: 13px; }
-
-.hover-actions { position: absolute; top: 47px; right: 13px; z-index: 5; display: flex; gap: 5px; opacity: 0; transition: opacity 180ms ease; }
-.media-card:hover .hover-actions { opacity: 1; }
-.card-action { display: grid; min-height: 32px; place-items: center; padding: 0 10px; border-radius: 10px; font-size: 0.67rem; cursor: pointer; }
-.card-action.danger { width: 32px; padding: 0; color: #ff938c; }
-.card-action svg { width: 13px; height: 13px; }
-.more-trigger { display: none; }
-
-.card-play-target:focus-visible { outline: 2px solid var(--liquid-accent); outline-offset: 3px; border-radius: 14px; }
-
-@media (hover: none), (max-width: 640px) {
-  .media-card {
-    padding: 0 0 5px;
-    border: 0;
-    border-radius: 14px;
-    background: transparent;
-    box-shadow: none;
-  }
-  .media-card:hover { transform: none; }
-  .media-card:hover .poster-image { filter: none; transform: none; }
-  .poster-viewport {
-    border: 1px solid rgb(239 241 255 / 0.075);
-    border-radius: 13px;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
-  }
-  .hover-play,
-  .category-trigger,
-  .hover-actions { display: none; }
-
-  .more-trigger {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    z-index: 5;
-    display: grid;
-    width: 44px;
-    height: 44px;
-    place-items: center;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    color: rgb(250 250 255 / 0.9);
-    background: transparent;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .more-trigger::before { content: ''; position: absolute; inset: 6px; z-index: -1; border: 1px solid rgb(239 241 255 / 0.12); border-radius: 50%; background: rgb(9 10 16 / 0.68); box-shadow: inset 0 1px rgb(255 255 255 / .06), 0 5px 15px rgb(0 0 0 / .28); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-  .more-trigger svg { width: 16px; height: 16px; fill: currentColor; }
-
-  .quality-tag { top: 7px; left: 7px; padding: 2px 6px; font-size: 0.59rem; }
-  .status-badge { right: 7px; bottom: 7px; left: 7px; max-width: none; padding: 2px 6px; font-size: 0.59rem; }
-  .card-play-target { gap: 8px; }
-  .card-caption { padding: 0 2px; }
-  .media-title { font-size: 0.86rem; }
-  .media-subtitle { font-size: 0.61rem; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .media-card,
-  .poster-image,
-  .hover-play,
-  .hover-actions { transition: none; }
-}
+.media-card { position: relative; min-width: 0; }
+.card-play-target { display: flex; width: 100%; min-width: 0; flex-direction: column; gap: 11px; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; border-radius: 23px; }
+.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border: 1px solid rgb(255 255 255 / .95); border-radius: 22px; background: linear-gradient(135deg, #dae7f8, #c6d5ec); box-shadow: 0 10px 22px rgb(57 78 119 / .16), inset 0 1px #fff; }
+.poster-image { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
+.poster-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgb(12 27 51 / .14), transparent 40%, rgb(12 27 51 / .57)); }
+.quality-tag { position: absolute; top: 10px; left: 10px; max-width: calc(100% - 64px); overflow: hidden; padding: 4px 8px; border: 1px solid rgb(255 255 255 / .4); border-radius: 10px; color: #fff; background: rgb(23 41 65 / .65); font-size: .62rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.status-badge { position: absolute; right: 10px; bottom: 12px; left: 12px; overflow: hidden; color: #fff; text-shadow: 0 1px 5px rgb(0 0 0 / .55); font-size: .73rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.status-badge.has-update { right: auto; padding: 4px 8px; border: 1px solid rgb(255 255 255 / .7); border-radius: 10px; color: #fff; background: #2c60cf; text-shadow: none; }
+.card-caption { display: grid; min-width: 0; width: 100%; gap: 3px; padding: 0 3px; }
+.media-title { display: block; overflow: hidden; color: #22314a; font-size: .95rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
+.media-subtitle { color: var(--text-tertiary); font-size: .73rem; }
+.more-trigger { position: absolute; top: 6px; right: 6px; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: #fff; background: transparent; }
+.more-trigger::before { content: ''; position: absolute; inset: 6px; z-index: 0; border: 1px solid rgb(255 255 255 / .56); border-radius: 50%; background: rgb(27 43 69 / .58); }
+.more-trigger svg { position: relative; width: 19px; height: 19px; }
+.category-trigger, .hover-actions { display: none; }
+.hover-play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .2s; }
+.play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgb(255 255 255 / .85); border-radius: 50%; color: #fff; background: rgb(255 255 255 / .3); backdrop-filter: blur(10px); }
+.play-disk svg { width: 22px; height: 22px; margin-left: 2px; }
+@media (hover: hover) { .card-play-target:hover .poster-image { transform: scale(1.035); } .card-play-target:hover .hover-play { opacity: 1; } }
+.card-play-target:focus-visible .hover-play { opacity: 1; }
+@media (max-width: 640px) { .media-title { font-size: .87rem; } .poster-viewport { border-radius: 20px; } .card-play-target { gap: 9px; } }
 </style>

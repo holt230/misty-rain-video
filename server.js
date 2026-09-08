@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { createApiContext, handleApiRequest } from './server/api.js';
 import { startBundledResourceSearch } from './server/bundledResourceSearch.js';
 import { handleMobileConfigRequest } from './server/mobileConfig.js';
+import { handleBasePath, normalizeBasePath } from './server/basePath.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const port = Number(process.env.PORT) || 5173;
 const host = process.env.HOST || '0.0.0.0';
+const basePath = normalizeBasePath(process.env.APP_BASE_PATH);
 const dataDir = path.resolve(__dirname, 'data');
 const distDir = path.resolve(__dirname, 'dist');
 const bundledResourceSearch = await startBundledResourceSearch({ appDir: __dirname, dataDir });
@@ -58,6 +60,7 @@ const resolveStaticFile = pathname => {
 
 const server = http.createServer(async (request, response) => {
   try {
+    if (handleBasePath(request, response, basePath)) return;
     if (handleMobileConfigRequest(request, response, { distDir })) return;
     if (await handleApiRequest(request, response, apiContext)) return;
     setPageSecurityHeaders(response);

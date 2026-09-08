@@ -127,6 +127,58 @@ APP_PUBLIC_URL=https://example.com/misty-rain/
 
 ## 本地开发
 
+### 本机运行与临时外网访问
+
+本地部署使用 Node.js，绑定 `127.0.0.1:5200`，通过 Cloudflare Quick Tunnel 提供临时 HTTPS 地址。适合先验证本人和家人的访问线路；临时服务没有可用性保证，重启后地址会变化，不作为长期视频分发方案。
+
+首次准备需要安装依赖、构建前端，并将对应操作系统和架构的官方 `cloudflared` 可执行文件放入 `.local-runtime/cloudflared`。当前 Apple Silicon Mac 可执行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+mkdir -p .local-runtime
+curl -fL https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-darwin-arm64.tgz -o .local-runtime/cloudflared.tgz
+tar -xzf .local-runtime/cloudflared.tgz -C .local-runtime
+./start-local.sh start
+```
+
+日常管理不会重复构建：
+
+```bash
+./start-local.sh start   # 后台启动；已运行时显示现有地址
+./start-local.sh status  # 查看本地和临时外网地址
+./start-local.sh stop   # 停止本地服务和穿透进程
+```
+
+环境配置和运行日志统一保存在项目的 `.local-runtime/` 目录。首次启动自动在 `.local-runtime/.env.local` 创建 `admin` 账号和随机密码，文件权限为仅当前用户可读写；修改密码后停止再启动。登录后仍需在“我的 → 播放认证”配置网盘 Cookie。本地 `data/` 与服务器数据独立，不会自动迁移。原生部署没有 Docker 镜像中的内置检索引擎，检索依赖远端备用源。
+
+运行日志位于 `.local-runtime/service.log`，临时地址位于 `.local-runtime/public-url.txt`。整个 `.local-runtime/` 目录均不提交到 Git，也不进入 Docker 构建上下文。脚本不配置开机自启或防休眠；电脑需保持开机联网且不休眠。当前脚本面向 macOS/Linux，不支持 Windows 原生运行。
+
+### 固定域名隧道
+
+支持 Cloudflare 控制台管理的固定隧道。先完成域名接入和 Tunnel 路由配置，将隧道令牌保存到 `.local-runtime/tunnel-token.txt`（仅保存令牌本身，权限设为 `600`），然后在 `.local-runtime/.env.local` 中增加：
+
+```env
+CLOUDFLARE_TUNNEL_MODE=named
+APP_PUBLIC_URL=https://linlunji.cn/misty/
+APP_BASE_PATH=/misty/
+```
+
+隧道路由的源服务填写 `http://127.0.0.1:5200`，保留 `/misty` 请求路径；应用会处理此前缀并将 Cookie 限定在 `/misty/`。同一域名下的其他网站路径需要单独保留原有路由，不能直接覆盖整个域名的现有服务。
+
+部署路径变化后需构建一次，再停止并启动本地服务：
+
+```bash
+APP_BASE_PATH=/misty/ pnpm build
+./start-local.sh stop
+# 等待本地服务停止后启动
+./start-local.sh start
+```
+
+普通重启不会重新生成域名或隧道。固定隧道同样受 Cloudflare 视频分发政策约束。恢复临时隧道时将 `CLOUDFLARE_TUNNEL_MODE` 改为 `quick`，并移除 `APP_PUBLIC_URL`；可以保留当前子路径，若改回根路径则需同步重新构建。
+
+### 开发模式
+
 需要 Node.js 22 和 pnpm 10：
 
 ```bash

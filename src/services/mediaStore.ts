@@ -1,6 +1,7 @@
 import type { MediaItem, CategoryType, LibraryUpdateApplySummary, LibraryUpdateSummary } from '../types/media';
 import { apiUrl, withAppBase } from './appUrl';
 import { authFetch } from './authService';
+import { LibrarySaveError } from './libraryFeedback';
 
 const API_URL = apiUrl('/api/media-cards');
 
@@ -58,7 +59,7 @@ export class MediaStore {
     });
     const json = await resp.json().catch(() => ({}));
     if (!resp.ok || json.code !== 0 || !Array.isArray(json.data)) {
-      throw new Error(json.message || '转存到云端片库失败');
+      throw new LibrarySaveError(json.message || '转存到云端片库失败', String(json.code || 'SAVE_FAILED'));
     }
     return {
       items: hydrateMedia(json.data),

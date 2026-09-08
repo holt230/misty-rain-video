@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { ref } from 'vue';
+import { useDialog } from '../../composables/useDialog';
 import { ChevronRight, Download, ListFilter, RefreshCw, Trash2, X } from '@lucide/vue';
+import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem } from '../../types/media';
 
 const props = defineProps<{
@@ -16,12 +18,8 @@ const emit = defineEmits<{
   (e: 'delete'): void;
 }>();
 
-const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && props.open) emit('cancel');
-};
-
-onMounted(() => window.addEventListener('keydown', onKeydown));
-onUnmounted(() => window.removeEventListener('keydown', onKeydown));
+const dialogRef = ref<HTMLElement | null>(null);
+useDialog(dialogRef, () => props.open, () => emit('cancel'));
 </script>
 
 <template>
@@ -29,6 +27,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
     <div
       v-if="open && media"
       class="action-backdrop"
+      ref="dialogRef"
       role="dialog"
       aria-modal="true"
       aria-labelledby="media-action-title"
@@ -38,7 +37,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
         <div class="drag-handle" aria-hidden="true"></div>
 
         <header class="media-summary">
-          <img :src="media.poster" :alt="media.title" class="summary-poster" />
+<MediaPoster :src="media.poster" :alt="media.title" class="summary-poster" />
           <div class="summary-copy">
             <span>影片操作</span>
             <h2 id="media-action-title">{{ media.title }}</h2>
@@ -101,175 +100,27 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 </template>
 
 <style scoped>
-.action-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background: rgba(3, 6, 13, 0.76);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-.action-sheet {
-  width: min(440px, 100%);
-  padding: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 24px;
-  color: #fff;
-  background: rgba(18, 23, 36, 0.88);
-  backdrop-filter: blur(38px) saturate(185%);
-  -webkit-backdrop-filter: blur(38px) saturate(185%);
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.58), inset 0 1px 1px rgba(255, 255, 255, 0.18);
-}
-
+.action-backdrop { position: fixed; inset: 0; z-index: 1700; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.action-sheet { width: min(440px, 100%); padding: 24px; border-radius: 30px; }
 .drag-handle { display: none; }
-
-.media-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.summary-poster {
-  flex: 0 0 auto;
-  width: 48px;
-  height: 64px;
-  border-radius: 10px;
-  object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-}
-
+.media-summary { display: flex; align-items: center; gap: 13px; margin-bottom: 22px; }
+.summary-poster { width: 48px; height: 66px; flex-shrink: 0; object-fit: cover; border: 1px solid white; border-radius: 12px; box-shadow: var(--glass-shadow-sm); }
 .summary-copy { min-width: 0; flex: 1; }
-.summary-copy span { color: var(--text-tertiary); font-size: 0.76rem; }
-.summary-copy h2 {
-  margin: 4px 0 0;
-  overflow: hidden;
-  color: #fff;
-  font-size: 1.05rem;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.close-button {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 50%;
-  color: rgba(255, 255, 255, 0.75);
-  background: rgba(255, 255, 255, 0.06);
-  cursor: pointer;
-}
-.close-button svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 2; }
-
-.action-list {
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.action-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 68px;
-  padding: 10px 13px;
-  border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: #fff;
-  text-align: left;
-  background: transparent;
-  cursor: pointer;
-  touch-action: manipulation;
-}
+.summary-copy span { color: var(--text-tertiary); font-size: .74rem; }
+.summary-copy h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.12rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }
+.close-button { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
+.close-button svg { width: 19px; height: 19px; }
+.action-list { border: 1px solid; border-radius: 23px; overflow: hidden; }
+.action-item { display: flex; width: 100%; min-height: 76px; align-items: center; gap: 13px; padding: 12px 15px; border: 0; border-bottom: 1px solid rgb(90 116 159 / .10); color: var(--text-primary); background: transparent; text-align: left; }
 .action-item:last-child { border-bottom: 0; }
-.action-item:hover { background: rgba(255, 255, 255, 0.06); }
-
-.action-icon {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  color: var(--liquid-accent);
-  background: var(--liquid-accent-subtle);
-}
-.action-icon svg,
-.chevron { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
-.action-icon svg { width: 21px; }
-.chevron { flex: 0 0 auto; width: 18px; color: var(--text-tertiary); }
-
-.action-copy { display: grid; flex: 1; min-width: 0; gap: 3px; }
-.action-copy strong { font-size: 0.94rem; font-weight: 650; }
-.action-copy small { color: var(--text-tertiary); font-size: 0.75rem; }
-.action-item.danger .action-icon { color: #ff8c82; background: rgba(239, 68, 68, 0.12); }
-.action-item.update .action-icon { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
-.action-item.danger strong { color: #ff9a91; }
-
-.cancel-button {
-  width: 100%;
-  min-height: 50px;
-  margin-top: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  color: #fff;
-  font-size: 0.94rem;
-  font-weight: 650;
-  background: rgba(255, 255, 255, 0.07);
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-@media (max-width: 640px) {
-  .action-backdrop { align-items: flex-end; padding: 0; }
-  .action-sheet {
-    width: 100%;
-    padding: 10px calc(14px + var(--safe-area-right)) calc(14px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left));
-    border-radius: 24px 24px 0 0;
-    animation: sheet-in 0.24s ease-out;
-  }
-  .drag-handle {
-    display: block;
-    width: 40px;
-    height: 5px;
-    margin: 0 auto 12px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.24);
-  }
-  .media-summary { margin-bottom: 12px; }
-  .close-button { display: none; }
-  .action-item { min-height: 64px; }
-  .cancel-button { min-height: 52px; }
-}
-
-@media (max-width: 640px) {
-  .action-sheet { padding-top: 8px; }
-  .drag-handle { margin-bottom: 10px; }
-  .media-summary { margin-bottom: 10px; }
-  .summary-poster { width: 44px; height: 60px; }
-  .action-list { border-radius: 15px; }
-  .action-item { min-height: 60px; padding: 8px 10px; }
-  .action-icon { width: 36px; height: 36px; border-radius: 11px; }
-  .cancel-button { min-height: 48px; margin-top: 10px; border-radius: 14px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .action-sheet { animation: none !important; }
-}
-
-@keyframes sheet-in {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
+.action-icon { display: grid; width: 40px; height: 40px; place-items: center; flex-shrink: 0; border: 1px solid #fff; border-radius: 14px; color: var(--liquid-accent); background: #e7eeff; }
+.action-icon svg { width: 21px; height: 21px; }
+.action-copy { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.action-copy strong { font-size: .92rem; font-weight: 650; }
+.action-copy small { color: var(--text-tertiary); font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
+.chevron { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-tertiary); }
+.danger .action-icon { color: var(--danger); background: #ffe9ed; }
+.danger strong { color: var(--danger); }
+.cancel-button { width: 100%; min-height: 50px; margin-top: 16px; border: 1px solid; border-radius: 26px; color: var(--text-secondary); font-size: .92rem; font-weight: 600; }
+@media (max-width: 640px) { .action-backdrop { align-items: flex-end; padding: 0; } .action-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 22px; border-radius: 10px; } .action-item { min-height: 74px; } }
 </style>

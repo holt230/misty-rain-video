@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { RefreshCw } from '@lucide/vue';
+import { Plus, RefreshCw } from '@lucide/vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
 import AccountPage from './components/auth/AccountPage.vue';
 import Navbar from './components/layout/Navbar.vue';
@@ -17,6 +17,7 @@ import { useAuth } from './composables/useAuth';
 import { useToast } from './composables/useToast';
 import { usePlaybackHistory } from './composables/usePlaybackHistory';
 import { MediaStore } from './services/mediaStore';
+import { getLibrarySaveFeedback, type LibrarySaveFeedback } from './services/libraryFeedback';
 import type { MediaItem, CategoryType, PlaybackHistoryEntry } from './types/media';
 import type { ResourceItem } from './types/search';
 
@@ -35,7 +36,7 @@ const QuarkEmbedPlayerModal = defineAsyncComponent({
 
 const { user, authenticated, checking, loggingIn, errorMessage, login, logout } = useAuth();
 const toast = useToast();
-const { history, updateLocalHistory, removeHistory } = usePlaybackHistory(authenticated);
+const { history, historyError, loadingHistory, deletingHistoryId, refreshHistory, updateLocalHistory, removeHistory } = usePlaybackHistory(authenticated);
 const isEmbedPlayerOpen = ref(false);
 
 const {
@@ -44,6 +45,7 @@ const {
   enrichedMediaList,
   allMediaList,
   isLoading,
+  loadError,
   categoryCounts,
   categoryNames,
   saveMedia,
@@ -75,6 +77,8 @@ const categoryMedia = ref<MediaItem | null>(null);
 const isSavingCategory = ref(false);
 const isSavingTransfer = ref(false);
 const savingResourceId = ref('');
+const saveError = ref<LibrarySaveFeedback | null>(null);
+const failedResourceId = ref('');
 const actionMedia = ref<MediaItem | null>(null);
 type MobileTab = MobileDockTab | 'search';
 const mobileTab = ref<MobileTab>('library');
@@ -85,7 +89,7 @@ let autoCheckedUsername = '';
 type MobileHistoryLayer = 'library' | 'search' | 'account' | 'player' | 'transfer' | 'delete' | 'category' | 'actions';
 let handlingPopState = false;
 
-const mobileHistoryEnabled = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches;
+const mobileHistoryEnabled = () => typeof window !== 'undefined' && (window.matchMedia('(max-width: 640px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 const currentHistoryLayer = () => window.history.state?.mistyRainLayer as MobileHistoryLayer | undefined;
 
 const setMobileHistoryLayer = (layer: MobileHistoryLayer, replace = false) => {
@@ -104,6 +108,7 @@ const requestLayerClose = (layer: MobileHistoryLayer, closeDirectly: () => void)
 };
 
 const closeCurrentMobileLayer = () => {
+  if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value) return;
   if (isEmbedPlayerOpen.value) isEmbedPlayerOpen.value = false;
   else if (isTransferOpen.value) closeTransferModal();
   else if (deletingMedia.value) deletingMedia.value = null;
@@ -113,6 +118,10 @@ const closeCurrentMobileLayer = () => {
 };
 
 const handleMobilePopState = () => {
+  if (isSavingTransfer.value || isDeletingMedia.value || isSavingCategory.value) {
+    setMobileHistoryLayer(isSavingTransfer.value && isTransferOpen.value ? 'transfer' : isDeletingMedia.value ? 'delete' : isSavingCategory.value ? 'category' : 'library');
+    return;
+  }
   handlingPopState = true;
   closeCurrentMobileLayer();
   nextTick(() => { handlingPopState = false; });
@@ -139,6 +148,8 @@ watch(user, () => {
   selectedHistoryEntry.value = null;
   isSavingTransfer.value = false;
   savingResourceId.value = '';
+  saveError.value = null;
+  failedResourceId.value = '';
   autoCheckedUsername = '';
   setMobileHistoryLayer('library', true);
 });
@@ -200,6 +211,7 @@ watch(
  * 调起影院播放窗
  */
 const handleSelectMedia = (media: MediaItem) => {
+  if (isSavingTransfer.value) { toast.show('正在添加影片，请稍候', '↻'); return; }
   embedPlayingMedia.value = media;
   selectedHistoryEntry.value = history.value.find(entry =>
     (media.quarkFid && entry.media.quarkFid === media.quarkFid) || entry.media.id === media.id
@@ -220,11 +232,15 @@ const closeEmbedPlayer = () => {
 };
 
 const closeTransferPanel = () => {
+  if (isSavingTransfer.value) return;
   requestLayerClose('transfer', closeTransferModal);
 };
 
+watch(isTransferOpen, () => { saveError.value = null; failedResourceId.value = ''; });
+
 // 换源
 const handleReSearch = (media: MediaItem) => {
+  if (isSavingTransfer.value) return;
   const replaceHistory = currentHistoryLayer() === 'player' || currentHistoryLayer() === 'actions';
   isEmbedPlayerOpen.value = false;
   openTransferModal(media);
@@ -257,7 +273,7 @@ const handleSearchMedia = (kw: string) => {
 
 // 保存片单
 const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRes?: ResourceItem) => {
-  if (isSavingTransfer.value) return;
+  if (isSavingTransfer.value) return false;
   const cat = targetCat || media.category || currentCategory.value;
   const cardToSave: MediaItem = {
     ...media,
@@ -269,12 +285,18 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
   };
   isSavingTransfer.value = true;
   savingResourceId.value = bestRes?.id || 'direct';
+  saveError.value = null;
+  failedResourceId.value = '';
   try {
     await saveMedia(cardToSave);
+    currentCategory.value = cat;
     mobileTab.value = 'library';
-    requestLayerClose('transfer', closeTransferModal);
-  } catch {
-    // 错误已由 useMediaList 在当前系统内提示，保留面板供用户换源重试。
+    if (isTransferOpen.value) requestLayerClose('transfer', closeTransferModal);
+    return true;
+  } catch (error) {
+    saveError.value = getLibrarySaveFeedback(error);
+    failedResourceId.value = bestRes?.id || 'direct';
+    return false;
   } finally {
     isSavingTransfer.value = false;
     savingResourceId.value = '';
@@ -288,6 +310,7 @@ const handleDeleteCard = (media: MediaItem) => {
 };
 
 const openMediaActions = (media: MediaItem) => {
+  if (isSavingTransfer.value) { toast.show('正在添加影片，请稍候', '↻'); return; }
   actionMedia.value = media;
   setMobileHistoryLayer('actions');
 };
@@ -345,6 +368,8 @@ const confirmDeleteMedia = async () => {
   try {
     await removeMedia(deletingMedia.value);
     requestLayerClose('delete', () => { deletingMedia.value = null; });
+  } catch {
+    // 保留确认窗供重试，错误由片库操作提示。
   } finally {
     isDeletingMedia.value = false;
   }
@@ -360,6 +385,8 @@ const selectMediaCategory = async (category: CategoryType) => {
   try {
     await updateMediaCategory(categoryMedia.value, category);
     requestLayerClose('category', () => { categoryMedia.value = null; });
+  } catch {
+    // 保存失败时保留原分类和选择面板。
   } finally {
     isSavingCategory.value = false;
   }
@@ -368,8 +395,9 @@ const selectMediaCategory = async (category: CategoryType) => {
 const handlePlaybackAuthUpdated = () => undefined;
 
 const openPlaybackAuth = async () => {
-  const replaceHistory = currentHistoryLayer() === 'player';
+  const replaceHistory = currentHistoryLayer() === 'player' || currentHistoryLayer() === 'transfer';
   isEmbedPlayerOpen.value = false;
+  closeTransferModal();
   mobileTab.value = 'account';
   setMobileHistoryLayer('account', replaceHistory);
   await nextTick();
@@ -405,6 +433,7 @@ const showMobileLibrary = () => {
 };
 
 const showMobileAccount = () => {
+  if (isSavingTransfer.value) return;
   const replaceHistory = currentHistoryLayer() === 'search';
   mobileTab.value = 'account';
   setMobileHistoryLayer('account', replaceHistory);
@@ -444,14 +473,22 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       :current-category="currentCategory"
       :current-category-name="categoryNames[currentCategory]"
       :user="user"
+      :add-media="handleSaveCard"
+      :is-saving="isSavingTransfer"
+      :save-error="failedResourceId === 'direct' ? saveError : null"
       @search-media="handleSearchMedia"
       @search-blur="finishMobileSearch"
-      @save-card="handleSaveCard"
+      @open-auth-settings="openPlaybackAuth"
+      @clear-save-error="saveError = null; failedResourceId = ''"
       @open-account="showMobileAccount"
     />
 
     <!-- 核心主区域 -->
     <main v-if="mobileTab !== 'account'" class="page-container">
+    <header class="library-intro">
+      <div><p>留一点时间，给喜欢的故事</p><h1>我的片库<span>{{ !allMediaList.length && isLoading ? '正在读取…' : !allMediaList.length && loadError ? '等待重新加载' : `${allMediaList.length} 部收藏` }}</span></h1></div>
+      <button type="button" class="add-library-button" aria-label="添加影片" @click="focusMobileSearch"><Plus aria-hidden="true" /></button>
+    </header>
     <!-- 分类标签控制栏 -->
     <div class="category-toolbar">
       <CategoryTabs
@@ -494,7 +531,13 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     </div>
 
     <!-- 影视卡片网格 -->
+    <div v-if="loadError" class="inline-feedback library-load-error" role="alert">
+      <strong>暂时无法读取片库</strong>
+      <p>{{ loadError }}{{ allMediaList.length ? ' 当前保留上次加载的内容。' : '' }}</p>
+      <button type="button" :disabled="isLoading" @click="refreshList()">{{ isLoading ? '正在重试…' : '重新加载片库' }}</button>
+    </div>
     <MediaGrid
+      v-if="!loadError || allMediaList.length > 0 || isLoading"
       :media-list="mediaList"
       :loading="isLoading"
       :current-category="currentCategory"
@@ -513,6 +556,10 @@ const navigateMobileTab = (tab: MobileDockTab) => {
       ref="accountPageRef"
       :user="user"
       :history="history"
+      :history-error="historyError"
+      :loading-history="loadingHistory"
+      :deleting-history-id="deletingHistoryId"
+      @retry-history="refreshHistory()"
       @auth-updated="handlePlaybackAuthUpdated"
       @play-history="continuePlayback"
       @delete-history="removeHistory"
@@ -523,6 +570,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     <MobileTabBar
       v-if="!isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia"
       :active-tab="mobileTab === 'account' ? 'account' : 'library'"
+      :disabled="isSavingTransfer"
       @navigate="navigateMobileTab"
     />
 
@@ -550,6 +598,9 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     :search-keyword="searchKeyword"
     :is-saving="isSavingTransfer"
     :saving-resource-id="savingResourceId"
+    :save-error="saveError"
+    :failed-resource-id="failedResourceId"
+    @open-auth-settings="openPlaybackAuth"
     @close="closeTransferPanel"
     @retry-search="retrySearch"
     @search="refreshResources"
@@ -589,97 +640,36 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 </template>
 
 <style scoped>
-.page-container {
-  max-width: 1240px;
-  position: relative;
-  z-index: 1;
-  margin: 0 auto;
-  padding-right: 16px;
-  padding-left: 16px;
-  padding-top: 30px;
-  padding-bottom: 112px;
-}
-
-.category-toolbar { display: flex; align-items: center; justify-content: flex-start; margin-bottom: 22px; }
-.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 76px;
-  margin-bottom: 18px;
-  padding: 12px 14px;
-  border: 1px solid rgb(239 241 255 / 0.08);
-  border-radius: 18px;
-  background:
-    radial-gradient(70% 160% at 100% 100%, rgb(var(--accent-rgb) / 0.10), transparent 66%),
-    rgb(237 240 255 / 0.025);
-  box-shadow: inset 0 1px rgb(255 255 255 / 0.045);
-}
-
-.section-heading-copy { display: grid; min-width: 0; gap: 3px; }
-.section-kicker { color: var(--liquid-accent); font-size: 0.61rem; font-weight: 760; letter-spacing: 0.12em; }
-.heading-main-line { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
-.category-heading-title { color: var(--text-primary); font-size: 1.32rem; font-weight: 730; letter-spacing: -0.035em; }
-.count-hint { color: var(--text-tertiary); font-size: 0.73rem; font-weight: 560; }
-.library-update-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
-
-.check-updates-button,
-.apply-updates-button {
-  min-height: 44px;
-  border: 1px solid rgb(239 241 255 / 0.09);
-  cursor: pointer;
-  touch-action: manipulation;
-  color: var(--text-secondary);
-  background: rgb(237 240 255 / 0.045);
-  box-shadow: inset 0 1px rgb(255 255 255 / 0.045);
-}
-
-.apply-updates-button {
-  padding: 0 14px;
-  border-radius: 12px;
-  color: var(--liquid-accent);
-  background: var(--liquid-accent-subtle);
-  font-size: 0.78rem;
-  font-weight: 650;
-}
-
+.page-container { position: relative; z-index: 1; width: 100%; max-width: 1112px; margin: 0 auto; padding: 48px 24px 80px; }
+.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
+.library-intro p { color: var(--text-tertiary); font-size: .81rem; letter-spacing: .02em; }
+.library-intro h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin-top: 5px; font-size: 2.2rem; font-weight: 780; letter-spacing: -.055em; line-height: 1.3; }
+.library-intro h1 span { color: var(--text-tertiary); font-size: .78rem; font-weight: 500; letter-spacing: 0; }
+.add-library-button { display: grid; width: 52px; height: 52px; place-items: center; flex-shrink: 0; border: 1px solid #fff; border-radius: 50%; color: var(--liquid-accent); background: linear-gradient(145deg, #fff, rgb(255 255 255 / .35)); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.add-library-button svg { width: 25px; height: 25px; stroke-width: 1.8; }
+.category-toolbar { display: flex; margin-bottom: 26px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-bottom: 18px; }
+.section-kicker { display: none; }
+.heading-main-line { display: flex; align-items: baseline; gap: 9px; }
+.category-heading-title { font-size: 1.2rem; font-weight: 720; letter-spacing: -.035em; }
+.count-hint { color: var(--text-tertiary); font-size: .74rem; }
+.library-update-actions { display: flex; align-items: center; gap: 8px; }
+.check-updates-button, .apply-updates-button { min-height: 44px; border: var(--glass-border); color: var(--liquid-accent); background: rgb(255 255 255 / .58); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .check-updates-button { position: relative; display: grid; width: 44px; place-items: center; border-radius: 50%; }
-.check-updates-button svg { width: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.check-updates-button svg { width: 18px; height: 18px; }
+.apply-updates-button { padding: 0 15px; border-radius: 23px; font-size: .79rem; font-weight: 650; }
+.update-count-dot { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; place-items: center; border: 2px solid #fff; border-radius: 20px; color: #fff; background: var(--liquid-accent); font-size: .58rem; }
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
-.check-updates-button:disabled,
-.apply-updates-button:disabled { opacity: .5; cursor: default; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
-
-.check-updates-button:hover,
-.apply-updates-button:hover { border-color: rgb(var(--accent-rgb) / 0.24); background: rgb(var(--accent-rgb) / 0.15); }
-.update-count-dot { color: var(--accent-ink); background: var(--liquid-accent); }
-
 @media (max-width: 640px) {
-  .page-container {
-    padding: 14px calc(var(--mobile-gutter) + var(--safe-area-right)) var(--mobile-content-bottom) calc(var(--mobile-gutter) + var(--safe-area-left));
-  }
-
-  .category-toolbar { margin-bottom: 14px; }
-  .section-heading {
-    min-height: 50px;
-    margin-bottom: 12px;
-    padding: 3px 2px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-  .section-kicker { display: none; }
-  .section-heading-copy { display: flex; align-items: baseline; }
-  .category-heading-title { font-size: 1.18rem; }
-  .count-hint { font-size: 0.68rem; }
-  .library-update-actions { gap: 5px; }
-  .apply-updates-button { min-height: 40px; padding: 0 11px; border-radius: 12px; font-size: 0.72rem; }
-  .check-updates-button { width: 44px; min-height: 44px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .check-updates-button.checking svg { animation: none; }
+  .page-container { padding: 23px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
+  .library-intro { margin-bottom: 23px; }
+  .library-intro p { font-size: .74rem; }
+  .library-intro h1 { font-size: 1.85rem; gap: 10px; }
+  .library-intro h1 span { font-size: .68rem; }
+  .add-library-button { width: 47px; height: 47px; }
+  .category-toolbar { margin-bottom: 20px; }
+  .section-heading { margin-bottom: 14px; }
+  .category-heading-title { font-size: 1.05rem; }
 }
 </style>

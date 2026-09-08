@@ -114,11 +114,7 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 
 export class QuarkStreamService {
   static async getConfig(): Promise<QuarkConfig> {
-    try {
-      return await request<QuarkConfig>('/api/quark/config');
-    } catch {
-      return { isConfigured: false, isAuthenticated: false };
-    }
+    return request<QuarkConfig>('/api/quark/config');
   }
 
   static async saveConfig(cookie: string): Promise<{ success: boolean; message: string; status?: QuarkConfig }> {

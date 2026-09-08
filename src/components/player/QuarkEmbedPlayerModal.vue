@@ -12,6 +12,7 @@ import {
   type QuarkPlaybackSession
 } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
+import { useDialog } from '../../composables/useDialog';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 
 const props = defineProps<{
@@ -96,7 +97,6 @@ const soundEffectMode = ref<SoundEffectMode>(
 const soundEffectAvailable = ref(!isIOSPlaybackDevice && typeof window !== 'undefined'
   && Boolean(window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext));
 let requestSequence = 0;
-let previousBodyOverflow = '';
 let audioContext: AudioContext | null = null;
 let mediaAudioSource: MediaElementAudioSourceNode | null = null;
 let dryGain: GainNode | null = null;
@@ -451,7 +451,7 @@ const handleServiceError = (error: unknown) => {
   errorMessage.value = error instanceof Error ? error.message : '播放器加载失败';
   if (serviceError?.code === 'QUARK_AUTH_REQUIRED' || serviceError?.status === 401) {
     phase.value = 'auth-required';
-    announce('播放 Cookie 已失效，可手动前往“我的”更新');
+    announce('播放认证已失效，可前往“我的”更新');
   } else {
     phase.value = 'error';
     announce(errorMessage.value);
@@ -1056,10 +1056,11 @@ const close = () => {
   emit('close');
 };
 
-const handleKeydown = (event: KeyboardEvent) => {
-  if (!props.isOpen) return;
-  if (event.key === 'Escape') close();
-};
+const dialogRef = ref<HTMLElement | null>(null);
+useDialog(dialogRef, () => props.isOpen, () => {
+  if (visualLandscapeFullscreen.value) visualLandscapeFullscreen.value = false;
+  else close();
+});
 
 watch(
   [() => props.isOpen, () => props.media?.id],
@@ -1075,17 +1076,6 @@ watch(
   { immediate: true }
 );
 
-watch(() => props.isOpen, isOpen => {
-  if (isOpen) {
-    previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    window.addEventListener('keydown', handleKeydown);
-  } else {
-    document.body.style.overflow = previousBodyOverflow;
-    window.removeEventListener('keydown', handleKeydown);
-  }
-});
-
 watch(playbackAutomation, value => {
   localStorage.setItem(playbackAutomationStorageKey, JSON.stringify(value));
 }, { deep: true });
@@ -1096,8 +1086,6 @@ onBeforeUnmount(() => {
   visualLandscapeFullscreen.value = false;
   stopVideo(true);
   resetSoundEffectGraph();
-  document.body.style.overflow = previousBodyOverflow;
-  window.removeEventListener('keydown', handleKeydown);
   window.removeEventListener('pagehide', handlePageHide);
   window.removeEventListener('pageshow', handlePageShow);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -1115,7 +1103,8 @@ defineExpose({ retry });
 <template>
   <div
     class="player-backdrop"
-    :class="{ active: isOpen }"
+    ref="dialogRef"
+    :class="{ active: isOpen, 'visual-fullscreen-active': visualLandscapeFullscreen }"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
@@ -1196,7 +1185,7 @@ defineExpose({ retry });
 
             <div v-else-if="phase === 'error' || phase === 'auth-required'" class="stage-state error-state" role="alert">
               <CircleAlert class="state-icon" aria-hidden="true" />
-              <strong>{{ phase === 'auth-required' ? '播放 Cookie 已失效' : '加载失败' }}</strong>
+              <strong>{{ phase === 'auth-required' ? '播放认证已失效' : '加载失败' }}</strong>
               <p>{{ errorMessage }}</p>
               <div class="state-actions">
                 <button v-if="phase === 'auth-required'" type="button" class="primary-button" @click="emit('open-auth-settings')">
@@ -2486,16 +2475,50 @@ defineExpose({ retry });
   .episode-number { background: transparent; }
 }
 
-@media (max-width: 820px) {
-  .video-stage.visual-landscape-fullscreen {
-    position: fixed;
-    z-index: 2400;
-    min-width: 0;
-    min-height: 0;
-    max-width: none;
-    max-height: none;
-    aspect-ratio: auto;
-    background: #000;
+/* 全屏由状态控制：iPhone 横屏宽度可能超过普通移动布局的 820px 断点。 */
+.player-backdrop.visual-fullscreen-active {
+  /* 覆盖共享弹层的 !important 毛玻璃，避免固定播放器被祖先包含或裁剪。 */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.visual-fullscreen-active .player-window,
+.visual-fullscreen-active .player-layout {
+  overflow: visible;
+}
+
+/* 明确高于 single-column 的优先级，防止电影布局用 height: 100% 覆盖视口高度。 */
+.visual-fullscreen-active .video-stage.visual-landscape-fullscreen {
+  position: fixed;
+  z-index: 2400;
+  inset: 0;
+  width: 100dvw;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  transform: none;
+  background: #000;
+}
+
+.visual-fullscreen-active .video-element {
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+}
+
+@media (orientation: portrait) {
+  .visual-fullscreen-active .video-stage.visual-landscape-fullscreen {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    width: 100dvh;
+    height: 100dvw;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center;
   }
 
   .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox {
@@ -2503,31 +2526,6 @@ defineExpose({ retry });
     right: auto;
     bottom: 0;
     left: 0;
-  }
-}
-
-@media (max-width: 820px) and (orientation: portrait) {
-  .video-stage.visual-landscape-fullscreen {
-    top: 50%;
-    left: 50%;
-    width: 100dvh;
-    height: 100dvw;
-    transform: translate(-50%, -50%) rotate(90deg);
-    transform-origin: center;
-  }
-}
-
-@media (max-width: 820px) and (orientation: landscape) {
-  .video-stage.visual-landscape-fullscreen {
-    inset: 0;
-    width: 100dvw;
-    height: 100dvh;
-    transform: none;
-  }
-
-  .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox {
-    top: 0;
-    bottom: auto;
   }
 }
 

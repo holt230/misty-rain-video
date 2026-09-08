@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { Check, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
+import { Check, ChevronDown, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
+import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
 import SkeletonCard from '../common/SkeletonCard.vue';
+import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
+import { useDialog } from '../../composables/useDialog';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -15,10 +18,13 @@ const props = defineProps<{
   searchKeyword?: string;
   isSaving?: boolean;
   savingResourceId?: string;
+  saveError?: LibrarySaveFeedback | null;
+  failedResourceId?: string;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  (e: 'open-auth-settings'): void;
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string): void;
@@ -26,6 +32,13 @@ const emit = defineEmits<{
 }>();
 
 const targetCategory = ref<CategoryType>('tv');
+const categoryExpanded = ref(false);
+const categories: Array<{ value: CategoryType; label: string }> = [
+  { value: 'tv', label: '电视剧' }, { value: 'movie', label: '电影' },
+  { value: 'variety', label: '综艺' }, { value: 'anime', label: '动漫' }
+];
+const targetCategoryName = computed(() => categories.find(category => category.value === targetCategory.value)?.label || '电视剧');
+const replacingSource = computed(() => Boolean(props.media?.quarkFid));
 type ResultFilter = 'recommended' | 'latest' | '4k' | 'complete';
 const resultFilter = ref<ResultFilter>('recommended');
 const searchQuery = ref('');
@@ -129,8 +142,9 @@ const visibleResources = computed(() => filteredResources.value.slice(0, visible
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
 const bestQuarkResource = computed(() => rankedQuarkResources.value[0]);
 
-watch(() => props.currentCategory, (newVal) => {
-  targetCategory.value = newVal;
+watch([() => props.media?.id, () => props.currentCategory], () => {
+  targetCategory.value = props.media?.category || props.currentCategory;
+  categoryExpanded.value = false;
 }, { immediate: true });
 
 watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
@@ -160,59 +174,48 @@ const handleBodyScroll = (event: Event) => {
 const requestClose = () => {
   if (!props.isSaving) emit('close');
 };
+const dialogRef = ref<HTMLElement | null>(null);
+useDialog(dialogRef, () => props.isOpen, requestClose);
 </script>
 
 <template>
   <div
     class="liquid-dialog-backdrop"
+    ref="dialogRef"
     :class="{ active: isOpen }"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="resource-dialog-title"
+    @keydown.esc.stop="requestClose"
     @click.self="requestClose"
   >
     <div class="liquid-dialog" v-if="media" :aria-busy="isSaving || isAnalyzing">
       <!-- 弹窗顶栏 -->
       <div class="dialog-header">
         <div class="media-meta-row">
-          <img :src="media.poster" :alt="media.title" class="dialog-poster" />
+<MediaPoster :src="media.poster" :alt="media.title" class="dialog-poster" />
           <div class="dialog-meta-info">
             <div class="meta-title-line">
-              <h3 class="dialog-title" :title="media.title">{{ media.title }}</h3>
+              <h3 id="resource-dialog-title" class="dialog-title" :title="media.title">{{ media.title }}</h3>
             </div>
 
-            <!-- 分类选择 -->
+            <!-- 默认沿用当前分类，需要时再展开修改。 -->
             <div class="cat-selector-row">
-              <span class="cat-label">归档分类</span>
-              <div class="cat-pill-group">
+              <button type="button" class="category-picker-trigger" :disabled="isSaving" :aria-expanded="categoryExpanded" aria-controls="resource-category-options" @click="categoryExpanded = !categoryExpanded">
+                分类 · {{ targetCategoryName }}<ChevronDown aria-hidden="true" />
+              </button>
+              <div v-if="categoryExpanded" id="resource-category-options" class="cat-pill-group" role="group" aria-label="选择保存分类">
                 <button
+                  v-for="category in categories"
+                  :key="category.value"
+                  type="button"
                   class="cat-select-pill"
-                  :class="{ active: targetCategory === 'tv' }"
+                  :class="{ active: targetCategory === category.value }"
+                  :aria-pressed="targetCategory === category.value"
                   :disabled="isSaving"
-                  @click="targetCategory = 'tv'"
+                  @click="targetCategory = category.value; categoryExpanded = false"
                 >
-                  电视剧
-                </button>
-                <button
-                  class="cat-select-pill"
-                  :class="{ active: targetCategory === 'movie' }"
-                  :disabled="isSaving"
-                  @click="targetCategory = 'movie'"
-                >
-                  电影
-                </button>
-                <button
-                  class="cat-select-pill"
-                  :class="{ active: targetCategory === 'variety' }"
-                  :disabled="isSaving"
-                  @click="targetCategory = 'variety'"
-                >
-                  综艺
-                </button>
-                <button
-                  class="cat-select-pill"
-                  :class="{ active: targetCategory === 'anime' }"
-                  :disabled="isSaving"
-                  @click="targetCategory = 'anime'"
-                >
-                  动漫
+                  {{ category.label }}
                 </button>
               </div>
             </div>
@@ -257,10 +260,10 @@ const requestClose = () => {
         </button>
       </form>
 
-      <div v-if="!isAnalyzing" class="result-summary" aria-live="polite">
+      <div v-if="!isAnalyzing && !searchError" class="result-summary" aria-live="polite">
         <span>找到</span>
         <strong>{{ rankedQuarkResources.length }}</strong>
-        <span>条可用资源</span>
+        <span>条候选资源 · 添加时验证链接</span>
       </div>
 
       <div v-if="!isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
@@ -293,9 +296,8 @@ const requestClose = () => {
         <template v-else>
           <div v-if="visibleResources.length > 0" class="resource-rows">
             <div
-              v-for="(res, index) in visibleResources"
+              v-for="res in visibleResources"
               :key="res.id"
-              v-memo="[res.id, index === 0]"
               class="liquid-resource-row"
             >
               <div class="row-left">
@@ -306,10 +308,15 @@ const requestClose = () => {
                     </span>
                     {{ cleanTitle(res.title) }}
                   </div>
+                  <div v-if="saveError && failedResourceId === res.id" class="inline-feedback resource-save-error" role="alert">
+                    <strong>{{ saveError.title }}</strong>
+                    <p>{{ saveError.message }}</p>
+                    <button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往认证设置</button>
+                  </div>
                   <div class="row-tags">
                     <span class="tag-badge">{{ res.quality }}</span>
                     <span v-if="res.size" class="tag-meta">{{ res.size }}</span>
-                    <span v-if="res.password" class="tag-meta">提取码 {{ res.password }}</span>
+                    <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
                     <span class="tag-meta">{{ res.datetime }}</span>
                   </div>
                 </div>
@@ -322,7 +329,7 @@ const requestClose = () => {
                   :disabled="isSaving"
                   @click="emit('save-to-cards', media, targetCategory, res)"
                 >
-                  {{ isSaving && savingResourceId === res.id ? '正在验证并转存…' : '选用并加入' }}
+                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? '替换片源' : '加入片库' }}
                 </button>
               </div>
             </div>
@@ -332,12 +339,13 @@ const requestClose = () => {
             </button>
           </div>
 
-          <div v-else class="empty-notice">
+          <div v-else class="empty-notice" role="status">
             <span>{{ searchError || (resultFilter === 'recommended' ? '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
             <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
               重新检索
             </button>
+            <button v-else-if="resultFilter !== 'recommended'" type="button" class="retry-search-button" @click="resultFilter = 'recommended'">查看全部候选资源</button>
           </div>
         </template>
       </div>
@@ -346,637 +354,88 @@ const requestClose = () => {
 </template>
 
 <style scoped>
-.liquid-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  z-index: 1100;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.3s ease, visibility 0.3s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-.liquid-dialog-backdrop.active {
-  opacity: 1;
-  visibility: visible;
-}
-
-.liquid-dialog {
-  width: 100%;
-  max-width: 820px;
-  max-height: 86vh;
-  background: rgba(22, 28, 44, 0.78);
-  backdrop-filter: blur(48px) saturate(200%);
-  -webkit-backdrop-filter: blur(48px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow:
-    inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.35),
-    0 28px 70px rgba(0, 0, 0, 0.8);
-  border-radius: var(--radius-2xl);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transform: scale(0.95);
-  transition: transform 0.35s var(--spring-bounce);
-}
-.liquid-dialog-backdrop.active .liquid-dialog {
-  transform: scale(1);
-}
-
-.dialog-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.media-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  flex: 1;
-}
-
-.dialog-poster {
-  width: 48px;
-  height: 64px;
-  border-radius: var(--radius-sm);
-  object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
-  flex-shrink: 0;
-}
-
-.dialog-meta-info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-}
-
-.dialog-title {
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cat-selector-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cat-label {
-  font-size: 0.76rem;
-  color: var(--text-tertiary);
-  flex-shrink: 0;
-}
-
-.cat-pill-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cat-select-pill {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-pill);
-  padding: 2px 9px;
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.cat-select-pill.active {
-  background: linear-gradient(145deg, var(--liquid-accent), var(--liquid-accent-strong));
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 2px 8px var(--liquid-accent-glow);
-  color: var(--accent-ink);
-  font-weight: 600;
-}
-
-.dialog-top-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.btn-save-to-list {
-  background: linear-gradient(145deg, var(--liquid-accent), var(--liquid-accent-strong));
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.35),
-    0 4px 14px var(--liquid-accent-glow);
-  color: var(--accent-ink);
-  border-radius: var(--radius-pill);
-  padding: 7px 16px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--spring-ease);
-}
-.btn-save-to-list:hover {
-  transform: scale(1.04);
-}
-
-.btn-close-dialog {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: var(--spring-ease);
-}
-.btn-close-dialog:hover {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  transform: rotate(90deg);
-}
-.btn-close-dialog svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-
-.result-search {
-  display: grid;
-  min-height: 52px;
-  grid-template-columns: 20px minmax(0, 1fr) 36px auto;
-  align-items: center;
-  gap: 7px;
-  margin: 10px 20px 2px;
-  padding: 4px 5px 4px 13px;
-  border: 1px solid rgb(239 241 255 / 0.09);
-  border-radius: 15px;
-  background: rgb(237 240 255 / 0.035);
-}
-
-.result-search-icon { width: 18px; height: 18px; color: var(--text-tertiary); }
-.result-search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  color: var(--text-primary);
-  background: transparent;
-  font: inherit;
-  font-size: 16px;
-}
-.result-search input::-webkit-search-cancel-button { display: none; }
-.result-search input::placeholder { color: var(--text-quaternary); }
-.result-search:focus-within { border-color: rgb(var(--accent-rgb) / 0.32); box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.08); }
-.clear-search-button,
-.submit-search-button { border: 0; cursor: pointer; touch-action: manipulation; }
-.clear-search-button { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
+.liquid-dialog-backdrop { position: fixed; inset: 0; z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; visibility: hidden; }
+.liquid-dialog-backdrop.active { opacity: 1; visibility: visible; }
+.liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 32px; color: var(--text-primary); background: linear-gradient(145deg, rgb(255 255 255 / .97), rgb(236 242 253 / .97)); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
+.dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 24px 24px 16px; flex-shrink: 0; }
+.media-meta-row { display: flex; min-width: 0; align-items: center; gap: 14px; flex: 1; }
+.dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border: 1px solid #fff; border-radius: 14px; box-shadow: var(--glass-shadow-sm); }
+.dialog-meta-info { display: grid; min-width: 0; flex: 1; gap: 7px; }
+.dialog-title { overflow: hidden; color: var(--text-primary); font-size: 1.22rem; font-weight: 750; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
+.cat-selector-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.category-picker-trigger { display: inline-flex; min-height: 44px; align-items: center; gap: 6px; padding: 0 10px; margin-left: -10px; border: 0; border-radius: 16px; color: var(--text-secondary); background: transparent; font-size: .78rem; }
+.category-picker-trigger:hover { background: var(--liquid-accent-subtle); }
+.category-picker-trigger svg { width: 15px; height: 15px; transition: transform .2s; }
+.category-picker-trigger[aria-expanded='true'] svg { transform: rotate(180deg); }
+.cat-pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
+.cat-select-pill { min-height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .77rem; white-space: nowrap; }
+.cat-select-pill.active { border-color: #fff; color: var(--liquid-accent); background: #fff; box-shadow: var(--glass-shadow-sm); font-weight: 700; }
+.dialog-top-actions { flex-shrink: 0; }
+.btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: #e9eef6; box-shadow: inset 0 1px #fff; }
+.btn-close-dialog svg { width: 20px; height: 20px; }
+.result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 52px; padding: 3px 4px 3px 15px; border: 1px solid #fff; border-radius: 28px; background: rgb(96 123 171 / .07); flex-shrink: 0; }
+.result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }
+.result-search input { width: 100%; min-width: 0; flex: 1; min-height: 44px; padding: 6px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
+.result-search:focus-within { box-shadow: 0 0 0 3px var(--liquid-accent-subtle); }
+.result-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.clear-search-button { display: grid; width: 44px; height: 44px; place-items: center; flex-shrink: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .clear-search-button svg { width: 17px; height: 17px; }
-.submit-search-button { min-height: 42px; padding: 0 15px; border-radius: 11px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .78rem; font-weight: 700; }
-.clear-search-button:disabled,
-.submit-search-button:disabled { opacity: .45; cursor: default; }
-
-.result-filters {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 20px;
-  overflow-x: auto;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  scrollbar-width: none;
-}
-
-.result-filters::-webkit-scrollbar { display: none; }
-.result-filters > svg { width: 17px; flex: 0 0 auto; color: var(--text-tertiary); }
-.filter-chip {
-  min-height: 34px;
-  padding: 0 13px;
-  flex: 0 0 auto;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.04);
-  cursor: pointer;
-}
-.filter-chip.active {
-  color: var(--liquid-accent);
-  border-color: rgb(var(--accent-rgb) / 0.24);
-  background: var(--liquid-accent-subtle);
-}
-
-.dialog-body {
-  padding: 16px 20px;
-  overflow-y: auto;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.loading-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.84rem;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.mini-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: var(--liquid-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-.resource-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.liquid-resource-row {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  transition: all 0.25s ease;
-}
-.liquid-resource-row:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.25);
-  transform: translateY(-2px);
-}
-
-.row-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.drive-badge {
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.1);
-  padding: 3px 6px;
-  border-radius: var(--radius-xs);
-  flex-shrink: 0;
-}
-
-.row-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.row-title {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.recommended-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-right: 5px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  color: var(--liquid-accent);
-  background: var(--liquid-accent-subtle);
-  font-size: 0.67rem;
-  font-weight: 700;
-  vertical-align: 1px;
-}
+.submit-search-button { min-height: 44px; padding: 0 19px; border: 0; border-radius: 24px; flex-shrink: 0; color: #fff; background: var(--liquid-accent); font-size: .84rem; font-weight: 650; }
+.result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; flex-shrink: 0; padding: 16px 26px 3px; color: var(--text-tertiary); font-size: .75rem; }
+.result-summary strong { color: var(--text-primary); font-size: .92rem; }
+.result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
+.result-filters > svg { width: 18px; height: 18px; margin-right: 4px; color: var(--text-tertiary); flex-shrink: 0; }
+.filter-chip { min-height: 44px; padding: 0 17px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .8rem; flex-shrink: 0; }
+.filter-chip.active { color: var(--liquid-accent); border-color: #fff; background: #fff; box-shadow: var(--glass-shadow-sm); font-weight: 650; }
+.dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
+.resource-rows { display: grid; gap: 12px; }
+.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 18px; border: 1px solid #fff; border-radius: 24px; background: rgb(255 255 255 / .65); box-shadow: 0 3px 10px rgb(69 93 137 / .035); }
+.row-left { min-width: 0; flex: 1; }
+.row-info { min-width: 0; }
+.row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
+.recommended-badge { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; padding: 2px 6px; border-radius: 6px; color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-size: .66rem; vertical-align: 1px; }
 .recommended-badge svg { width: 12px; height: 12px; }
-
-.row-tags {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 0.74rem;
-  color: var(--text-tertiary);
-}
-
-.tag-badge {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-secondary);
-  border-radius: var(--radius-xs);
-  padding: 1px 5px;
-}
-
-.tag-meta {
-  color: var(--text-tertiary);
-}
-
-.row-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.btn-action {
-  padding: 6px 14px;
-  border-radius: var(--radius-pill);
-  font-size: 0.78rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-}
-
-.btn-copy {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--text-secondary);
-}
-.btn-copy:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-}
-
-.btn-transfer {
-  background: linear-gradient(145deg, var(--liquid-accent), var(--liquid-accent-strong));
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 12px var(--liquid-accent-glow);
-  color: var(--accent-ink);
-}
-.btn-transfer:hover {
-  transform: scale(1.04);
-}
-
-.empty-notice {
-  padding: 40px 16px;
-  text-align: center;
-  color: var(--text-tertiary);
-  font-size: 0.85rem;
-}
-
-.load-more-button {
-  width: 100%;
-  min-height: 46px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 14px;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.035);
-  cursor: pointer;
-}
-
-@keyframes spin {
-  100% { transform: rotate(360deg); }
-}
-
+.row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
+.tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
+.row-right { display: flex; flex-shrink: 0; }
+.btn-action { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 18px; border: 1px solid #fff; border-radius: 24px; color: var(--liquid-accent); background: linear-gradient(155deg, #f5f9ff, #dfeaff); box-shadow: inset 0 1px #fff, 0 3px 8px rgb(66 100 159 / .08); font-size: .81rem; font-weight: 650; }
+.btn-action:hover:not(:disabled) { background: #d7e5ff; }
+.resource-save-error { margin-top: 12px; }
+.empty-notice { padding: 40px 16px; color: var(--text-secondary); text-align: center; font-size: .9rem; }
+.empty-notice > span { display: block; }
+.retry-search-button, .load-more-button { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 7px; margin-top: 16px; padding: 0 18px; border: var(--glass-border); border-radius: 24px; color: var(--liquid-accent); background: #fff; font-size: .84rem; }
+.retry-search-button svg { width: 17px; height: 17px; }
+.load-more-button { width: 100%; margin-top: 0; }
+.loading-bar { display: flex; align-items: center; gap: 10px; padding: 24px 0; color: var(--text-secondary); font-size: .88rem; }
+.mini-spinner { width: 18px; height: 18px; flex-shrink: 0; border: 2px solid #d3ddf0; border-top-color: var(--liquid-accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
-  .liquid-dialog-backdrop {
-    align-items: flex-end;
-    padding: 0;
-    overscroll-behavior: contain;
-  }
-
-  .liquid-dialog {
-    width: 100%;
-    height: 100dvh;
-    max-width: none;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-    transform: translateY(24px);
-  }
-
-  .liquid-dialog-backdrop.active .liquid-dialog {
-    transform: translateY(0);
-  }
-
-  .dialog-header {
-    position: relative;
-    align-items: stretch;
-    flex-direction: column;
-    gap: 12px;
-    padding: calc(10px + env(safe-area-inset-top)) 64px 12px 12px;
-  }
-
-  .dialog-poster {
-    width: 42px;
-    height: 56px;
-  }
-
-  .dialog-title {
-    font-size: 1rem;
-  }
-
-  .cat-selector-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 5px;
-  }
-
-  .cat-pill-group {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 5px;
-  }
-
-  .cat-select-pill {
-    min-height: 40px;
-    padding: 0 4px;
-    touch-action: manipulation;
-  }
-
-  .dialog-top-actions {
-    position: absolute;
-    top: calc(9px + env(safe-area-inset-top));
-    right: 12px;
-    width: auto;
-  }
-
-  .btn-close-dialog {
-    width: 44px;
-    height: 44px;
-    flex: 0 0 44px;
-  }
-
-  .result-search {
-    min-height: 54px;
-    grid-template-columns: 20px minmax(0, 1fr) 38px auto;
-    margin: 9px calc(var(--mobile-gutter) + var(--safe-area-right)) 3px calc(var(--mobile-gutter) + var(--safe-area-left));
-  }
-
-  .clear-search-button { width: 38px; height: 44px; }
-  .submit-search-button { min-height: 44px; padding: 0 14px; }
-
-  .result-filters {
-    gap: 6px;
-    padding: 7px 12px;
-  }
-
-  .filter-chip { min-height: 40px; padding: 0 14px; touch-action: manipulation; }
-
-  .dialog-body {
-    padding: 12px 10px calc(16px + env(safe-area-inset-bottom));
-    overscroll-behavior: contain;
-  }
-
-  .liquid-resource-row {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 12px;
-    padding: 13px;
-  }
-
-  .row-title {
-    display: -webkit-box;
-    overflow: hidden;
-    white-space: normal;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .recommended-badge { display: inline-flex; }
-
-  .row-right {
-    width: 100%;
-  }
-
-  .btn-action {
-    min-height: 44px;
-    flex: 1;
-    justify-content: center;
-    touch-action: manipulation;
-  }
-
-  .load-more-button { min-height: 48px; touch-action: manipulation; }
+  .liquid-dialog-backdrop { align-items: flex-end; padding: calc(var(--safe-area-top) + 10px) 0 0; }
+  .liquid-dialog { width: 100%; height: calc(100dvh - var(--safe-area-top) - 10px); max-height: 100%; border-radius: 30px 30px 0 0; }
+  .dialog-header { position: relative; padding: 23px 20px 12px; }
+  .media-meta-row { align-items: flex-start; gap: 11px; }
+  .dialog-poster { width: 32px; height: 44px; }
+  .dialog-title { max-width: calc(100% - 40px); font-size: 1.08rem; line-height: 1.8; }
+  .dialog-meta-info { gap: 9px; }
+  .dialog-top-actions { position: absolute; top: 17px; right: 15px; }
+  .cat-selector-row { display: block; }
+  .cat-pill-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-left: -43px; }
+  .cat-select-pill { padding: 0 5px; }
+  .result-search { margin: 0 16px; }
+  .result-summary { padding: 14px 20px 2px; }
+  .result-filters { padding: 4px 16px 10px; gap: 2px; }
+  .filter-chip { padding: 0 15px; }
+  .dialog-body { padding: 0 16px calc(20px + var(--safe-area-bottom)); }
+  .liquid-resource-row { align-items: stretch; flex-direction: column; gap: 14px; padding: 17px; border-radius: 23px; }
+  .row-right, .btn-action { width: 100%; }
+  .row-title { font-size: .91rem; }
 }
-</style>
-
-<style scoped>
-.liquid-dialog { border-radius: 24px; }
-.dialog-header { border-color: rgba(255, 255, 255, 0.075); background: rgba(255, 255, 255, 0.018); }
-.dialog-poster { border-color: rgba(255, 255, 255, 0.08); box-shadow: none; }
-.cat-select-pill { min-height: 36px; border-color: transparent; background: transparent; }
-.cat-select-pill.active { color: var(--liquid-accent); border-color: rgba(46, 230, 166, 0.24); background: rgba(46, 230, 166, 0.1); box-shadow: none; }
-.btn-save-to-list,
-.btn-transfer { background: var(--liquid-accent); box-shadow: 0 8px 20px rgba(46, 230, 166, 0.14); }
-.btn-save-to-list:hover,
-.btn-transfer:hover { transform: none; filter: brightness(1.08); }
-.btn-close-dialog:hover { transform: none; }
-.mini-spinner { border-top-color: var(--liquid-accent); }
-.liquid-resource-row { border-radius: 15px; }
-@media (prefers-reduced-motion: reduce) {
-  .liquid-dialog-backdrop,
-  .liquid-dialog,
-  .mini-spinner { transition: none; animation: none; }
-}
-@media (max-width: 640px) {
-  .liquid-dialog { background: var(--liquid-canvas) !important; }
-  .dialog-header { gap: 10px; padding: calc(8px + var(--safe-area-top)) calc(56px + var(--safe-area-right)) 10px calc(var(--mobile-gutter) + var(--safe-area-left)); }
-  .dialog-top-actions { top: calc(7px + var(--safe-area-top)); right: calc(var(--mobile-gutter) + var(--safe-area-right)); }
-  .media-meta-row { gap: 10px; }
-  .dialog-poster { width: 38px; height: 52px; }
-  .cat-selector-row { gap: 4px; }
-  .cat-select-pill { min-height: 44px; border-radius: 12px; }
-  .result-filters { padding-right: calc(var(--mobile-gutter) + var(--safe-area-right)); padding-left: calc(var(--mobile-gutter) + var(--safe-area-left)); }
-  .dialog-body { padding: 10px var(--mobile-gutter) calc(16px + var(--safe-area-bottom)); }
-  .liquid-resource-row { gap: 10px; padding: 12px; }
-}
-</style>
-
-<style scoped>
-.liquid-dialog-backdrop { background: rgb(3 4 8 / 0.84); }
-.liquid-dialog {
-  border-color: rgb(239 241 255 / 0.10);
-  background: rgb(16 18 27 / 0.98);
-  box-shadow: 0 28px 74px rgb(0 0 0 / .58), 0 0 44px rgb(var(--accent-rgb) / .05);
-}
-.dialog-header,
-.result-filters { border-color: rgb(239 241 255 / 0.07); background: rgb(237 240 255 / 0.018); }
-.dialog-poster { border-color: rgb(239 241 255 / 0.10); }
-.cat-label { color: var(--text-tertiary); }
-.cat-select-pill,
-.filter-chip { color: var(--text-tertiary); background: rgb(237 240 255 / 0.035); }
-.cat-select-pill.active,
-.filter-chip.active {
-  border-color: rgb(var(--accent-rgb) / 0.25);
-  color: var(--liquid-accent);
-  background: var(--liquid-accent-subtle);
-}
-.btn-transfer { color: var(--accent-ink); background: linear-gradient(145deg, var(--liquid-accent), var(--liquid-accent-strong)); box-shadow: 0 8px 22px var(--liquid-accent-glow); }
-.mini-spinner { border-top-color: var(--liquid-accent); }
-.liquid-resource-row {
-  border-color: rgb(239 241 255 / 0.08);
-  background: rgb(237 240 255 / 0.03);
-  box-shadow: inset 0 1px rgb(255 255 255 / 0.035);
-}
-.liquid-resource-row:hover { border-color: rgb(var(--accent-rgb) / 0.16); background: var(--liquid-accent-muted); }
-.recommended-badge { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
-.tag-badge { color: var(--text-secondary); background: rgb(237 240 255 / 0.055); }
-.load-more-button { border-color: rgb(239 241 255 / 0.08); background: rgb(237 240 255 / 0.035); }
-.retry-search-button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; margin-top: 14px; padding: 0 14px; border: 1px solid rgb(var(--accent-rgb) / 0.20); border-radius: 12px; color: var(--liquid-accent); background: var(--liquid-accent-muted); font-size: .8rem; font-weight: 650; cursor: pointer; }
-.retry-search-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
-.cat-select-pill:disabled,
-.filter-chip:disabled,
-.btn-close-dialog:disabled,
-.btn-transfer:disabled,
-.load-more-button:disabled,
-.retry-search-button:disabled { cursor: default; opacity: .46; }
-.btn-transfer.is-saving:disabled { opacity: 1; }
-.btn-transfer.is-saving::before {
-  width: 13px;
-  height: 13px;
-  margin-right: 6px;
-  border: 2px solid rgb(4 18 17 / .32);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: spin .75s linear infinite;
-  content: '';
-}
-.result-summary { display: flex; align-items: baseline; gap: 4px; padding: 11px 20px 3px; color: var(--text-tertiary); font-size: .78rem; }
-.result-summary strong { color: var(--text-primary); font-size: .94rem; font-weight: 720; }
-
-@media (prefers-reduced-motion: reduce) {
-  .btn-transfer.is-saving::before { animation: none; }
-}
-
-@media (max-width: 640px) {
-  .liquid-dialog { background: var(--liquid-canvas) !important; }
-  .dialog-header { background: linear-gradient(180deg, rgb(24 28 43 / .94), rgb(10 11 16 / .98)); }
-  .result-summary { padding-right: calc(var(--mobile-gutter) + var(--safe-area-right)); padding-left: calc(var(--mobile-gutter) + var(--safe-area-left)); }
-  .dialog-body { background: radial-gradient(90% 38% at 50% 0%, rgb(var(--accent-rgb) / .05), transparent 74%); }
-  .liquid-resource-row { border-radius: 16px; }
+@media (max-height: 500px) and (orientation: landscape) {
+  .liquid-dialog { max-height: calc(100dvh - 20px); }
+  .dialog-header { padding-top: 10px; padding-bottom: 5px; }
+  .dialog-poster { display: none; }
+  .dialog-meta-info { display: flex; align-items: center; gap: 20px; }
+  .result-summary { padding-top: 4px; }
+  .result-filters { padding-bottom: 4px; }
 }
 </style>

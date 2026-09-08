@@ -3,6 +3,7 @@
 .env.*
 !.env.server.example
 node_modules/
+.local-runtime/
 dist/
 coverage/
 *.log

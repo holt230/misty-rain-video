@@ -1,6 +1,7 @@
 import type { ResourceItem, SearchResult } from '../types/search';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
+import { parseLibraryInput } from './libraryFeedback';
 
 const SEARCH_THROTTLE_MS = 300;
 const REQUEST_TIMEOUT_MS = 28_000;
@@ -184,9 +185,9 @@ export class SilentSearchEngine {
 
   private parseSingleItem(raw: any): ResourceItem | null {
     const note = String(raw.note || raw.title || '可用影视资源');
-    const match = String(raw.url || '').match(/^https:\/\/pan\.quark\.cn\/s\/([a-zA-Z0-9]+)/i);
-    if (!match) return null;
-    const canonicalUrl = `https://pan.quark.cn/s/${match[1]}`;
+    const share = parseLibraryInput(`${String(raw.url || '')}\n${note}`);
+    if (share.kind !== 'share') return null;
+    const canonicalUrl = share.url;
     const is4k = /4k|2160p|uhd|杜比|hdr/i.test(note);
     const is1080p = /1080p|fhd|蓝光/i.test(note);
     const quality = is4k ? '4K 超高清' : (is1080p ? '1080P 超清' : '清晰度待解析');
@@ -196,10 +197,10 @@ export class SilentSearchEngine {
     const datetime = year >= 2001 ? rawDatetime.substring(0, 10) : '近期收录';
 
     return {
-      id: `quark-${match[1]}`,
+      id: `quark-${canonicalUrl.split('/').pop()}`,
       title: note,
       url: canonicalUrl,
-      password: raw.password || '',
+      password: raw.password || share.passcode,
       driveType: 'quark',
       datetime,
       source: raw.source || 'PanSou 聚合分析',
