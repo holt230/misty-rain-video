@@ -2,7 +2,7 @@
 import type Hls from 'hls.js';
 import { playbackHealth } from '../../services/playbackHealth';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Maximize, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
+import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -60,7 +60,6 @@ const selectedSourceId = ref('');
 const errorMessage = ref('');
 const statusMessage = ref('');
 const playbackStarting = ref(false);
-const pageFullscreen = ref(false);
 const videoAspectRatio = ref(16 / 9);
 const pictureFit = ref<'contain' | 'cover'>('contain');
 const prolongedBuffering = ref(false);
@@ -1117,42 +1116,11 @@ const retry = () => {
 };
 
 type NativeFullscreenVideo = HTMLVideoElement & {
-  webkitEnterFullscreen?: () => void;
   webkitExitFullscreen?: () => void;
   webkitDisplayingFullscreen?: boolean;
 };
 
-const requestNativeVideoFullscreen = async () => {
-  const video = videoRef.value as NativeFullscreenVideo | null;
-  if (!video) return;
-  if (phase.value !== 'ready' || video.readyState === 0) {
-    toast.show('视频准备好后再点全屏', '!', 3000);
-    return;
-  }
-
-  try {
-    // iPhone 使用系统视频播放器；同步调用以保留点击手势授权。
-    if (isIOSPlaybackDevice && video.webkitEnterFullscreen) {
-      video.webkitEnterFullscreen();
-    } else if (video.requestFullscreen) {
-      await video.requestFullscreen();
-    } else if (video.webkitEnterFullscreen) {
-      video.webkitEnterFullscreen();
-    } else {
-      toast.show('请使用视频自带的全屏按钮，或在 Safari 中打开', '!', 4000);
-    }
-  } catch {
-    toast.show('暂时无法进入全屏，请先播放，再点视频自带的全屏按钮', '!', 4000);
-  }
-};
-
-const togglePageFullscreen = () => {
-  pageFullscreen.value = !pageFullscreen.value;
-  pictureFit.value = 'contain';
-};
-
 const close = () => {
-  pageFullscreen.value = false;
   void persistProgress(true, false, true);
   phase.value = 'idle';
   requestSequence += 1;
@@ -1164,8 +1132,7 @@ const close = () => {
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, () => {
   if (document.fullscreenElement || (videoRef.value as NativeFullscreenVideo | null)?.webkitDisplayingFullscreen) return;
-  if (pageFullscreen.value) pageFullscreen.value = false;
-  else close();
+  close();
 });
 
 watch(
@@ -1173,7 +1140,6 @@ watch(
   ([isOpen]) => {
     if (isOpen) loadSession();
     else {
-      pageFullscreen.value = false;
       phase.value = 'idle';
       requestSequence += 1;
       stopVideo();
@@ -1211,7 +1177,7 @@ defineExpose({ retry });
   <div
     class="player-backdrop"
     ref="dialogRef"
-    :class="{ active: isOpen, 'page-fullscreen-active': pageFullscreen }"
+    :class="{ active: isOpen }"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
@@ -1239,10 +1205,6 @@ defineExpose({ retry });
       <div class="player-layout" :class="{ 'single-column': !episodes.length }">
         <main class="video-column">
           <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
-            <div v-if="pageFullscreen" class="expanded-toolbar">
-              <button type="button" @click="togglePageFullscreen"><X aria-hidden="true" />退出大屏</button>
-              <button type="button" @click="requestNativeVideoFullscreen"><Maximize aria-hidden="true" />系统全屏</button>
-            </div>
             <video
               :key="videoInstanceKey"
               ref="videoRef"
@@ -1351,7 +1313,6 @@ defineExpose({ retry });
               <ListVideo aria-hidden="true" />
               <span><strong>选集</strong><small>{{ episodeStatus }}</small></span>
             </button>
-            <button type="button" class="fullscreen-button" aria-label="网页大屏播放" @click="togglePageFullscreen"><Maximize aria-hidden="true" /><span>大屏</span></button>
           </div>
 
           <div
@@ -1365,13 +1326,11 @@ defineExpose({ retry });
               <button class="icon-button" type="button" aria-label="收起播放设置" @click="collapseSettings"><X aria-hidden="true" /></button>
             </div>
             <div class="setting-group">
-              <div class="setting-heading"><span>画面与全屏</span><small>默认完整显示，不拉伸</small></div>
+              <div class="setting-heading"><span>画面比例</span><small>默认完整显示，不拉伸</small></div>
               <div class="option-scroll" role="group" aria-label="画面显示方式">
                 <button type="button" class="option-chip" :class="{ active: pictureFit === 'contain' }" :aria-pressed="pictureFit === 'contain'" @click="pictureFit = 'contain'">适应画面</button>
                 <button type="button" class="option-chip" :class="{ active: pictureFit === 'cover' }" :aria-pressed="pictureFit === 'cover'" @click="pictureFit = 'cover'">铺满（裁切边缘）</button>
-                <button type="button" class="option-chip" @click="requestNativeVideoFullscreen">系统全屏</button>
               </div>
-              <p class="fullscreen-help">大屏模式保留完整画面和中断提示。横屏观看请关闭 iPhone 的竖屏方向锁定；系统全屏中的缩放由系统控制。</p>
             </div>
             <div class="setting-group">
               <div class="setting-heading">
@@ -1584,7 +1543,6 @@ defineExpose({ retry });
 .stage-play-label { font-size: .86rem; font-weight: 650; text-shadow: 0 2px 6px #000; }
 .stage-play-button small { color: #e1e9f8; font-size: .7rem; text-shadow: 0 2px 6px #000; }
 .buffer-retry { position: absolute; top: calc(50% + 30px); min-height: 44px; padding: 0 18px; border: var(--glass-border); border-radius: 22px; color: #fff; background: #252529; pointer-events: auto; }
-.fullscreen-help { color: var(--text-secondary); font-size: .75rem; line-height: 1.65; }
 .playback-starting-pill { display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 1px solid rgb(255 255 255 / .09); border-radius: 24px; color: #f4f7ff; background: rgb(29 40 59 / .8); box-shadow: inset 0 1px rgb(255 255 255 / .4); font-size: .77rem; }
 .playback-starting-pill svg { width: 17px; height: 17px; animation: spin 1s linear infinite; }
 .loading-wave { display: flex; height: 30px; align-items: center; gap: 4px; margin-bottom: 2px; }
@@ -1592,7 +1550,7 @@ defineExpose({ retry });
 .loading-wave i:nth-child(2) { animation-delay: .12s; }
 .loading-wave i:nth-child(3) { animation-delay: .24s; }
 .loading-wave i:nth-child(4) { animation-delay: .36s; }
-.player-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 58px; flex-shrink: 0; gap: 9px; padding: 14px 0; }
+.player-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex-shrink: 0; gap: 9px; padding: 14px 0; }
 .player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
 .player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); border-color: rgb(var(--accent-rgb) / .25); }
 .player-toolbar button > svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--liquid-accent); }
@@ -1601,8 +1559,6 @@ defineExpose({ retry });
 .player-toolbar small { overflow: hidden; color: var(--text-tertiary); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .player-toolbar .toolbar-chevron { width: 15px; height: 15px; transition: transform .2s; }
 .player-toolbar [aria-expanded='true'] .toolbar-chevron { transform: rotate(180deg); }
-.player-toolbar .fullscreen-button { display: grid; justify-items: center; align-content: center; gap: 3px; padding: 7px 4px; }
-.fullscreen-button span { flex: none; font-size: .65rem; }
 .playback-settings { display: grid; flex-shrink: 0; gap: 22px; margin-bottom: 8px; padding: 20px; border: 0; border-radius: 16px; background: var(--surface-1); }
 .settings-panel-heading, .setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .settings-panel-heading { margin-top: -6px; margin-bottom: -7px; }
@@ -1673,12 +1629,11 @@ defineExpose({ retry });
   .stage-poster { display: none; }
   .stage-play-icon { width: 58px; height: 58px; }
   .stage-play-button small { font-size: .65rem; }
-  .player-toolbar { gap: 7px; padding: 12px 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 49px; }
+  .player-toolbar { gap: 7px; padding: 12px 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .player-toolbar button { min-height: 62px; gap: 7px; padding: 9px 10px; border-radius: 12px; background: var(--surface-1); }
   .player-toolbar strong { font-size: .77rem; }
   .player-toolbar small { font-size: .62rem; }
   .player-toolbar .toolbar-chevron { display: none; }
-  .player-toolbar .fullscreen-button { padding: 8px 3px; }
   .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 16px; }
   .setting-heading { flex-wrap: wrap; gap: 4px 10px; }
   .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 0; overflow: visible; scroll-margin-top: 10px; }
@@ -1705,15 +1660,5 @@ defineExpose({ retry });
   .episode-number { width: 100%; height: 52px; border: 0; }
   .episode-copy { display: none; }
 }
-/* Expand without CSS rotation. System bars and controls retain their real orientation. */
-.expanded-toolbar { position: absolute; z-index: 4; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #000; }
-.expanded-toolbar button { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 22px; color: #eee; background: #202023; font-size: .8rem; }
-.expanded-toolbar svg { width: 17px; height: 17px; }
-.page-fullscreen-active { background: #000; backdrop-filter: none; -webkit-backdrop-filter: none; }
-.page-fullscreen-active .player-window { background: #000; box-shadow: none; border: 0; }
-.page-fullscreen-active .player-header, .page-fullscreen-active .player-toolbar, .page-fullscreen-active .playback-settings, .page-fullscreen-active .episode-panel { display: none; }
-.page-fullscreen-active .player-window, .page-fullscreen-active .player-layout, .page-fullscreen-active .video-column { overflow: visible; }
-.page-fullscreen-active .video-stage { position: fixed; z-index: 2400; inset: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left); width: auto; height: auto; min-height: 0; border: 0; border-radius: 0; aspect-ratio: auto; box-shadow: none; }
-.page-fullscreen-active .video-element, .page-fullscreen-active .stage-state, .page-fullscreen-active .play-prompt, .page-fullscreen-active .playback-starting { top: 52px; height: calc(100% - 52px); }
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>
