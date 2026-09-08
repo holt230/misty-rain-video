@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
+import { playbackHealth } from '../../services/playbackHealth';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Maximize, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
@@ -59,6 +60,13 @@ const selectedSourceId = ref('');
 const errorMessage = ref('');
 const statusMessage = ref('');
 const playbackStarting = ref(false);
+const pageFullscreen = ref(false);
+const videoAspectRatio = ref(16 / 9);
+const pictureFit = ref<'contain' | 'cover'>('contain');
+const prolongedBuffering = ref(false);
+const interruptionPosition = ref(0);
+let playbackWatchdog: number | null = null;
+let fullscreenNoticeRevealed = false;
 const manualPlayRequired = ref(false);
 const playbackHasStarted = ref(false);
 const detectedAudioTracks = ref<PlaybackAudioTrack[]>([]);
@@ -114,6 +122,7 @@ let autoNextTimer: number | null = null;
 let bufferingTimer: number | null = null;
 let hlsNetworkRetryTimer: number | null = null;
 let hlsNetworkRetryCount = 0;
+let hlsMediaRecoveryCount = 0;
 let lastPlaybackPosition = 0;
 let lastPlaybackProgressAt = 0;
 let lastAudibleVolume = Math.max(0.1, Math.min(1, Number(localStorage.getItem('misty_rain_player_volume')) || 1));
@@ -256,6 +265,7 @@ const destroyPlaybackEngine = () => {
     hlsNetworkRetryTimer = null;
   }
   hlsNetworkRetryCount = 0;
+  hlsMediaRecoveryCount = 0;
   hlsRef.value?.destroy();
   hlsRef.value = null;
   detectedAudioTracks.value = [];
@@ -267,6 +277,8 @@ const clearBufferingIndicator = (clearStartingState = true) => {
     window.clearTimeout(bufferingTimer);
     bufferingTimer = null;
   }
+  prolongedBuffering.value = false;
+  fullscreenNoticeRevealed = false;
   if (clearStartingState && playbackHasStarted.value) playbackStarting.value = false;
 };
 
@@ -446,6 +458,7 @@ const handleVolumeChange = () => {
 };
 
 const handleServiceError = (error: unknown) => {
+  void revealPlaybackNotice();
   stopVideo();
   const serviceError = error instanceof QuarkServiceError ? error : null;
   errorMessage.value = error instanceof Error ? error.message : '播放器加载失败';
@@ -463,6 +476,7 @@ const attemptPlayback = async (attachSequence = sourceAttachSequence, userInitia
   if (!video || attachSequence !== sourceAttachSequence) return;
   restoreVideoAudioOutput();
   const attemptSequence = ++playAttemptSequence;
+  lastPlaybackProgressAt = Date.now();
   playbackStarting.value = true;
   manualPlayRequired.value = false;
   try {
@@ -572,7 +586,7 @@ const attachSource = async (
         hlsNetworkRetryCount = 0;
       });
       hls.on(HlsRuntime.Events.ERROR, (_event, data) => {
-        if (!data.fatal || attachSequence !== sourceAttachSequence) return;
+        if (!data.fatal || attachSequence !== sourceAttachSequence || phase.value !== 'ready') return;
         if (data.type === HlsRuntime.ErrorTypes.NETWORK_ERROR) {
           if (hlsNetworkRetryTimer !== null) return;
           if (hlsNetworkRetryCount < 3) {
@@ -580,23 +594,19 @@ const attachSource = async (
             const retryDelay = retryDelays[hlsNetworkRetryCount++] ?? 3_000;
             hlsNetworkRetryTimer = window.setTimeout(() => {
               hlsNetworkRetryTimer = null;
-              if (attachSequence === sourceAttachSequence && hlsRef.value === hls) hls.startLoad();
+              if (attachSequence === sourceAttachSequence && hlsRef.value === hls && phase.value === 'ready') hls.startLoad();
             }, retryDelay);
             return;
           }
-          playbackStarting.value = false;
-          errorMessage.value = '视频网络持续不稳定，请刷新当前剧集重试';
-          phase.value = 'error';
-          announce(errorMessage.value);
+          interruptPlayback('网络连接中断，请检查网络后重新连接，继续从当前进度播放');
           return;
         }
         if (data.type === HlsRuntime.ErrorTypes.MEDIA_ERROR) {
-          hls.recoverMediaError();
+          if (hlsMediaRecoveryCount++ === 0) hls.recoverMediaError();
+          else interruptPlayback('视频解码中断，请重新连接后继续播放');
           return;
         }
-        errorMessage.value = '视频流中断，请重新加载当前剧集';
-        phase.value = 'error';
-        announce(errorMessage.value);
+        interruptPlayback('视频流中断，请重新连接当前剧集');
       });
       hls.attachMedia(video);
       return;
@@ -745,6 +755,7 @@ const handleTimeUpdate = () => {
 
 const handlePause = () => {
   const video = videoRef.value;
+  clearBufferingIndicator();
   playbackStarting.value = false;
   if (phase.value !== 'ready' || video?.ended) return;
   void persistProgress(true);
@@ -766,6 +777,7 @@ const handleEnded = () => {
 
 const handlePlaying = () => {
   const video = videoRef.value;
+  if (phase.value !== 'ready') { video?.pause(); return; }
   if (episodeCompletionHandled && video && video.currentTime < 1) {
     episodeCompletionHandled = false;
     introSkipped = false;
@@ -839,17 +851,86 @@ const handleWaiting = () => {
 };
 
 const handlePlaybackAvailable = () => {
+  // canplay only describes buffered data, not an advancing playback clock.
+  if (videoRef.value && !videoRef.value.paused && !videoRef.value.seeking) monitorPlayback();
+};
+
+const handleMetadata = () => {
+  const video = videoRef.value;
+  if (video?.videoWidth && video.videoHeight) videoAspectRatio.value = video.videoWidth / video.videoHeight;
+};
+
+const handleSeeking = () => {
   lastPlaybackProgressAt = Date.now();
+  lastPlaybackPosition = videoRef.value?.currentTime || 0;
   clearBufferingIndicator();
+};
+
+const revealPlaybackNotice = async () => {
+  const video = videoRef.value as NativeFullscreenVideo | null;
+  try {
+    if (video?.webkitDisplayingFullscreen) video.webkitExitFullscreen?.();
+    else if (document.fullscreenElement) await document.exitFullscreen();
+  } catch {
+    // The user can still exit with the native fullscreen control.
+  }
+};
+
+const interruptPlayback = (message: string) => {
+  const video = videoRef.value;
+  interruptionPosition.value = video && Number.isFinite(video.currentTime) && video.currentTime > 0
+    ? video.currentTime : Math.max(interruptionPosition.value, lastPlaybackPosition);
+  phase.value = 'error';
+  playAttemptSequence += 1;
+  errorMessage.value = message;
+  playbackStarting.value = false;
+  manualPlayRequired.value = false;
+  clearBufferingIndicator(false);
+  video?.pause();
+  hlsRef.value?.stopLoad();
+  void persistProgress(true);
+  void revealPlaybackNotice();
+  announce(message);
+};
+
+const monitorPlayback = () => {
+  const video = videoRef.value;
+  const active = Boolean(props.isOpen && phase.value === 'ready' && video && !video.ended
+    && document.visibilityState === 'visible' && !manualPlayRequired.value
+    && (!video.paused || playbackStarting.value));
+  if (!active || !video) {
+    lastPlaybackProgressAt = Date.now();
+    return;
+  }
+  const now = Date.now();
+  if (Math.abs(video.currentTime - lastPlaybackPosition) > .05) {
+    lastPlaybackPosition = video.currentTime;
+    lastPlaybackProgressAt = now;
+    interruptionPosition.value = video.currentTime;
+    clearBufferingIndicator();
+    return;
+  }
+  if (!lastPlaybackProgressAt) lastPlaybackProgressAt = now;
+  const health = playbackHealth({ active, elapsedMs: now - lastPlaybackProgressAt });
+  if (health === 'interrupted') {
+    interruptPlayback(navigator.onLine
+      ? '播放已中断，请重新连接，继续从当前进度播放'
+      : '网络已断开，请恢复网络后重新连接');
+    return;
+  }
+  if (health === 'buffering' || health === 'stalled') playbackStarting.value = true;
+  prolongedBuffering.value = health === 'stalled';
+  if (prolongedBuffering.value && !fullscreenNoticeRevealed) {
+    fullscreenNoticeRevealed = true;
+    void revealPlaybackNotice();
+  }
 };
 
 const handleVideoError = () => {
   if (phase.value !== 'ready') return;
-  playbackStarting.value = false;
-  manualPlayRequired.value = false;
-  errorMessage.value = '当前视频无法解码或播放地址已失效';
-  phase.value = 'error';
-  announce(errorMessage.value);
+  interruptPlayback(videoRef.value?.error?.code === MediaError.MEDIA_ERR_NETWORK
+    ? '视频连接中断，请检查网络后重新连接'
+    : '当前视频无法继续播放，请重新连接后重试');
 };
 
 const startPlaybackFromPrompt = () => {
@@ -862,6 +943,11 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
   if (!activeSession || !episode) return;
   if (currentEpisode.value && currentEpisodeIndex.value !== index && !episodeCompletionHandled) {
     await persistProgress(true);
+  }
+  interruptionPosition.value = resumeAt;
+  if (currentEpisodeIndex.value !== index || !playback.value) {
+    videoAspectRatio.value = 16 / 9;
+    pictureFit.value = 'contain';
   }
   const sequence = ++requestSequence;
   introSkipped = false;
@@ -1021,12 +1107,18 @@ const selectEpisode = async (index: number) => {
 };
 
 const retry = () => {
-  if (session.value && currentEpisode.value) prepareEpisode(currentEpisodeIndex.value);
+  if (session.value && currentEpisode.value) {
+    const video = videoRef.value;
+    const resumeAt = video && Number.isFinite(video.currentTime) && video.currentTime > 0
+      ? video.currentTime : interruptionPosition.value;
+    void prepareEpisode(currentEpisodeIndex.value, resumeAt);
+  }
   else loadSession();
 };
 
 type NativeFullscreenVideo = HTMLVideoElement & {
   webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
   webkitDisplayingFullscreen?: boolean;
 };
 
@@ -1054,7 +1146,13 @@ const requestNativeVideoFullscreen = async () => {
   }
 };
 
+const togglePageFullscreen = () => {
+  pageFullscreen.value = !pageFullscreen.value;
+  pictureFit.value = 'contain';
+};
+
 const close = () => {
+  pageFullscreen.value = false;
   void persistProgress(true, false, true);
   phase.value = 'idle';
   requestSequence += 1;
@@ -1066,7 +1164,8 @@ const close = () => {
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, () => {
   if (document.fullscreenElement || (videoRef.value as NativeFullscreenVideo | null)?.webkitDisplayingFullscreen) return;
-  close();
+  if (pageFullscreen.value) pageFullscreen.value = false;
+  else close();
 });
 
 watch(
@@ -1074,6 +1173,7 @@ watch(
   ([isOpen]) => {
     if (isOpen) loadSession();
     else {
+      pageFullscreen.value = false;
       phase.value = 'idle';
       requestSequence += 1;
       stopVideo();
@@ -1087,6 +1187,7 @@ watch(playbackAutomation, value => {
 }, { deep: true });
 
 onBeforeUnmount(() => {
+  if (playbackWatchdog !== null) window.clearInterval(playbackWatchdog);
   void persistProgress(true, false, true);
   phase.value = 'idle';
   stopVideo(true);
@@ -1097,6 +1198,7 @@ onBeforeUnmount(() => {
 });
 
 onMounted(() => {
+  playbackWatchdog = window.setInterval(monitorPlayback, 1_000);
   window.addEventListener('pagehide', handlePageHide);
   window.addEventListener('pageshow', handlePageShow);
   document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1109,7 +1211,7 @@ defineExpose({ retry });
   <div
     class="player-backdrop"
     ref="dialogRef"
-    :class="{ active: isOpen }"
+    :class="{ active: isOpen, 'page-fullscreen-active': pageFullscreen }"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
@@ -1136,11 +1238,16 @@ defineExpose({ retry });
 
       <div class="player-layout" :class="{ 'single-column': !episodes.length }">
         <main class="video-column">
-          <div class="video-stage">
+          <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
+            <div v-if="pageFullscreen" class="expanded-toolbar">
+              <button type="button" @click="togglePageFullscreen"><X aria-hidden="true" />退出大屏</button>
+              <button type="button" @click="requestNativeVideoFullscreen"><Maximize aria-hidden="true" />系统全屏</button>
+            </div>
             <video
               :key="videoInstanceKey"
               ref="videoRef"
               class="video-element"
+              :style="{ objectFit: pictureFit }"
               controls
               controlslist="nodownload noremoteplayback"
               playsinline
@@ -1152,6 +1259,9 @@ defineExpose({ retry });
               @playing="handlePlaying"
               @waiting="handleWaiting"
               @stalled="handleWaiting"
+              @loadedmetadata="handleMetadata"
+              @resize="handleMetadata"
+              @seeking="handleSeeking"
               @canplay="handlePlaybackAvailable"
               @seeked="handlePlaybackAvailable"
               @timeupdate="handleTimeUpdate"
@@ -1180,7 +1290,7 @@ defineExpose({ retry });
 
             <div v-else-if="phase === 'error' || phase === 'auth-required'" class="stage-state error-state" role="alert">
               <CircleAlert class="state-icon" aria-hidden="true" />
-              <strong>{{ phase === 'auth-required' ? '播放认证已失效' : '加载失败' }}</strong>
+              <strong>{{ phase === 'auth-required' ? '播放认证已失效' : interruptionPosition > 0 ? '播放中断' : '暂时无法播放' }}</strong>
               <p>{{ errorMessage }}</p>
               <div class="state-actions">
                 <button v-if="phase === 'auth-required'" type="button" class="primary-button" @click="emit('open-auth-settings')">
@@ -1188,7 +1298,7 @@ defineExpose({ retry });
                 </button>
                 <button type="button" class="secondary-button reload-button" @click="retry">
                   <RefreshCw aria-hidden="true" />
-                  刷新重试
+                  {{ interruptionPosition > 0 ? '重新连接并续播' : '重新连接' }}
                 </button>
               </div>
             </div>
@@ -1219,8 +1329,9 @@ defineExpose({ retry });
             >
               <span class="playback-starting-pill">
                 <LoaderCircle aria-hidden="true" />
-                {{ playbackHasStarted ? '正在缓冲' : '即将播放' }}
+                {{ prolongedBuffering ? '网络较慢，正在等待视频…' : playbackHasStarted ? '正在缓冲…' : '正在连接视频…' }}
               </span>
+              <button v-if="prolongedBuffering" type="button" class="buffer-retry" @click="retry">重新连接</button>
             </div>
           </div>
 
@@ -1240,7 +1351,7 @@ defineExpose({ retry });
               <ListVideo aria-hidden="true" />
               <span><strong>选集</strong><small>{{ episodeStatus }}</small></span>
             </button>
-            <button type="button" class="fullscreen-button" aria-label="全屏播放" @click="requestNativeVideoFullscreen"><Maximize aria-hidden="true" /><span>全屏</span></button>
+            <button type="button" class="fullscreen-button" aria-label="网页大屏播放" @click="togglePageFullscreen"><Maximize aria-hidden="true" /><span>大屏</span></button>
           </div>
 
           <div
@@ -1252,6 +1363,15 @@ defineExpose({ retry });
             <div class="settings-panel-heading">
               <strong>播放设置</strong>
               <button class="icon-button" type="button" aria-label="收起播放设置" @click="collapseSettings"><X aria-hidden="true" /></button>
+            </div>
+            <div class="setting-group">
+              <div class="setting-heading"><span>画面与全屏</span><small>默认完整显示，不拉伸</small></div>
+              <div class="option-scroll" role="group" aria-label="画面显示方式">
+                <button type="button" class="option-chip" :class="{ active: pictureFit === 'contain' }" :aria-pressed="pictureFit === 'contain'" @click="pictureFit = 'contain'">适应画面</button>
+                <button type="button" class="option-chip" :class="{ active: pictureFit === 'cover' }" :aria-pressed="pictureFit === 'cover'" @click="pictureFit = 'cover'">铺满（裁切边缘）</button>
+                <button type="button" class="option-chip" @click="requestNativeVideoFullscreen">系统全屏</button>
+              </div>
+              <p class="fullscreen-help">大屏模式保留完整画面和中断提示。横屏观看请关闭 iPhone 的竖屏方向锁定；系统全屏中的缩放由系统控制。</p>
             </div>
             <div class="setting-group">
               <div class="setting-heading">
@@ -1440,7 +1560,7 @@ defineExpose({ retry });
 .player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
 .video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
-.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: 16 / 9; flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
+.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
 .stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
 .loading-state { isolation: isolate; }
@@ -1463,6 +1583,8 @@ defineExpose({ retry });
 .stage-play-button:active .stage-play-icon { transform: scale(.95); }
 .stage-play-label { font-size: .86rem; font-weight: 650; text-shadow: 0 2px 6px #000; }
 .stage-play-button small { color: #e1e9f8; font-size: .7rem; text-shadow: 0 2px 6px #000; }
+.buffer-retry { position: absolute; top: calc(50% + 30px); min-height: 44px; padding: 0 18px; border: var(--glass-border); border-radius: 22px; color: #fff; background: #252529; pointer-events: auto; }
+.fullscreen-help { color: var(--text-secondary); font-size: .75rem; line-height: 1.65; }
 .playback-starting-pill { display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 1px solid rgb(255 255 255 / .09); border-radius: 24px; color: #f4f7ff; background: rgb(29 40 59 / .8); box-shadow: inset 0 1px rgb(255 255 255 / .4); font-size: .77rem; }
 .playback-starting-pill svg { width: 17px; height: 17px; animation: spin 1s linear infinite; }
 .loading-wave { display: flex; height: 30px; align-items: center; gap: 4px; margin-bottom: 2px; }
@@ -1543,7 +1665,7 @@ defineExpose({ retry });
   .text-action { padding: 0 13px; }
   .player-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
   .video-column { flex: 0 0 auto; overflow: visible; padding: 14px calc(14px + var(--safe-area-right)) 0 calc(14px + var(--safe-area-left)); }
-  .video-stage { min-height: 0; aspect-ratio: 16 / 9; border-radius: 10px; border: 0; }
+  .video-stage { min-height: 0; aspect-ratio: var(--video-ratio, 16 / 9); border-radius: 10px; border: 0; }
   .video-stage:last-child { margin-bottom: 14px; }
   .stage-state { gap: 7px; padding: 12px;  background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
   .stage-state strong { font-size: .88rem; }
@@ -1583,5 +1705,15 @@ defineExpose({ retry });
   .episode-number { width: 100%; height: 52px; border: 0; }
   .episode-copy { display: none; }
 }
+/* Expand without CSS rotation. System bars and controls retain their real orientation. */
+.expanded-toolbar { position: absolute; z-index: 4; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #000; }
+.expanded-toolbar button { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 22px; color: #eee; background: #202023; font-size: .8rem; }
+.expanded-toolbar svg { width: 17px; height: 17px; }
+.page-fullscreen-active { background: #000; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.page-fullscreen-active .player-window { background: #000; box-shadow: none; border: 0; }
+.page-fullscreen-active .player-header, .page-fullscreen-active .player-toolbar, .page-fullscreen-active .playback-settings, .page-fullscreen-active .episode-panel { display: none; }
+.page-fullscreen-active .player-window, .page-fullscreen-active .player-layout, .page-fullscreen-active .video-column { overflow: visible; }
+.page-fullscreen-active .video-stage { position: fixed; z-index: 2400; inset: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left); width: auto; height: auto; min-height: 0; border: 0; border-radius: 0; aspect-ratio: auto; box-shadow: none; }
+.page-fullscreen-active .video-element, .page-fullscreen-active .stage-state, .page-fullscreen-active .play-prompt, .page-fullscreen-active .playback-starting { top: 52px; height: calc(100% - 52px); }
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>
