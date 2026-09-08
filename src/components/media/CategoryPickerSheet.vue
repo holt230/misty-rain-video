@@ -37,7 +37,7 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
       aria-labelledby="category-picker-title"
       @click.self="!saving && emit('cancel')"
     >
-      <section class="picker-sheet">
+      <section class="picker-sheet glass-rim">
         <div class="drag-handle" aria-hidden="true"></div>
         <div class="sheet-heading">
           <div>
@@ -88,8 +88,8 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
 .close-button svg { width: 19px; height: 19px; }
 .category-options { display: grid; gap: 10px; }
 .category-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 72px; padding: 12px 15px; border: 1px solid; border-radius: 22px; color: var(--text-primary); text-align: left; }
-.option-icon { display: grid; width: 38px; height: 38px; place-items: center; flex-shrink: 0; border: 1px solid #fff; border-radius: 50%; color: transparent; background: rgb(124 148 188 / .08); }
-.active .option-icon { color: var(--liquid-accent); background: #e4edff; }
+.option-icon { display: grid; width: 38px; height: 38px; place-items: center; flex-shrink: 0; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: transparent; background: rgb(124 148 188 / .08); }
+.active .option-icon { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
 .option-icon svg { width: 20px; height: 20px; }
 .option-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .option-copy strong { font-size: .94rem; font-weight: 650; }

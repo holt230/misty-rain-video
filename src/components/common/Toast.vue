@@ -30,7 +30,7 @@ const iconComponent = (icon: string) => {
 
 <style scoped>
 .toast-container { position: fixed; bottom: calc(24px + var(--safe-area-bottom)); left: 50%; z-index: 10000; display: grid; justify-items: center; gap: 8px; width: min(92vw, 440px); transform: translateX(-50%); pointer-events: none; }
-.liquid-toast { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 13px 18px; border: 1px solid #fff; border-radius: 24px; color: var(--text-primary); background: rgb(249 251 255 / .94); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); font-size: .85rem; line-height: 1.5; }
+.liquid-toast { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 13px 18px; border: 1px solid rgb(255 255 255 / .09); border-radius: 24px; color: var(--text-primary); background: var(--surface-elevated); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); font-size: .85rem; line-height: 1.5; }
 .toast-msg { min-width: 0; overflow-wrap: anywhere; }
 .toast-icon { display: grid; width: 22px; height: 22px; flex-shrink: 0; place-items: center; color: var(--liquid-accent); }
 .toast-icon svg { width: 20px; height: 20px; }

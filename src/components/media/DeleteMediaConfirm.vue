@@ -30,7 +30,7 @@ useDialog(dialogRef, () => props.open, () => { if (!props.deleting) emit('cancel
       aria-labelledby="delete-title"
       @click.self="!deleting && emit('cancel')"
     >
-      <section class="confirm-sheet">
+      <section class="confirm-sheet glass-rim">
         <div class="drag-handle" aria-hidden="true"></div>
         <div class="danger-icon" aria-hidden="true">
           <Trash2 />
@@ -62,15 +62,15 @@ useDialog(dialogRef, () => props.open, () => { if (!props.deleting) emit('cancel
 .confirm-backdrop { position: fixed; inset: 0; z-index: 1800; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .confirm-sheet { width: min(430px, 100%); padding: 28px; border-radius: 30px; }
 .drag-handle { display: none; }
-.danger-icon { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 20px; border: 1px solid #fff; border-radius: 18px; color: var(--danger); background: #ffe9ed; }
+.danger-icon { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 20px; border: 1px solid rgb(255 255 255 / .09); border-radius: 18px; color: var(--danger); background: var(--danger-surface); }
 .danger-icon svg { width: 24px; height: 24px; }
 .confirm-copy h2 { margin-bottom: 12px; color: var(--text-primary); font-size: 1.25rem; font-weight: 720; line-height: 1.45; overflow-wrap: anywhere; }
 .confirm-copy p { color: var(--text-secondary); font-size: .87rem; line-height: 1.7; }
 .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 26px; }
-.confirm-actions button { min-height: 50px; border: 1px solid #fff; border-radius: 26px; font-size: .87rem; font-weight: 650; }
+.confirm-actions button { min-height: 50px; border: 1px solid rgb(255 255 255 / .09); border-radius: 26px; font-size: .87rem; font-weight: 650; }
 .cancel-button { color: var(--text-secondary); }
-.delete-button { color: #fff; background: #bb3c4d; box-shadow: inset 0 1px rgb(255 255 255 / .3); }
-.button-spinner { display: inline-block; width: 14px; height: 14px; margin-right: 5px; border: 2px solid rgb(255 255 255 / .5); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+.delete-button { color: #fff; background: #bb3c4d; box-shadow: none; }
+.button-spinner { display: inline-block; width: 14px; height: 14px; margin-right: 5px; border: 1px solid rgb(255 255 255 / .09); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) { .confirm-backdrop { align-items: flex-end; padding: 0; } .confirm-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 24px; border-radius: 10px; } }
 </style>

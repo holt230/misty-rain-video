@@ -5,12 +5,14 @@
 <style scoped>
 .skeleton-resource-card {
   height: 88px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.025) 25%, rgba(255,255,255,0.065) 50%, rgba(255,255,255,0.025) 75%);
+  background: linear-gradient(90deg, rgb(255 255 255 / .035) 25%, rgb(255 255 255 / .085) 50%, rgb(255 255 255 / .035) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.6s infinite;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 24px;
+  border: var(--glass-border);
+  margin-top: 12px;
 }
+@media (prefers-reduced-motion: reduce) { .skeleton-resource-card { animation: none; } }
 
 @keyframes shimmer {
   0% { background-position: 200% 0; }

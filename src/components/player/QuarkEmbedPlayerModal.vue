@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
+import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Maximize, Minimize, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -53,6 +53,7 @@ const playback = ref<PreparedPlayback | null>(null);
 const currentEpisodeIndex = ref(0);
 const episodeGroupIndex = ref(0);
 const settingsExpanded = ref(false);
+const settingsToggleRef = ref<HTMLButtonElement | null>(null);
 const episodePanelRef = ref<HTMLElement | null>(null);
 const selectedSourceId = ref('');
 const errorMessage = ref('');
@@ -1005,6 +1006,21 @@ const scrollToEpisodes = async () => {
   episodePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
+const collapseSettings = async () => {
+  settingsExpanded.value = false;
+  await nextTick();
+  settingsToggleRef.value?.focus({ preventScroll: true });
+};
+
+const selectEpisode = async (index: number) => {
+  await prepareEpisode(index);
+  if (phase.value !== 'ready') return;
+  videoRef.value?.parentElement?.scrollIntoView({
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'start'
+  });
+};
+
 const retry = () => {
   if (session.value && currentEpisode.value) prepareEpisode(currentEpisodeIndex.value);
   else loadSession();
@@ -1167,12 +1183,16 @@ defineExpose({ retry });
             </video>
 
             <button
-              v-if="isIOSPlaybackDevice && phase === 'ready'"
+              v-if="isIOSPlaybackDevice && phase === 'ready' && !visualLandscapeFullscreen"
               type="button"
               class="ios-native-fullscreen-hitbox"
-              :aria-label="visualLandscapeFullscreen ? '退出横屏全屏' : '横屏全屏播放'"
+              aria-label="横屏全屏播放"
               @click="requestNativeVideoFullscreen"
             ></button>
+
+            <button v-if="visualLandscapeFullscreen" type="button" class="fullscreen-exit-button" aria-label="退出横屏全屏" @click="requestNativeVideoFullscreen">
+              <Minimize aria-hidden="true" />
+            </button>
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
@@ -1229,8 +1249,9 @@ defineExpose({ retry });
             </div>
           </div>
 
-          <div v-if="phase === 'ready' && sources.length" class="mobile-player-actions">
+          <div v-if="phase === 'ready' && sources.length" class="player-toolbar" aria-label="播放操作">
             <button
+              ref="settingsToggleRef"
               type="button"
               :aria-expanded="settingsExpanded"
               aria-controls="playback-settings"
@@ -1238,19 +1259,25 @@ defineExpose({ retry });
             >
               <SlidersHorizontal aria-hidden="true" />
               <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ selectedSoundEffect?.label || '原声' }}</small></span>
+              <ChevronDown class="toolbar-chevron" aria-hidden="true" />
             </button>
             <button type="button" @click="scrollToEpisodes">
               <ListVideo aria-hidden="true" />
               <span><strong>选集</strong><small>{{ episodeStatus }}</small></span>
             </button>
+            <button type="button" class="fullscreen-button" aria-label="全屏播放" @click="requestNativeVideoFullscreen"><Maximize aria-hidden="true" /><span>全屏</span></button>
           </div>
 
           <div
             v-if="phase === 'ready' && sources.length"
+            v-show="settingsExpanded"
             id="playback-settings"
             class="playback-settings"
-            :class="{ 'mobile-expanded': settingsExpanded }"
           >
+            <div class="settings-panel-heading">
+              <strong>播放设置</strong>
+              <button class="icon-button" type="button" aria-label="收起播放设置" @click="collapseSettings"><X aria-hidden="true" /></button>
+            </div>
             <div class="setting-group">
               <div class="setting-heading">
                 <span>画质</span>
@@ -1267,6 +1294,7 @@ defineExpose({ retry });
                   :aria-checked="selectedSourceId === source.id"
                   @click="changeQuality(source)"
                 >
+                  <Check v-if="selectedSourceId === source.id" aria-hidden="true" />
                   {{ source.label }}
                 </button>
               </div>
@@ -1395,7 +1423,7 @@ defineExpose({ retry });
               :aria-selected="currentEpisodeIndex === entry.index"
               :aria-label="`${entry.episode.episodeTitle}，${[entry.episode.durationFormatted, entry.episode.sizeFormatted].filter(Boolean).join('，')}`"
               :title="entry.episode.fileName"
-              @click="prepareEpisode(entry.index)"
+              @click="selectEpisode(entry.index)"
             >
               <span class="episode-number">
                 <span>{{ entry.episode.episodeNumber > 0 ? entry.episode.episodeNumber : '•' }}</span>
@@ -1417,1120 +1445,182 @@ defineExpose({ retry });
 </template>
 
 <style scoped>
-.player-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background: rgba(0, 0, 0, 0.86);
-  backdrop-filter: blur(22px);
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 200ms ease, visibility 200ms ease;
-}
-
-.player-backdrop.active {
-  opacity: 1;
-  visibility: visible;
-}
-
-.player-backdrop:not(.active) {
-  display: none;
-}
-
-.player-window {
-  width: min(1180px, 100%);
-  height: min(780px, calc(100dvh - 36px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  color: #f8fafc;
-  background: rgba(8, 10, 17, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 24px;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.72);
-}
-
-.player-header {
-  min-height: 68px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 18px;
-  background: rgba(17, 20, 31, 0.92);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.title-block,
-.header-actions,
-.setting-heading,
-.episode-heading > div {
-  display: flex;
-  align-items: center;
-}
-
-.title-block {
-  gap: 12px;
-  min-width: 0;
-}
-
-.source-badge {
-  flex: 0 0 auto;
-  padding: 4px 9px;
-  color: #fed7aa;
-  font-size: 0.72rem;
-  font-weight: 700;
-  border: 1px solid rgba(251, 146, 60, 0.36);
-  border-radius: 999px;
-  background: rgba(194, 65, 12, 0.2);
-}
-
-.source-badge.svip {
-  color: #fde68a;
-  border-color: rgba(245, 158, 11, 0.42);
-  background: rgba(180, 83, 9, 0.22);
-}
-
-.title-copy {
-  min-width: 0;
-}
-
-.title-copy h2 {
-  overflow: hidden;
-  color: #fff;
-  font-size: 1rem;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.title-copy p {
-  max-width: 560px;
-  overflow: hidden;
-  color: rgba(255, 255, 255, 0.52);
-  font-size: 0.75rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.header-actions {
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
-.text-action,
-.icon-button,
-.primary-button,
-.secondary-button,
-.option-chip,
-.episode-item {
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.text-action,
-.icon-button {
-  min-height: 44px;
-  color: rgba(255, 255, 255, 0.76);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.text-action {
-  padding: 0 15px;
-  border-radius: 999px;
-}
-
-.icon-button {
-  width: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-}
-
-.icon-button svg,
-.state-icon {
-  width: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 2;
-}
-
-.text-action:hover,
-.icon-button:hover,
-.text-action:focus-visible,
-.icon-button:focus-visible {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.player-layout {
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  flex: 1;
-}
-
-.player-layout.single-column {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.video-column {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: #000;
-}
-
-.video-stage {
-  position: relative;
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  flex: 1;
-  overflow: hidden;
-  background: #000;
-}
-
-.video-element {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
-}
-
-.ios-native-fullscreen-hitbox {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 4;
-  width: 58px;
-  height: 50px;
-  padding: 0;
-  border: 0;
-  border-radius: 0 0 18px;
-  background: transparent;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.ios-native-fullscreen-hitbox:focus-visible {
-  outline: 2px solid var(--liquid-accent);
-  outline-offset: -3px;
-}
-
-.stage-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 24px;
-  text-align: center;
-  background: radial-gradient(circle at center, rgba(34, 39, 57, 0.92), rgba(0, 0, 0, 0.95));
-}
-
-.loading-state {
-  isolation: isolate;
-  overflow: hidden;
-  background: #030304;
-}
-
-.loading-state::before,
-.loading-state::after {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-}
-
-.loading-state::before {
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(20, 23, 31, 0.42), rgba(0, 0, 0, 0.86) 66%),
-    linear-gradient(180deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.82));
-}
-
-.loading-state::after {
-  z-index: 0;
-  top: 0;
-  bottom: 0;
-  width: 30%;
-  opacity: 0.42;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.055), transparent);
-  transform: skewX(-12deg) translateX(-180%);
-  animation: stage-scan 2.8s ease-in-out infinite;
-}
-
-.stage-poster {
-  position: absolute;
-  inset: -9%;
-  z-index: -2;
-  width: 118%;
-  height: 118%;
-  object-fit: cover;
-  opacity: 0.28;
-  filter: blur(18px) saturate(0.72);
-  transform: scale(1.04);
-}
-
-.loading-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.stage-state strong {
-  font-size: 1rem;
-}
-
-.stage-state p {
-  max-width: 420px;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 0.82rem;
-}
-
-.play-prompt,
-.playback-starting {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-}
-
-.play-prompt {
-  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.42));
-}
-
-.stage-play-button {
-  min-width: 148px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 7px;
-  padding: 14px 18px;
-  color: #fff;
-  border: 0;
-  border-radius: 24px;
-  background: transparent;
-  pointer-events: auto;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.stage-play-icon {
-  width: 70px;
-  height: 70px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.36);
-  border-radius: 50%;
-  background: rgba(20, 20, 24, 0.54);
-  box-shadow:
-    0 14px 38px rgba(0, 0, 0, 0.36),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(18px) saturate(1.35);
-  -webkit-backdrop-filter: blur(18px) saturate(1.35);
-  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
-}
-
-.stage-play-icon svg {
-  width: 29px;
-  height: 29px;
-  margin-left: 3px;
-  fill: currentColor;
-  stroke-width: 1.7;
-}
-
-.stage-play-label {
-  font-size: 0.92rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.72);
-}
-
-.stage-play-button small {
-  color: rgba(255, 255, 255, 0.64);
-  font-size: 0.7rem;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.76);
-}
-
-.stage-play-button:hover .stage-play-icon,
-.stage-play-button:focus-visible .stage-play-icon {
-  border-color: rgba(255, 255, 255, 0.58);
-  background: rgb(var(--accent-rgb) / 0.86);
-}
-
-.stage-play-button:active .stage-play-icon {
-  transform: scale(0.96);
-}
-
-.stage-play-button:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.88);
-  outline-offset: 3px;
-}
-
-.playback-starting-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 13px;
-  color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
-  background: rgba(15, 16, 20, 0.58);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(16px) saturate(1.25);
-  -webkit-backdrop-filter: blur(16px) saturate(1.25);
-  font-size: 0.76rem;
-  font-weight: 550;
-}
-
-.playback-starting-pill svg {
-  width: 16px;
-  height: 16px;
-  animation: spin 0.9s linear infinite;
-}
-
-.loading-wave {
-  display: flex;
-  width: 48px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  margin-bottom: 3px;
-}
-
-.loading-wave i {
-  width: 3px;
-  height: 22px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #d9deff, var(--liquid-accent));
-  box-shadow: 0 0 14px var(--liquid-accent-glow);
-  animation: loading-wave 1.05s ease-in-out infinite;
-}
-
-.loading-wave i:nth-child(2) { animation-delay: 0.12s; }
-.loading-wave i:nth-child(3) { animation-delay: 0.24s; }
-.loading-wave i:nth-child(4) { animation-delay: 0.36s; }
-
-.error-state .state-icon {
-  width: 38px;
-  color: #fda4af;
-}
-
-.state-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.primary-button,
-.secondary-button {
-  min-height: 44px;
-  padding: 0 18px;
-  color: #fff;
-  border-radius: 999px;
-}
-
-.primary-button {
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: #e11d48;
-}
-
-.secondary-button {
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.reload-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-.reload-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; }
-
-.mobile-player-actions { display: none; }
-
-.playback-settings {
-  display: grid;
-  gap: 12px;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(13, 16, 25, 0.98);
-}
-
-.setting-group {
-  min-width: 0;
-}
-
-.setting-heading {
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 7px;
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 0.8rem;
-}
-
-.setting-heading small,
-.episode-heading small,
-.episode-heading span,
-.episode-copy small {
-  color: rgba(255, 255, 255, 0.44);
-  font-size: 0.7rem;
-}
-
-.option-scroll {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.option-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.option-chip {
-  min-height: 40px;
-  flex: 0 0 auto;
-  padding: 0 14px;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 0.78rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.option-chip.active {
-  color: #fff;
-  border-color: rgba(244, 63, 94, 0.62);
-  background: rgba(190, 18, 60, 0.34);
-}
-
-.option-chip:disabled {
-  cursor: default;
-  opacity: 0.62;
-}
-
-.option-chip:focus-visible,
-.episode-item:focus-visible,
-.primary-button:focus-visible,
-.secondary-button:focus-visible {
-  outline: 2px solid #fb7185;
-  outline-offset: 2px;
-}
-
-.episode-panel {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  background: #0c0f18;
-}
-
-.episode-heading {
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.episode-heading > div {
-  gap: 8px;
-}
-
-.episode-heading-title {
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start !important;
-  gap: 3px !important;
-}
-
-.episode-heading-main { display: flex; align-items: center; gap: 8px; }
-.episode-update-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
-
-.episode-heading strong {
-  font-size: 0.9rem;
-}
-
-.episode-ranges {
-  display: flex;
-  gap: 7px;
-  padding: 9px 10px 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.episode-ranges::-webkit-scrollbar { display: none; }
-.episode-ranges button {
-  min-height: 34px;
-  padding: 0 12px;
-  flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.035);
-  cursor: pointer;
-}
-.episode-ranges button.active {
-  color: #fff;
-  border-color: rgb(var(--accent-rgb) / 0.24);
-  background: var(--liquid-accent-subtle);
-}
-
-.episode-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.episode-item {
-  min-height: 58px;
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  color: rgba(255, 255, 255, 0.76);
-  text-align: left;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.episode-item:hover,
-.episode-item:focus-visible {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.episode-item.active {
-  color: #fff;
-  border-color: rgba(244, 63, 94, 0.38);
-  background: rgba(159, 18, 57, 0.22);
-}
-
-.episode-number {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.76rem;
-  font-weight: 700;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.episode-latest {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  padding: 0 3px;
-  color: var(--accent-ink);
-  font-size: 0.55rem;
-  font-style: normal;
-  font-weight: 800;
-  line-height: 1;
-  border-radius: 999px;
-  background: var(--liquid-accent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
-}
-
-.episode-current-dot {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 7px currentColor;
-}
-
-.episode-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.episode-copy strong {
-  overflow: hidden;
-  font-size: 0.78rem;
-  font-weight: 550;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sr-status {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes loading-wave {
-  0%, 100% { opacity: 0.38; transform: scaleY(0.34); }
-  50% { opacity: 1; transform: scaleY(1); }
-}
-
-@keyframes stage-scan {
-  0%, 18% { transform: skewX(-12deg) translateX(-180%); }
-  72%, 100% { transform: skewX(-12deg) translateX(440%); }
-}
-
+.player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
+.player-backdrop.active { opacity: 1; visibility: visible; }
+.player-backdrop:not(.active) { display: none; }
+.player-window { display: flex; flex-direction: column; width: min(1200px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 34px; color: var(--text-primary); background: var(--app-atmosphere); box-shadow: var(--glass-highlight-inner), 0 28px 90px rgb(0 0 0 / .4); }
+.player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 22px; border-bottom: 1px solid rgb(255 255 255 / .09); background: var(--glass-material); }
+.title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
+.title-block, .title-copy { min-width: 0; }
+.source-badge { flex: 0 0 auto; padding: 6px 10px; border: var(--glass-border); border-radius: 18px; color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-size: .7rem; font-weight: 650; }
+.title-copy h2 { overflow: hidden; color: var(--text-primary); font-size: 1.1rem; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
+.title-copy p { margin-top: 3px; overflow: hidden; color: var(--text-tertiary); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
+.header-actions { flex-shrink: 0; gap: 8px; }
+.text-action, .icon-button { min-height: 44px; border: var(--glass-border); color: var(--text-secondary); background: var(--glass-bg); box-shadow: none; }
+.text-action { padding: 0 18px; border-radius: 24px; font-size: .82rem; font-weight: 600; }
+.icon-button { display: grid; width: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
+.icon-button svg { width: 19px; height: 19px; }
+.text-action:hover, .icon-button:hover { background: var(--glass-bg-active); }
+.player-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; flex: 1; }
+.player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
+.video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
+/* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
+.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: 16 / 9; flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 22px; color: var(--text-primary); background: #000; box-shadow: 0 9px 25px rgb(30 43 67 / .16); color-scheme: dark; }
+.video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
+.ios-native-fullscreen-hitbox { position: absolute; top: 0; left: 0; z-index: 4; width: 58px; height: 50px; padding: 0; border: 0; border-radius: 0 0 18px; background: transparent; }
+.ios-native-fullscreen-hitbox:focus-visible { outline-offset: -3px; }
+.fullscreen-exit-button { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); z-index: 5; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: #fff; background: rgb(23 32 47 / .72); box-shadow: inset 0 1px rgb(255 255 255 / .55); }
+.fullscreen-exit-button svg { width: 20px; height: 20px; }
+.stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
+.loading-state { isolation: isolate; }
+.stage-poster { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
+.loading-content { display: grid; justify-items: center; gap: 8px; }
+.stage-state strong { font-size: .97rem; font-weight: 650; }
+.stage-state p { max-width: 420px; color: var(--text-secondary); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.state-icon { width: 28px; height: 28px; color: #f0c3cc; }
+.state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 5px; }
+.primary-button, .secondary-button { min-height: 44px; padding: 0 17px; border: 1px solid rgb(255 255 255 / .16); border-radius: 24px; font-size: .8rem; font-weight: 600; box-shadow: none; }
+.primary-button { color: #eff3fa; background: rgb(255 255 255 / .12); }
+.secondary-button { color: #f1f5ff; background: rgb(255 255 255 / .045); }
+.reload-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.reload-button svg { width: 16px; height: 16px; }
+.play-prompt, .playback-starting { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
+.play-prompt { background: rgb(0 0 0 / .2); }
+.stage-play-button { display: grid; min-width: 140px; justify-items: center; gap: 7px; padding: 12px 16px; border: 0; border-radius: 26px; color: #fff; background: transparent; pointer-events: auto; }
+.stage-play-icon { display: grid; width: 68px; height: 68px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: #fff; background: linear-gradient(145deg, rgb(255 255 255 / .4), rgb(255 255 255 / .1)); box-shadow: inset 0 2px 2px rgb(255 255 255 / .6), 0 9px 28px rgb(0 0 0 / .2); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); transition: transform .2s, background .2s; }
+.stage-play-icon svg { width: 27px; height: 27px; margin-left: 3px; fill: currentColor; }
+.stage-play-button:active .stage-play-icon { transform: scale(.95); }
+.stage-play-label { font-size: .86rem; font-weight: 650; text-shadow: 0 2px 6px #000; }
+.stage-play-button small { color: #e1e9f8; font-size: .7rem; text-shadow: 0 2px 6px #000; }
+.playback-starting-pill { display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 1px solid rgb(255 255 255 / .09); border-radius: 24px; color: #f4f7ff; background: rgb(29 40 59 / .8); box-shadow: inset 0 1px rgb(255 255 255 / .4); font-size: .77rem; }
+.playback-starting-pill svg { width: 17px; height: 17px; animation: spin 1s linear infinite; }
+.loading-wave { display: flex; height: 30px; align-items: center; gap: 4px; margin-bottom: 2px; }
+.loading-wave i { width: 3px; height: 20px; border-radius: 5px; background: #bad2ff; animation: loading-wave 1.2s ease-in-out infinite; }
+.loading-wave i:nth-child(2) { animation-delay: .12s; }
+.loading-wave i:nth-child(3) { animation-delay: .24s; }
+.loading-wave i:nth-child(4) { animation-delay: .36s; }
+.player-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 58px; flex-shrink: 0; gap: 9px; padding: 14px 0; }
+.player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: var(--glass-border); border-radius: 17px; color: var(--text-primary); background: var(--glass-bg); box-shadow: none; text-align: left; }
+.player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); border-color: rgb(var(--accent-rgb) / .25); }
+.player-toolbar button > svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--liquid-accent); }
+.player-toolbar button > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.player-toolbar strong { font-size: .81rem; font-weight: 650; }
+.player-toolbar small { overflow: hidden; color: var(--text-tertiary); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.player-toolbar .toolbar-chevron { width: 15px; height: 15px; transition: transform .2s; }
+.player-toolbar [aria-expanded='true'] .toolbar-chevron { transform: rotate(180deg); }
+.player-toolbar .fullscreen-button { display: grid; justify-items: center; align-content: center; gap: 3px; padding: 7px 4px; }
+.fullscreen-button span { flex: none; font-size: .65rem; }
+.playback-settings { display: grid; flex-shrink: 0; gap: 18px; margin-bottom: 8px; padding: 18px; border: var(--glass-border); border-radius: 27px; background: var(--glass-sheet-material); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.settings-panel-heading, .setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settings-panel-heading { margin-top: -6px; margin-bottom: -7px; }
+.settings-panel-heading > strong { font-size: .97rem; font-weight: 700; }
+.settings-panel-heading .icon-button { box-shadow: none; background: var(--glass-bg); }
+.setting-group { min-width: 0; }
+.setting-heading { margin-bottom: 10px; font-size: .82rem; font-weight: 650; }
+.setting-heading small { min-width: 0; overflow: hidden; color: var(--text-tertiary); font-size: .67rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.option-scroll { display: flex; gap: 7px; overflow-x: auto; padding: 3px 2px 7px; scrollbar-width: thin; }
+.option-chip { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; padding: 0 15px; border: var(--glass-border); border-radius: 24px; color: var(--text-secondary); background: var(--glass-bg); font-size: .77rem; }
+.option-chip svg { width: 14px; height: 14px; }
+.option-chip.active { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .23); background: var(--glass-lens); box-shadow: none; font-weight: 650; }
+.option-chip:disabled { opacity: 1; cursor: default; }
+.automation-list { display: grid; border: var(--glass-border); border-radius: 20px; background: var(--glass-bg); }
+.automation-row { display: flex; min-width: 0; min-height: 70px; align-items: center; gap: 12px; padding: 12px 14px; }
+.automation-row + .automation-row { border-top: 1px solid rgb(60 84 122 / .1); }
+.automation-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.automation-copy strong { font-size: .8rem; font-weight: 600; }
+.automation-copy small { color: var(--text-tertiary); font-size: .68rem; line-height: 1.5; }
+/* The switch has a 44px touch target around its 30px visual track. */
+.setting-switch { position: relative; width: 52px; height: 44px; flex-shrink: 0; border: 0; border-radius: 24px; background: transparent; }
+.setting-switch::before { content: ''; position: absolute; inset: 7px 0; border: 1px solid rgb(80 105 145 / .14); border-radius: 18px; background: #3b4450; box-shadow: inset 0 1px 3px rgb(36 54 86 / .12); transition: background .2s; }
+.setting-switch span { position: absolute; top: 10px; left: 3px; width: 24px; height: 24px; border: 1px solid rgb(255 255 255 / .18); border-radius: 50%; background: #d8dfe9; box-shadow: 0 2px 5px rgb(36 54 86 / .2); transition: transform .22s var(--spring-ease); }
+.setting-switch[aria-checked='true']::before { background: var(--liquid-accent); }
+.setting-switch[aria-checked='true'] span { transform: translateX(22px); }
+.episode-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin: 18px 18px 18px 0; overflow: hidden; border: var(--glass-border); border-radius: 27px; background: var(--glass-sheet-material); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.episode-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 16px 15px; }
+.episode-heading-title { display: grid; min-width: 0; gap: 5px; }
+.episode-heading-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
+.episode-heading strong { font-size: 1rem; font-weight: 700; }
+.episode-heading small, .episode-heading span { color: var(--text-tertiary); font-size: .66rem; }
+.episode-heading > small { flex-shrink: 0; }
+.episode-update-time { font-variant-numeric: tabular-nums; }
+.episode-ranges { display: flex; flex-shrink: 0; gap: 6px; overflow-x: auto; padding: 0 12px 10px; }
+.episode-ranges button { min-height: 44px; flex-shrink: 0; padding: 0 14px; border: var(--glass-border); border-radius: 24px; color: var(--text-secondary); background: var(--glass-bg); font-size: .76rem; }
+.episode-ranges button.active { color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-weight: 650; }
+.episode-list { display: grid; min-height: 0; align-content: start; gap: 8px; overflow-y: auto; overscroll-behavior: contain; padding: 3px 12px 16px; }
+.episode-item { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px; border: 1px solid transparent; border-radius: 19px; color: var(--text-secondary); background: transparent; text-align: left;  box-shadow: none; }
+.episode-item.active { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .24); background: var(--glass-lens); box-shadow: none; }
+.episode-item:hover { background: var(--glass-bg-hover); }
+.episode-number { position: relative; display: grid; width: 40px; height: 40px; place-items: center; border: var(--glass-border); border-radius: 14px; background: var(--glass-bg); font-size: .84rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.episode-item.active .episode-number { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .2); background: var(--liquid-accent-subtle); box-shadow: none; }
+.episode-latest { position: absolute; top: -6px; right: -5px; display: grid; min-width: 16px; height: 16px; place-items: center; padding: 0 3px; border: 1px solid rgb(255 255 255 / .09); border-radius: 9px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .5rem; font-weight: 650; line-height: 1; }
+.episode-current-dot { position: absolute; bottom: 4px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.episode-copy { display: grid; min-width: 0; gap: 4px; }
+.episode-copy strong { overflow: hidden; font-size: .79rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.episode-copy small { color: var(--text-tertiary); font-size: .65rem; }
+.sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes loading-wave { 0%, 100% { opacity: .45; transform: scaleY(.45); } 50% { opacity: 1; transform: scaleY(1); } }
+@media (max-width: 1000px) and (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 255px; } .source-badge { display: none; } .player-toolbar .toolbar-chevron { display: none; } }
 @media (max-width: 820px) {
-  .player-backdrop {
-    padding: 0;
-    place-items: stretch;
-  }
-
-  .player-window {
-    width: 100%;
-    height: 100dvh;
-    border: 0;
-    border-radius: 0;
-  }
-
-  .player-header {
-    min-height: calc(60px + env(safe-area-inset-top));
-    padding-top: calc(8px + env(safe-area-inset-top));
-  }
-
-  .player-layout {
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-
-  .video-column {
-    flex: 0 0 auto;
-  }
-
-  .video-stage {
-    width: 100%;
-    min-height: min(56.25vw, 42dvh);
-    aspect-ratio: 16 / 9;
-    flex: none;
-  }
-
-  .playback-settings {
-    padding-bottom: 12px;
-  }
-
-  .option-chip {
-    min-height: 44px;
-  }
-
-  .episode-panel {
-    min-height: 280px;
-    flex: 1 0 280px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    border-left: 0;
-  }
-
-  .episode-heading {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: rgba(12, 15, 24, 0.96);
-  }
-
-  .episode-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  }
-
-  .text-action {
-    display: none;
-  }
-
-  .title-copy p {
-    max-width: 54vw;
-  }
-}
-
-@media (max-width: 430px) {
-  .source-badge {
-    display: none;
-  }
-
-  .episode-list {
-    grid-template-columns: 1fr;
-  }
-
-  .setting-heading small,
-  .episode-heading > small {
-    display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .player-backdrop,
-  .loading-wave i,
-  .loading-state::after,
-  .playback-starting-pill svg {
-    transition: none;
-    animation: none;
-  }
-}
-</style>
-
-<style scoped>
-.player-backdrop { background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.player-window {
-  border-color: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  background: #090a0d;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.66);
-}
-.player-header { border-color: rgba(255, 255, 255, 0.075); background: #121318; }
-.source-badge { color: var(--liquid-accent); border-color: rgba(46, 230, 166, 0.24); background: rgba(46, 230, 166, 0.09); }
-.text-action,
-.icon-button { border-color: rgba(255, 255, 255, 0.075); background: rgba(255, 255, 255, 0.045); }
-.text-action:hover,
-.icon-button:hover,
-.text-action:focus-visible,
-.icon-button:focus-visible { border-color: rgba(255, 255, 255, 0.13); background: rgba(255, 255, 255, 0.075); }
-.stage-state { background: radial-gradient(circle at center, #15171d 0%, #050506 76%); }
-.loading-state { background: #030304; }
-.error-state .state-icon { color: var(--danger); }
-.primary-button { border-color: transparent; background: var(--liquid-accent); }
-.playback-settings { border-color: rgba(255, 255, 255, 0.075); background: #111217; }
-.option-chip { border-color: rgba(255, 255, 255, 0.075); border-radius: 12px; background: rgba(255, 255, 255, 0.045); }
-.option-chip.active { border-color: rgba(46, 230, 166, 0.24); background: rgba(46, 230, 166, 0.1); }
-.option-chip:focus-visible,
-.episode-item:focus-visible,
-.primary-button:focus-visible,
-.secondary-button:focus-visible { outline-color: var(--liquid-accent); }
-.episode-panel { border-color: rgba(255, 255, 255, 0.075); background: #0e0f13; }
-.episode-heading { border-color: rgba(255, 255, 255, 0.075); }
-.episode-item { border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
-.episode-item.active { border-color: rgba(46, 230, 166, 0.22); background: rgba(46, 230, 166, 0.1); }
-.episode-number { color: var(--text-secondary); background: rgba(255, 255, 255, 0.055); }
-
-@media (max-width: 820px) {
-  .player-backdrop { background: #050506; backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .player-window { background: #08090b; }
-  .player-header {
-    min-height: calc(56px + var(--safe-area-top));
-    padding: calc(7px + var(--safe-area-top)) var(--mobile-gutter) 7px;
-    border: 0;
-    background: #08090b;
-  }
-  .title-block { gap: 8px; }
-  .title-copy h2 { font-size: 1rem; font-weight: 650; }
-  .title-copy p { margin-top: 1px; font-size: .69rem; }
-  .icon-button { width: 42px; min-height: 42px; border: 0; background: rgba(255,255,255,.07); }
-  .video-stage { min-height: 0; max-height: 38dvh; background: #000; }
-  .stage-state { gap: 8px; background: #030304; }
+  .player-backdrop { padding: 0; place-items: stretch; background: rgb(0 0 0 / .58); }
+  .player-window { width: 100%; height: 100dvh; border: 0; border-radius: 0;  box-shadow: var(--glass-highlight-inner), 0 28px 90px rgb(0 0 0 / .4); }
+  .player-header { min-height: calc(72px + var(--safe-area-top)); padding: calc(10px + var(--safe-area-top)) calc(18px + var(--safe-area-right)) 10px calc(18px + var(--safe-area-left)); }
+  .source-badge { display: none; }
+  .title-copy h2 { font-size: 1.06rem; }
+  .title-copy p { font-size: .71rem; }
+  .header-actions { gap: 6px; }
+  .text-action { padding: 0 13px; }
+  .player-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+  .video-column { flex: 0 0 auto; overflow: visible; padding: 14px calc(14px + var(--safe-area-right)) 0 calc(14px + var(--safe-area-left)); }
+  .video-stage { min-height: 0; aspect-ratio: 16 / 9; border-radius: 21px;  border: var(--glass-border); }
+  .video-stage:last-child { margin-bottom: 14px; }
+  .stage-state { gap: 7px; padding: 12px;  background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
+  .stage-state strong { font-size: .88rem; }
+  .stage-state p { font-size: .74rem; line-height: 1.45; }
   .stage-poster { display: none; }
-  .loading-state::after { display: none; }
-  .loading-wave { margin-bottom: 1px; }
-  .stage-state p { max-width: 300px; font-size: .76rem; }
-  .stage-play-button { min-width: 132px; gap: 6px; padding: 10px 14px; }
-  .stage-play-icon { width: 60px; height: 60px; }
-  .stage-play-icon svg { width: 25px; height: 25px; }
-  .stage-play-label { font-size: .82rem; }
-  .stage-play-button small { font-size: .66rem; }
-  .mobile-player-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px var(--mobile-gutter);
-    background: #08090b;
-  }
-  .mobile-player-actions button {
-    min-width: 0;
-    min-height: 56px;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 8px 10px;
-    border: 1px solid rgba(255,255,255,.065);
-    border-radius: 13px;
-    color: #fff;
-    background: rgba(255,255,255,.035);
-    text-align: left;
-    touch-action: manipulation;
-  }
-  .mobile-player-actions button > svg { width: 20px; flex: 0 0 auto; color: var(--liquid-accent); }
-  .mobile-player-actions button > span { min-width: 0; display: grid; gap: 2px; }
-  .mobile-player-actions strong { font-size: .78rem; }
-  .mobile-player-actions small { overflow: hidden; color: var(--text-tertiary); font-size: .63rem; text-overflow: ellipsis; white-space: nowrap; }
-  .playback-settings {
-    display: none;
-    gap: 0;
-    padding: 4px var(--mobile-gutter) 0;
-    border: 0;
-    background: #08090b;
-  }
-  .playback-settings.mobile-expanded { display: grid; }
-  .setting-group { padding: 13px 0; border-bottom: 1px solid rgba(255,255,255,.065); }
-  .setting-heading { margin-bottom: 9px; font-size: .76rem; }
-  .setting-heading small { font-size: .66rem; }
-  .option-scroll { gap: 7px; margin-right: calc(-1 * var(--mobile-gutter)); padding-right: var(--mobile-gutter); }
-  .option-chip {
-    min-height: 38px;
-    padding: 0 13px;
-    border: 0;
-    border-radius: 10px;
-    background: rgba(255,255,255,.055);
-    font-size: .75rem;
-  }
-  .option-chip.active { color: var(--liquid-accent); background: rgba(46,230,166,.11); }
-  .episode-panel { min-height: 244px; flex-basis: 244px; border: 0; background: #08090b; scroll-margin-top: calc(56px + var(--safe-area-top)); }
-  .player-layout.single-column .video-column { flex: 1 1 auto; }
-  .player-layout.single-column .video-stage { height: 100%; max-height: none; aspect-ratio: auto; }
-  .episode-heading {
-    position: static;
-    min-height: 58px;
-    padding: 14px var(--mobile-gutter) 9px;
-    border: 0;
-    background: #08090b;
-  }
-  .episode-heading strong { font-size: .96rem; }
-  .episode-ranges {
-    gap: 6px;
-    padding: 5px var(--mobile-gutter) 3px;
-  }
-  .episode-ranges button { min-height: 42px; padding: 0 14px; border: 0; border-radius: 11px; touch-action: manipulation; }
-  .episode-list {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 7px;
-    padding: 6px var(--mobile-gutter) calc(18px + var(--safe-area-bottom));
-  }
-  .episode-item {
-    position: relative;
-    min-height: 52px;
-    grid-template-columns: 1fr;
-    gap: 0;
-    padding: 0;
-    overflow: visible;
-    border: 1px solid rgba(151,255,211,.06);
-    border-radius: 13px;
-    background: linear-gradient(145deg, rgba(151,255,211,.055), rgba(151,255,211,.018));
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
-  }
-  .episode-item.active {
-    color: #032117;
-    border-color: rgba(129,255,207,.7);
-    background: linear-gradient(145deg, #78f6c5, var(--liquid-accent-strong));
-    box-shadow: 0 7px 18px rgba(16,174,119,.2), inset 0 1px 0 rgba(255,255,255,.48);
-  }
-  .episode-number {
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
-    color: inherit;
-    background: transparent;
-    font-size: .86rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .episode-item.latest:not(.active) { border-color: rgba(46,230,166,.18); }
-  .episode-latest { top: -5px; right: -4px; min-width: 15px; height: 15px; font-size: .5rem; }
-  .episode-item.active .episode-latest { color: var(--liquid-accent); background: #032117; }
-  .episode-current-dot { right: 7px; bottom: 6px; width: 4px; height: 4px; }
+  .stage-play-icon { width: 58px; height: 58px; }
+  .stage-play-button small { font-size: .65rem; }
+  .player-toolbar { gap: 7px; padding: 12px 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 49px; }
+  .player-toolbar button { min-height: 62px; gap: 7px; padding: 9px 10px; border-radius: 17px;  box-shadow: none;  background: var(--glass-bg); }
+  .player-toolbar strong { font-size: .77rem; }
+  .player-toolbar small { font-size: .62rem; }
+  .player-toolbar .toolbar-chevron { display: none; }
+  .player-toolbar .fullscreen-button { padding: 8px 3px; }
+  .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 25px; }
+  .setting-heading { flex-wrap: wrap; gap: 4px 10px; }
+  .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); overflow: visible; scroll-margin-top: 10px; }
+  .episode-heading { padding: 19px 16px 15px; }
+  .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; overflow: visible; padding: 7px 14px 20px; }
+  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: var(--glass-border); border-radius: 17px; background: transparent; box-shadow: none; }
+  .episode-number { width: 100%; height: 100%; min-height: 52px; border: 0; border-radius: inherit; background: transparent; font-size: .9rem; }
+  .episode-item.active { border-color: rgb(var(--accent-rgb) / .3);  box-shadow: none; }
+  .episode-item.active .episode-number { background: var(--liquid-accent-subtle);  color: var(--liquid-accent-strong);  box-shadow: none;  border-color: rgb(var(--accent-rgb) / .2); }
+  .episode-latest { top: -5px; right: -4px;  color: var(--accent-ink); }
   .episode-copy { display: none; }
 }
-
-@media (max-width: 430px) {
-  .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
+@media (max-height: 500px) and (orientation: landscape) {
+  .player-backdrop { padding: 0;  background: rgb(0 0 0 / .58); }
+  .player-window { width: 100%; height: 100dvh; border-radius: 0;  box-shadow: var(--glass-highlight-inner), 0 28px 90px rgb(0 0 0 / .4); }
+  .player-header { min-height: 62px; padding-top: 8px; padding-bottom: 8px; }
+  .player-layout { display: grid; grid-template-columns: minmax(0, 1fr) 250px; overflow: hidden; }
+  .video-column { overflow-y: auto; padding: 12px; }
+  .video-stage { min-height: 200px;  border: var(--glass-border); }
+  .episode-panel { min-height: 0; margin: 12px 12px 12px 0; overflow: hidden; }
+  .episode-list { grid-template-columns: repeat(3, minmax(0, 1fr)); overflow-y: auto; gap: 9px; padding: 7px 14px 14px; }
+  .episode-item { min-height: 52px; grid-template-columns: 1fr; padding: 0;  background: transparent;  box-shadow: none; }
+  .episode-number { width: 100%; height: 52px; border: 0; }
+  .episode-copy { display: none; }
 }
-</style>
-
-<style scoped>
-.player-backdrop { background: rgb(3 4 8 / 0.94); }
-.player-window { border-color: rgb(239 241 255 / 0.08); background: #0a0b10; }
-.player-header { border-color: rgb(239 241 255 / 0.07); background: #11131b; }
-.source-badge { color: var(--liquid-accent); border-color: rgb(var(--accent-rgb) / 0.22); background: var(--liquid-accent-subtle); }
-.text-action,
-.icon-button { border-color: rgb(239 241 255 / 0.08); background: rgb(237 240 255 / 0.04); }
-.text-action:hover,
-.icon-button:hover { border-color: rgb(var(--accent-rgb) / 0.18); background: var(--liquid-accent-muted); }
-.loading-wave i { background: linear-gradient(180deg, #d9deff, var(--liquid-accent)); box-shadow: 0 0 14px var(--liquid-accent-glow); }
-.playback-starting-pill { border-color: rgb(var(--accent-rgb) / 0.16); color: var(--text-secondary); background: rgb(17 19 28 / 0.78); }
-.stage-play-icon,
-.primary-button { color: var(--accent-ink); background: linear-gradient(145deg, var(--liquid-accent), var(--liquid-accent-strong)); }
-.playback-settings { border-color: rgb(239 241 255 / 0.07); background: #11131b; }
-.option-chip { border-color: rgb(239 241 255 / 0.075); background: rgb(237 240 255 / 0.04); }
-.option-chip.active { border-color: rgb(var(--accent-rgb) / 0.25); color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
-.automation-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid rgb(239 241 255 / 0.07);
-  border-radius: 14px;
-  background: rgb(237 240 255 / 0.025);
-}
-.automation-row {
-  min-width: 0;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 11px;
-}
-.automation-row + .automation-row { border-left: 1px solid rgb(239 241 255 / 0.07); }
-.automation-copy { min-width: 0; display: grid; flex: 1; gap: 2px; }
-.automation-copy strong { color: var(--text-primary); font-size: .78rem; font-weight: 620; }
-.automation-copy small { color: var(--text-tertiary); font-size: .66rem; line-height: 1.35; }
-.setting-switch {
-  position: relative;
-  width: 46px;
-  height: 28px;
-  flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: rgb(205 210 229 / 0.18);
-  cursor: pointer;
-  touch-action: manipulation;
-  transition: background 180ms ease, box-shadow 180ms ease;
-}
-.setting-switch span {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #f8f8ff;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, .34);
-  transition: transform 190ms ease;
-}
-.setting-switch[aria-checked='true'] { background: var(--liquid-accent-strong); box-shadow: 0 0 0 1px rgb(var(--accent-rgb) / .14); }
-.setting-switch[aria-checked='true'] span { transform: translateX(18px); }
-.setting-switch:focus-visible { outline: 2px solid var(--liquid-accent); outline-offset: 2px; }
-.episode-panel { border-color: rgb(239 241 255 / 0.07); background: #0d0f16; }
-.episode-heading { border-color: rgb(239 241 255 / 0.07); }
-.episode-ranges button,
-.episode-item { border-color: rgb(239 241 255 / 0.07); background: rgb(237 240 255 / 0.03); }
-.episode-ranges button.active,
-.episode-item.active { border-color: rgb(var(--accent-rgb) / 0.22); color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
-.episode-number { background: rgb(237 240 255 / 0.045); }
-
-@media (max-width: 820px) {
-  .player-backdrop,
-  .player-window,
-  .player-header,
-  .mobile-player-actions,
-  .playback-settings,
-  .episode-panel,
-  .episode-heading { background: #0a0b10; }
-  .player-header { background: linear-gradient(180deg, #151824, #0a0b10); }
-  .icon-button { background: rgb(237 240 255 / 0.055); }
-  .mobile-player-actions button { border-color: rgb(239 241 255 / 0.08); background: rgb(237 240 255 / 0.035); }
-  .mobile-player-actions button > svg { color: var(--liquid-accent); }
-  .setting-group { border-color: rgb(239 241 255 / 0.07); }
-  .automation-setting-group { padding-bottom: 16px; border-bottom: 0; }
-  .automation-list { grid-template-columns: 1fr; border-radius: 15px; }
-  .automation-row { min-height: 62px; padding: 10px 12px; }
-  .automation-row + .automation-row { border-top: 1px solid rgb(239 241 255 / 0.07); border-left: 0; }
-  .automation-copy strong { font-size: .8rem; }
-  .automation-copy small { font-size: .67rem; }
-  .option-chip { background: rgb(237 240 255 / 0.045); }
-  .option-chip.active { color: var(--liquid-accent); background: rgb(var(--accent-rgb) / 0.12); }
-  .episode-item {
-    border-color: rgb(239 241 255 / .06);
-    background: linear-gradient(145deg, rgb(237 240 255 / .055), rgb(237 240 255 / .018));
-  }
-  .episode-item.active {
-    color: var(--accent-ink);
-    border-color: rgb(var(--accent-rgb) / .72);
-    background: linear-gradient(145deg, #c0caff, var(--liquid-accent-strong));
-  }
-  .episode-number { background: transparent; }
-}
-
-/* 全屏由状态控制：iPhone 横屏宽度可能超过普通移动布局的 820px 断点。 */
-.player-backdrop.visual-fullscreen-active {
-  /* 覆盖共享弹层的 !important 毛玻璃，避免固定播放器被祖先包含或裁剪。 */
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-.visual-fullscreen-active .player-window,
-.visual-fullscreen-active .player-layout {
-  overflow: visible;
-}
-
-/* 明确高于 single-column 的优先级，防止电影布局用 height: 100% 覆盖视口高度。 */
-.visual-fullscreen-active .video-stage.visual-landscape-fullscreen {
-  position: fixed;
-  z-index: 2400;
-  inset: 0;
-  width: 100dvw;
-  height: 100dvh;
-  min-width: 0;
-  min-height: 0;
-  max-width: none;
-  max-height: none;
-  aspect-ratio: auto;
-  transform: none;
-  background: #000;
-}
-
-.visual-fullscreen-active .video-element {
-  min-width: 0;
-  min-height: 0;
-  object-fit: contain;
-}
-
+/* Fullscreen must stay viewport-bound at every breakpoint, including iPhone landscape. */
+.player-backdrop.visual-fullscreen-active { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.visual-fullscreen-active .player-header, .visual-fullscreen-active .player-toolbar, .visual-fullscreen-active .playback-settings, .visual-fullscreen-active .episode-panel { visibility: hidden; }
+.visual-fullscreen-active .player-window, .visual-fullscreen-active .player-layout, .visual-fullscreen-active .video-column { overflow: visible; }
+.visual-fullscreen-active .video-stage.visual-landscape-fullscreen { position: fixed; z-index: 2400; inset: 0; width: 100dvw; height: 100dvh; min-width: 0; min-height: 0; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; aspect-ratio: auto; transform: none; background: #000; box-shadow: none; }
+.visual-fullscreen-active .video-element { min-width: 0; min-height: 0; object-fit: contain; }
 @media (orientation: portrait) {
-  .visual-fullscreen-active .video-stage.visual-landscape-fullscreen {
-    top: 50%;
-    left: 50%;
-    right: auto;
-    bottom: auto;
-    width: 100dvh;
-    height: 100dvw;
-    transform: translate(-50%, -50%) rotate(90deg);
-    transform-origin: center;
-  }
-
-  .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox {
-    top: auto;
-    right: auto;
-    bottom: 0;
-    left: 0;
-  }
+  .visual-fullscreen-active .video-stage.visual-landscape-fullscreen { top: 50dvh; left: 50dvw; right: auto; bottom: auto; width: 100dvh; height: 100dvw; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center; }
+  .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox { top: auto; right: auto; bottom: 0; left: 0; }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .setting-switch,
-  .setting-switch span { transition: none; }
-}
+@media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>

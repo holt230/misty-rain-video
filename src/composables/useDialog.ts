@@ -2,6 +2,7 @@ import { onBeforeUnmount, watch, type Ref } from 'vue';
 
 const openDialogs: HTMLElement[] = [];
 let originalOverflow = '';
+let originalRootOverflow = '';
 const focusable = 'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]';
 
 /** 统一弹层的滚动锁定、键盘焦点循环和关闭后焦点恢复。 */
@@ -15,6 +16,7 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
     active = null;
     if (!openDialogs.length) {
       document.body.style.overflow = originalOverflow;
+      document.documentElement.style.overflow = originalRootOverflow;
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     }
   };
@@ -26,7 +28,7 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
       close();
     }
     if (event.key !== 'Tab') return;
-    const targets = [...active.querySelectorAll<HTMLElement>(focusable)].filter(node => node.getClientRects().length > 0);
+    const targets = [...active.querySelectorAll<HTMLElement>(focusable)].filter(node => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== 'hidden');
     const first = targets[0];
     const last = targets.at(-1);
     if (!first || !last) { event.preventDefault(); active.focus(); return; }
@@ -43,7 +45,9 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!openDialogs.length) {
       originalOverflow = document.body.style.overflow;
+      originalRootOverflow = document.documentElement.style.overflow;
       document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
     }
     active = node;
     openDialogs.push(node);

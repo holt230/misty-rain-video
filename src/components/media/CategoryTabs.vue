@@ -37,8 +37,8 @@ const categories: { id: CategoryType; label: string }[] = [
 </template>
 
 <style scoped>
-.category-segments { position: relative; display: inline-grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 5px; border: var(--glass-border); border-radius: 28px; background: var(--glass-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner), 0 5px 18px rgb(58 87 130 / .1); }
-.segment-lens { position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 4); border: var(--glass-border-strong); border-radius: 23px; background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), 0 3px 8px rgb(52 82 126 / .16); transform: translateX(calc(var(--selected-index) * 100%)); transition: transform .38s var(--spring-bounce); pointer-events: none; }
+.category-segments { position: relative; display: inline-grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 5px; border: var(--glass-border); border-radius: 28px; background: var(--glass-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner); }
+.segment-lens { position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 4); border: var(--glass-border-strong); border-radius: 23px; background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); transform: translateX(calc(var(--selected-index) * 100%)); transition: transform .38s var(--spring-bounce); pointer-events: none; }
 .segment-item { position: relative; display: flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 18px; border: 1px solid transparent; border-radius: 23px; color: var(--text-secondary); background: transparent; font-size: .85rem; font-weight: 550; white-space: nowrap; transition: color .2s; }
 .segment-item.active { color: var(--liquid-accent-strong); font-weight: 700; }
 .segment-count { min-width: 17px; color: var(--text-tertiary); font-size: .66rem; font-variant-numeric: tabular-nums; }

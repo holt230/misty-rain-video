@@ -450,7 +450,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 </script>
 
 <template>
-  <!-- Apple 空间液态流体漫射背景 -->
+  <!-- 静态石墨背景，播放时由播放器管理画面周围的材质。 -->
   <div v-show="!isEmbedPlayerOpen" class="liquid-spatial-canvas" aria-hidden="true"></div>
 
   <LoginScreen
@@ -641,7 +641,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 .library-intro p { color: var(--text-tertiary); font-size: .81rem; letter-spacing: .02em; }
 .library-intro h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin-top: 5px; font-size: 2.2rem; font-weight: 780; letter-spacing: -.055em; line-height: 1.3; }
 .library-intro h1 span { color: var(--text-tertiary); font-size: .78rem; font-weight: 500; letter-spacing: 0; }
-.add-library-button { display: grid; width: 52px; height: 52px; place-items: center; flex-shrink: 0; border: 1px solid #fff; border-radius: 50%; color: var(--liquid-accent); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.add-library-button { display: grid; width: 52px; height: 52px; place-items: center; flex-shrink: 0; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: var(--liquid-accent); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .add-library-button svg { width: 25px; height: 25px; stroke-width: 1.8; }
 .category-toolbar { display: flex; margin-bottom: 26px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-bottom: 18px; }
@@ -650,11 +650,11 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 .category-heading-title { font-size: 1.2rem; font-weight: 720; letter-spacing: -.035em; }
 .count-hint { color: var(--text-tertiary); font-size: .74rem; }
 .library-update-actions { display: flex; align-items: center; gap: 8px; }
-.check-updates-button, .apply-updates-button { min-height: 44px; border: var(--glass-border); color: var(--liquid-accent); background: rgb(255 255 255 / .58); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.check-updates-button, .apply-updates-button { min-height: 44px; border: var(--glass-border); color: var(--liquid-accent); background: var(--glass-bg); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .check-updates-button { position: relative; display: grid; width: 44px; place-items: center; border-radius: 50%; }
 .check-updates-button svg { width: 18px; height: 18px; }
 .apply-updates-button { padding: 0 15px; border-radius: 23px; font-size: .79rem; font-weight: 650; }
-.update-count-dot { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; place-items: center; border: 2px solid #fff; border-radius: 20px; color: #fff; background: var(--liquid-accent); font-size: .58rem; }
+.update-count-dot { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; color: #fff; background: var(--liquid-accent); font-size: .58rem; }
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {

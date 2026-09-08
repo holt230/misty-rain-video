@@ -94,21 +94,21 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 <style scoped>
 .media-card { position: relative; min-width: 0; }
 .card-play-target { display: flex; width: 100%; min-width: 0; flex-direction: column; gap: 11px; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; border-radius: 23px; }
-.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border: 1px solid rgb(255 255 255 / .95); border-radius: 22px; background: linear-gradient(135deg, #dae7f8, #c6d5ec); box-shadow: 0 10px 22px rgb(57 78 119 / .16), inset 0 1px #fff; }
+.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border: 1px solid rgb(255 255 255 / .09); border-radius: 22px; background: var(--surface-2); box-shadow: 0 8px 22px rgb(0 0 0 / .23); }
 .poster-image { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
 .poster-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgb(12 27 51 / .14), transparent 40%, rgb(12 27 51 / .57)); }
-.quality-tag { position: absolute; top: 10px; left: 10px; max-width: calc(100% - 64px); overflow: hidden; padding: 4px 8px; border: 1px solid rgb(255 255 255 / .4); border-radius: 10px; color: #fff; background: rgb(23 41 65 / .65); font-size: .62rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.quality-tag { position: absolute; top: 10px; left: 10px; max-width: calc(100% - 64px); overflow: hidden; padding: 4px 8px; border: 1px solid rgb(255 255 255 / .15); border-radius: 10px; color: #fff; background: rgb(23 41 65 / .65); font-size: .62rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .status-badge { position: absolute; right: 10px; bottom: 12px; left: 12px; overflow: hidden; color: #fff; text-shadow: 0 1px 5px rgb(0 0 0 / .55); font-size: .73rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.status-badge.has-update { right: auto; padding: 4px 8px; border: 1px solid rgb(255 255 255 / .7); border-radius: 10px; color: #fff; background: #2c60cf; text-shadow: none; }
+.status-badge.has-update { right: auto; padding: 4px 8px; border: 1px solid rgb(255 255 255 / .09); border-radius: 10px; color: #fff; background: #2c60cf; text-shadow: none; }
 .card-caption { display: grid; min-width: 0; width: 100%; gap: 3px; padding: 0 3px; }
-.media-title { display: block; overflow: hidden; color: #22314a; font-size: .95rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
+.media-title { display: block; overflow: hidden; color: var(--text-primary); font-size: .95rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
 .media-subtitle { color: var(--text-tertiary); font-size: .73rem; }
 .more-trigger { position: absolute; top: 6px; right: 6px; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: #fff; background: transparent; }
-.more-trigger::before { content: ''; position: absolute; inset: 6px; z-index: 0; border: 1px solid rgb(255 255 255 / .56); border-radius: 50%; background: rgb(27 43 69 / .58); }
+.more-trigger::before { content: ''; position: absolute; inset: 6px; z-index: 0; border: 1px solid rgb(255 255 255 / .15); border-radius: 50%; background: rgb(27 43 69 / .58); }
 .more-trigger svg { position: relative; width: 19px; height: 19px; }
 .category-trigger, .hover-actions { display: none; }
 .hover-play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .2s; }
-.play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgb(255 255 255 / .85); border-radius: 50%; color: #fff; background: rgb(255 255 255 / .3); backdrop-filter: blur(10px); }
+.play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: #fff; background: var(--glass-bg); backdrop-filter: blur(10px); }
 .play-disk svg { width: 22px; height: 22px; margin-left: 2px; }
 @media (hover: hover) { .card-play-target:hover .poster-image { transform: scale(1.035); } .card-play-target:hover .hover-play { opacity: 1; } }
 .card-play-target:focus-visible .hover-play { opacity: 1; }
