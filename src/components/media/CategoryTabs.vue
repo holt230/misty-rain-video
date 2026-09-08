@@ -19,8 +19,7 @@ const categories: { id: CategoryType; label: string }[] = [
 </script>
 
 <template>
-  <nav class="category-segments glass-rim" aria-label="影片分类" :style="{ '--selected-index': categories.findIndex(cat => cat.id === modelValue) }">
-    <span class="segment-lens" aria-hidden="true"></span>
+  <nav class="category-segments" aria-label="影片分类">
     <button
       v-for="cat in categories"
       :key="cat.id"
@@ -37,11 +36,11 @@ const categories: { id: CategoryType; label: string }[] = [
 </template>
 
 <style scoped>
-.category-segments { position: relative; display: inline-grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 5px; border: var(--glass-border); border-radius: 28px; background: var(--glass-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner); }
-.segment-lens { position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc((100% - 10px) / 4); border: var(--glass-border-strong); border-radius: 23px; background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); transform: translateX(calc(var(--selected-index) * 100%)); transition: transform .38s var(--spring-bounce); pointer-events: none; }
-.segment-item { position: relative; display: flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 18px; border: 1px solid transparent; border-radius: 23px; color: var(--text-secondary); background: transparent; font-size: .85rem; font-weight: 550; white-space: nowrap; transition: color .2s; }
-.segment-item.active { color: var(--liquid-accent-strong); font-weight: 700; }
-.segment-count { min-width: 17px; color: var(--text-tertiary); font-size: .66rem; font-variant-numeric: tabular-nums; }
+.category-segments { position: relative; display: inline-grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0; border: 0; background: transparent; }
+.segment-item { position: relative; display: flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 20px; border: 0; border-radius: 9px; color: var(--text-tertiary); background: transparent; font-size: .88rem; font-weight: 550; white-space: nowrap; transition: color .2s, background .2s; }
+.segment-item:hover { color: var(--text-primary); }
+.segment-item.active { color: var(--text-primary); background: rgb(255 255 255 / .09); font-weight: 650; }
+.segment-count { color: inherit; font-size: .65rem; font-variant-numeric: tabular-nums; opacity: .8; }
 .segment-item.active .segment-count { color: var(--liquid-accent); }
 @media (max-width: 640px) { .category-segments { width: 100%; } .segment-item { padding: 0 4px; gap: 4px; font-size: .82rem; } }
 @media (max-width: 360px) { .segment-count { display: none; } }

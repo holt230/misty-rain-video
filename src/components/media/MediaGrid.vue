@@ -67,7 +67,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 28px 20px; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 32px 24px; }
 .media-skeleton { display: grid; gap: 10px; min-width: 0; }
 .media-skeleton-poster, .media-skeleton-title, .media-skeleton-subtitle { display: block; background: linear-gradient(100deg, rgb(255 255 255 / .035), rgb(255 255 255 / .085), rgb(255 255 255 / .035)); background-size: 200% 100%; animation: shimmer 1.6s ease-in-out infinite; border-radius: 20px; }
 .media-skeleton-poster { width: 100%; aspect-ratio: 2 / 3; border: 1px solid rgb(255 255 255 / .09); }

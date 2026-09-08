@@ -7,11 +7,11 @@ const gradientId = `avatar-gradient-${uid}`;
 const glowId = `avatar-glow-${uid}`;
 
 const palettes = [
-  ['#ff9a72', '#e84f62', '#6027a8'],
-  ['#65d6ff', '#5269e8', '#7b38bf'],
-  ['#5be0b7', '#167f9e', '#3432a6'],
-  ['#ffc45c', '#f36b4b', '#9e327c'],
-  ['#a6ef67', '#29a57a', '#2253a7']
+  ['#c0a48e', '#75645c', '#38333c'],
+  ['#a9b7c7', '#626d80', '#353947'],
+  ['#9dafac', '#596c68', '#303c40'],
+  ['#c4b495', '#83715d', '#413638'],
+  ['#b3b9a5', '#717b68', '#38433d']
 ];
 
 const hash = computed(() => [...props.username].reduce((value, char) => ((value * 31) + char.charCodeAt(0)) >>> 0, 2166136261));

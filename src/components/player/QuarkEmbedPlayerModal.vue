@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Maximize, Minimize, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
+import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Maximize, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -61,7 +61,6 @@ const statusMessage = ref('');
 const playbackStarting = ref(false);
 const manualPlayRequired = ref(false);
 const playbackHasStarted = ref(false);
-const visualLandscapeFullscreen = ref(false);
 const detectedAudioTracks = ref<PlaybackAudioTrack[]>([]);
 const selectedAudioIndex = ref(-1);
 const playbackAutomationStorageKey = 'misty_rain_playback_automation';
@@ -807,7 +806,7 @@ const handlePageHide = () => {
   backgroundResumeAt = video && Number.isFinite(video.currentTime) ? video.currentTime : backgroundResumeAt;
   void persistProgress(true, false, true);
   pageWasHidden = true;
-  visualLandscapeFullscreen.value = false;
+
   stopVideo(true);
   resetSoundEffectGraph(true);
 };
@@ -1026,47 +1025,39 @@ const retry = () => {
   else loadSession();
 };
 
-type LockableOrientation = ScreenOrientation & {
-  lock?: (orientation: 'landscape') => Promise<void>;
-};
-
-const handleNativeVideoFullscreen = () => {
-  const orientation = screen.orientation as LockableOrientation | undefined;
-  orientation?.lock?.('landscape').catch(() => {});
+type NativeFullscreenVideo = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+  webkitDisplayingFullscreen?: boolean;
 };
 
 const requestNativeVideoFullscreen = async () => {
-  const video = videoRef.value;
+  const video = videoRef.value as NativeFullscreenVideo | null;
   if (!video) return;
-  if (visualLandscapeFullscreen.value) {
-    visualLandscapeFullscreen.value = false;
-    announce('已退出横屏全屏');
+  if (phase.value !== 'ready' || video.readyState === 0) {
+    toast.show('视频准备好后再点全屏', '!', 3000);
     return;
   }
 
-  const orientation = screen.orientation as LockableOrientation | undefined;
   try {
-    if (video.requestFullscreen && orientation?.lock) {
+    // iPhone 使用系统视频播放器；同步调用以保留点击手势授权。
+    if (isIOSPlaybackDevice && video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    } else if (video.requestFullscreen) {
       await video.requestFullscreen();
-      await orientation.lock('landscape');
-      return;
+    } else if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    } else {
+      toast.show('请使用视频自带的全屏按钮，或在 Safari 中打开', '!', 4000);
     }
   } catch {
-    if (document.fullscreenElement && document.exitFullscreen) {
-      await document.exitFullscreen().catch(() => {});
-    }
+    toast.show('暂时无法进入全屏，请先播放，再点视频自带的全屏按钮', '!', 4000);
   }
-
-  // iOS Web Clip 无法绕过系统竖屏锁，使用旋转后的全视口播放器兜底。
-  visualLandscapeFullscreen.value = true;
-  announce('已进入横屏全屏');
 };
 
 const close = () => {
   void persistProgress(true, false, true);
   phase.value = 'idle';
   requestSequence += 1;
-  visualLandscapeFullscreen.value = false;
   stopVideo(true);
   resetSoundEffectGraph(true);
   emit('close');
@@ -1074,8 +1065,8 @@ const close = () => {
 
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, () => {
-  if (visualLandscapeFullscreen.value) visualLandscapeFullscreen.value = false;
-  else close();
+  if (document.fullscreenElement || (videoRef.value as NativeFullscreenVideo | null)?.webkitDisplayingFullscreen) return;
+  close();
 });
 
 watch(
@@ -1085,7 +1076,6 @@ watch(
     else {
       phase.value = 'idle';
       requestSequence += 1;
-      visualLandscapeFullscreen.value = false;
       stopVideo();
     }
   },
@@ -1099,7 +1089,6 @@ watch(playbackAutomation, value => {
 onBeforeUnmount(() => {
   void persistProgress(true, false, true);
   phase.value = 'idle';
-  visualLandscapeFullscreen.value = false;
   stopVideo(true);
   resetSoundEffectGraph();
   window.removeEventListener('pagehide', handlePageHide);
@@ -1120,7 +1109,7 @@ defineExpose({ retry });
   <div
     class="player-backdrop"
     ref="dialogRef"
-    :class="{ active: isOpen, 'visual-fullscreen-active': visualLandscapeFullscreen }"
+    :class="{ active: isOpen }"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
@@ -1129,7 +1118,6 @@ defineExpose({ retry });
     <section v-if="media" class="player-window">
       <header class="player-header">
         <div class="title-block">
-          <span class="source-badge">云端高清</span>
           <div class="title-copy">
             <h2>{{ media.title }}</h2>
             <p v-if="episodeStatus">{{ episodeStatus }}</p>
@@ -1148,7 +1136,7 @@ defineExpose({ retry });
 
       <div class="player-layout" :class="{ 'single-column': !episodes.length }">
         <main class="video-column">
-          <div class="video-stage" :class="{ 'visual-landscape-fullscreen': visualLandscapeFullscreen }">
+          <div class="video-stage">
             <video
               :key="videoInstanceKey"
               ref="videoRef"
@@ -1169,7 +1157,6 @@ defineExpose({ retry });
               @timeupdate="handleTimeUpdate"
               @pause="handlePause"
               @ended="handleEnded"
-              @webkitbeginfullscreen="handleNativeVideoFullscreen"
               @error="handleVideoError"
             >
               <track
@@ -1181,18 +1168,6 @@ defineExpose({ retry });
                 :src="subtitle.url"
               />
             </video>
-
-            <button
-              v-if="isIOSPlaybackDevice && phase === 'ready' && !visualLandscapeFullscreen"
-              type="button"
-              class="ios-native-fullscreen-hitbox"
-              aria-label="横屏全屏播放"
-              @click="requestNativeVideoFullscreen"
-            ></button>
-
-            <button v-if="visualLandscapeFullscreen" type="button" class="fullscreen-exit-button" aria-label="退出横屏全屏" @click="requestNativeVideoFullscreen">
-              <Minimize aria-hidden="true" />
-            </button>
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
@@ -1448,15 +1423,15 @@ defineExpose({ retry });
 .player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
-.player-window { display: flex; flex-direction: column; width: min(1200px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 34px; color: var(--text-primary); background: var(--app-atmosphere); box-shadow: var(--glass-highlight-inner), 0 28px 90px rgb(0 0 0 / .4); }
-.player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 22px; border-bottom: 1px solid rgb(255 255 255 / .09); background: var(--glass-material); }
+.player-window { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 22px; color: var(--text-primary); background: var(--liquid-canvas); box-shadow: var(--glass-shadow-lg); }
+.player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid rgb(255 255 255 / .06); background: transparent; }
 .title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
 .title-block, .title-copy { min-width: 0; }
 .source-badge { flex: 0 0 auto; padding: 6px 10px; border: var(--glass-border); border-radius: 18px; color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-size: .7rem; font-weight: 650; }
 .title-copy h2 { overflow: hidden; color: var(--text-primary); font-size: 1.1rem; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.025em; }
 .title-copy p { margin-top: 3px; overflow: hidden; color: var(--text-tertiary); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions { flex-shrink: 0; gap: 8px; }
-.text-action, .icon-button { min-height: 44px; border: var(--glass-border); color: var(--text-secondary); background: var(--glass-bg); box-shadow: none; }
+.text-action, .icon-button { min-height: 44px; border: 0; color: var(--text-secondary); background: var(--glass-bg); box-shadow: none; }
 .text-action { padding: 0 18px; border-radius: 24px; font-size: .82rem; font-weight: 600; }
 .icon-button { display: grid; width: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .icon-button svg { width: 19px; height: 19px; }
@@ -1465,12 +1440,8 @@ defineExpose({ retry });
 .player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
 .video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
-.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: 16 / 9; flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 22px; color: var(--text-primary); background: #000; box-shadow: 0 9px 25px rgb(30 43 67 / .16); color-scheme: dark; }
+.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: 16 / 9; flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
-.ios-native-fullscreen-hitbox { position: absolute; top: 0; left: 0; z-index: 4; width: 58px; height: 50px; padding: 0; border: 0; border-radius: 0 0 18px; background: transparent; }
-.ios-native-fullscreen-hitbox:focus-visible { outline-offset: -3px; }
-.fullscreen-exit-button { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); z-index: 5; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: #fff; background: rgb(23 32 47 / .72); box-shadow: inset 0 1px rgb(255 255 255 / .55); }
-.fullscreen-exit-button svg { width: 20px; height: 20px; }
 .stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
 .loading-state { isolation: isolate; }
 .stage-poster { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
@@ -1500,7 +1471,7 @@ defineExpose({ retry });
 .loading-wave i:nth-child(3) { animation-delay: .24s; }
 .loading-wave i:nth-child(4) { animation-delay: .36s; }
 .player-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 58px; flex-shrink: 0; gap: 9px; padding: 14px 0; }
-.player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: var(--glass-border); border-radius: 17px; color: var(--text-primary); background: var(--glass-bg); box-shadow: none; text-align: left; }
+.player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
 .player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); border-color: rgb(var(--accent-rgb) / .25); }
 .player-toolbar button > svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--liquid-accent); }
 .player-toolbar button > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
@@ -1510,7 +1481,7 @@ defineExpose({ retry });
 .player-toolbar [aria-expanded='true'] .toolbar-chevron { transform: rotate(180deg); }
 .player-toolbar .fullscreen-button { display: grid; justify-items: center; align-content: center; gap: 3px; padding: 7px 4px; }
 .fullscreen-button span { flex: none; font-size: .65rem; }
-.playback-settings { display: grid; flex-shrink: 0; gap: 18px; margin-bottom: 8px; padding: 18px; border: var(--glass-border); border-radius: 27px; background: var(--glass-sheet-material); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.playback-settings { display: grid; flex-shrink: 0; gap: 22px; margin-bottom: 8px; padding: 20px; border: 0; border-radius: 16px; background: var(--surface-1); }
 .settings-panel-heading, .setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .settings-panel-heading { margin-top: -6px; margin-bottom: -7px; }
 .settings-panel-heading > strong { font-size: .97rem; font-weight: 700; }
@@ -1535,7 +1506,7 @@ defineExpose({ retry });
 .setting-switch span { position: absolute; top: 10px; left: 3px; width: 24px; height: 24px; border: 1px solid rgb(255 255 255 / .18); border-radius: 50%; background: #d8dfe9; box-shadow: 0 2px 5px rgb(36 54 86 / .2); transition: transform .22s var(--spring-ease); }
 .setting-switch[aria-checked='true']::before { background: var(--liquid-accent); }
 .setting-switch[aria-checked='true'] span { transform: translateX(22px); }
-.episode-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin: 18px 18px 18px 0; overflow: hidden; border: var(--glass-border); border-radius: 27px; background: var(--glass-sheet-material); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.episode-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; margin: 0; overflow: hidden; border-left: 1px solid rgb(255 255 255 / .07); background: transparent; }
 .episode-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 16px 15px; }
 .episode-heading-title { display: grid; min-width: 0; gap: 5px; }
 .episode-heading-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
@@ -1548,9 +1519,9 @@ defineExpose({ retry });
 .episode-ranges button.active { color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-weight: 650; }
 .episode-list { display: grid; min-height: 0; align-content: start; gap: 8px; overflow-y: auto; overscroll-behavior: contain; padding: 3px 12px 16px; }
 .episode-item { display: grid; min-width: 0; min-height: 66px; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px; border: 1px solid transparent; border-radius: 19px; color: var(--text-secondary); background: transparent; text-align: left;  box-shadow: none; }
-.episode-item.active { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .24); background: var(--glass-lens); box-shadow: none; }
+.episode-item.active { color: var(--text-primary); border-color: transparent; background: var(--glass-bg-active); box-shadow: none; }
 .episode-item:hover { background: var(--glass-bg-hover); }
-.episode-number { position: relative; display: grid; width: 40px; height: 40px; place-items: center; border: var(--glass-border); border-radius: 14px; background: var(--glass-bg); font-size: .84rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.episode-number { position: relative; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 8px; background: var(--glass-bg); font-size: .84rem; font-weight: 550; font-variant-numeric: tabular-nums; }
 .episode-item.active .episode-number { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .2); background: var(--liquid-accent-subtle); box-shadow: none; }
 .episode-latest { position: absolute; top: -6px; right: -5px; display: grid; min-width: 16px; height: 16px; place-items: center; padding: 0 3px; border: 1px solid rgb(255 255 255 / .09); border-radius: 9px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .5rem; font-weight: 650; line-height: 1; }
 .episode-current-dot { position: absolute; bottom: 4px; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
@@ -1572,7 +1543,7 @@ defineExpose({ retry });
   .text-action { padding: 0 13px; }
   .player-layout { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
   .video-column { flex: 0 0 auto; overflow: visible; padding: 14px calc(14px + var(--safe-area-right)) 0 calc(14px + var(--safe-area-left)); }
-  .video-stage { min-height: 0; aspect-ratio: 16 / 9; border-radius: 21px;  border: var(--glass-border); }
+  .video-stage { min-height: 0; aspect-ratio: 16 / 9; border-radius: 10px; border: 0; }
   .video-stage:last-child { margin-bottom: 14px; }
   .stage-state { gap: 7px; padding: 12px;  background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
   .stage-state strong { font-size: .88rem; }
@@ -1581,20 +1552,20 @@ defineExpose({ retry });
   .stage-play-icon { width: 58px; height: 58px; }
   .stage-play-button small { font-size: .65rem; }
   .player-toolbar { gap: 7px; padding: 12px 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 49px; }
-  .player-toolbar button { min-height: 62px; gap: 7px; padding: 9px 10px; border-radius: 17px;  box-shadow: none;  background: var(--glass-bg); }
+  .player-toolbar button { min-height: 62px; gap: 7px; padding: 9px 10px; border-radius: 12px; background: var(--surface-1); }
   .player-toolbar strong { font-size: .77rem; }
   .player-toolbar small { font-size: .62rem; }
   .player-toolbar .toolbar-chevron { display: none; }
   .player-toolbar .fullscreen-button { padding: 8px 3px; }
-  .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 25px; }
+  .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 16px; }
   .setting-heading { flex-wrap: wrap; gap: 4px 10px; }
-  .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); overflow: visible; scroll-margin-top: 10px; }
+  .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 0; overflow: visible; scroll-margin-top: 10px; }
   .episode-heading { padding: 19px 16px 15px; }
   .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; overflow: visible; padding: 7px 14px 20px; }
-  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: var(--glass-border); border-radius: 17px; background: transparent; box-shadow: none; }
+  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid transparent; border-radius: 10px; background: var(--surface-1); box-shadow: none; }
   .episode-number { width: 100%; height: 100%; min-height: 52px; border: 0; border-radius: inherit; background: transparent; font-size: .9rem; }
-  .episode-item.active { border-color: rgb(var(--accent-rgb) / .3);  box-shadow: none; }
-  .episode-item.active .episode-number { background: var(--liquid-accent-subtle);  color: var(--liquid-accent-strong);  box-shadow: none;  border-color: rgb(var(--accent-rgb) / .2); }
+  .episode-item.active { border-color: rgb(255 255 255 / .35); box-shadow: none; }
+  .episode-item.active .episode-number { background: var(--glass-bg-active); color: var(--text-primary);  box-shadow: none;  border-color: rgb(var(--accent-rgb) / .2); }
   .episode-latest { top: -5px; right: -4px;  color: var(--accent-ink); }
   .episode-copy { display: none; }
 }
@@ -1611,16 +1582,6 @@ defineExpose({ retry });
   .episode-item { min-height: 52px; grid-template-columns: 1fr; padding: 0;  background: transparent;  box-shadow: none; }
   .episode-number { width: 100%; height: 52px; border: 0; }
   .episode-copy { display: none; }
-}
-/* Fullscreen must stay viewport-bound at every breakpoint, including iPhone landscape. */
-.player-backdrop.visual-fullscreen-active { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-.visual-fullscreen-active .player-header, .visual-fullscreen-active .player-toolbar, .visual-fullscreen-active .playback-settings, .visual-fullscreen-active .episode-panel { visibility: hidden; }
-.visual-fullscreen-active .player-window, .visual-fullscreen-active .player-layout, .visual-fullscreen-active .video-column { overflow: visible; }
-.visual-fullscreen-active .video-stage.visual-landscape-fullscreen { position: fixed; z-index: 2400; inset: 0; width: 100dvw; height: 100dvh; min-width: 0; min-height: 0; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; aspect-ratio: auto; transform: none; background: #000; box-shadow: none; }
-.visual-fullscreen-active .video-element { min-width: 0; min-height: 0; object-fit: contain; }
-@media (orientation: portrait) {
-  .visual-fullscreen-active .video-stage.visual-landscape-fullscreen { top: 50dvh; left: 50dvw; right: auto; bottom: auto; width: 100dvh; height: 100dvw; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center; }
-  .video-stage.visual-landscape-fullscreen .ios-native-fullscreen-hitbox { top: auto; right: auto; bottom: 0; left: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>

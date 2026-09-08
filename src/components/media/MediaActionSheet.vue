@@ -110,10 +110,10 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 .summary-copy h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.12rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }
 .close-button { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .close-button svg { width: 19px; height: 19px; }
-.action-list { border: 1px solid; border-radius: 23px; overflow: hidden; }
+.action-list { border: 0; border-radius: 14px; overflow: hidden; }
 .action-item { display: flex; width: 100%; min-height: 76px; align-items: center; gap: 13px; padding: 12px 15px; border: 0; border-bottom: 1px solid rgb(90 116 159 / .10); color: var(--text-primary); background: transparent; text-align: left; }
 .action-item:last-child { border-bottom: 0; }
-.action-icon { display: grid; width: 40px; height: 40px; place-items: center; flex-shrink: 0; border: 1px solid rgb(255 255 255 / .09); border-radius: 14px; color: var(--liquid-accent); background: var(--glass-bg); }
+.action-icon { display: grid; width: 30px; height: 40px; place-items: center; flex-shrink: 0; color: var(--text-secondary); }
 .action-icon svg { width: 21px; height: 21px; }
 .action-copy { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .action-copy strong { font-size: .92rem; font-weight: 650; }

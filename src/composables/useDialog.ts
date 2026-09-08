@@ -22,6 +22,8 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
   };
   const onKeydown = (event: KeyboardEvent) => {
     if (!active || openDialogs.at(-1) !== active) return;
+    // 全屏视频的退出和焦点导航交给浏览器原生控件。
+    if (document.fullscreenElement && active.contains(document.fullscreenElement)) return;
     if (event.key === 'Escape' && close) {
       event.preventDefault();
       event.stopPropagation();

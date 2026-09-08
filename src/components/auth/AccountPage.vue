@@ -117,7 +117,7 @@ defineExpose({ focusAuth, refreshStatus });
       <UserAvatar class="profile-avatar" :username="user.username" />
     </header>
 
-    <section class="profile-card glass-rim" aria-labelledby="profile-title">
+    <section class="profile-card" aria-labelledby="profile-title">
       <div class="profile-copy">
         <small>{{ user.role === 'admin' ? '管理员账户' : '片库账户' }}</small>
         <h2 id="profile-title">{{ user.username }}</h2>
@@ -307,27 +307,27 @@ defineExpose({ focusAuth, refreshStatus });
 .heading-kicker { color: var(--text-tertiary); font-size: .72rem; }
 .page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.05em; }
 .profile-avatar { width: 48px; height: 48px; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); box-shadow: var(--glass-shadow-sm); }
-.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 25px; margin-bottom: 26px; border: var(--glass-border); border-radius: 29px; background: var(--glass-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); }
+.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0 28px; margin-bottom: 10px; border-bottom: 1px solid rgb(255 255 255 / .08); }
 .profile-copy { min-width: 0; }
 .profile-copy small { color: var(--liquid-accent); font-size: .73rem; font-weight: 600; }
 .profile-copy h2 { margin: 5px 0; overflow-wrap: anywhere; font-size: 1.3rem; font-weight: 750; letter-spacing: -.03em; }
 .profile-copy p { color: var(--text-tertiary); font-size: .79rem; }
-.folder-chip { max-width: 36%; flex-shrink: 0; overflow: hidden; padding: 6px 10px; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; color: var(--text-secondary); background: var(--glass-bg); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-.settings-section { margin-top: 20px; padding: 24px; border: var(--glass-border); border-radius: 28px; background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.folder-chip { max-width: 36%; flex-shrink: 0; overflow: hidden; color: var(--text-tertiary); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.settings-section { margin-top: 28px; padding: 24px; border: 0; border-radius: 16px; background: var(--surface-1); }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
 .section-title-row > div > span { color: var(--text-tertiary); font-size: .71rem; }
 .section-title-row h2 { margin-top: 2px; color: var(--text-primary); font-size: 1.08rem; font-weight: 700; letter-spacing: -.025em; }
 .history-count { color: var(--text-tertiary); font-size: .73rem; }
 .continue-history-section { margin-bottom: 26px; }
 .continue-history-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 12px; scroll-snap-type: x proximity; }
-.continue-history-card { position: relative; width: 192px; height: 130px; flex: 0 0 192px; overflow: hidden; border: 1px solid rgb(255 255 255 / .09); border-radius: 22px; text-align: left; background: #253b5a; box-shadow: var(--glass-shadow-sm); scroll-snap-align: start; }
+.continue-history-card { position: relative; width: 192px; height: 130px; flex: 0 0 192px; overflow: hidden; border: 1px solid rgb(255 255 255 / .09); border-radius: 12px; text-align: left; background: #253b5a; box-shadow: var(--glass-shadow-sm); scroll-snap-align: start; }
 .continue-history-card img { width: 100%; height: 100%; object-fit: cover; object-position: center 28%; }
 .continue-history-shade { position: absolute; inset: 0; background: linear-gradient(180deg, transparent, rgb(8 21 44 / .88)); }
 .continue-history-copy { position: absolute; right: 13px; bottom: 17px; left: 13px; display: grid; gap: 2px; color: #fff; }
 .continue-history-copy strong { overflow: hidden; font-size: .84rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .continue-history-copy small { color: #dde6f6; font-size: .7rem; }
 .continue-history-progress { position: absolute; right: 13px; bottom: 9px; left: 13px; height: 3px; overflow: hidden; border-radius: 4px; background: var(--glass-bg); }
-.continue-history-progress i { display: block; height: 100%; background: #a4c0ff; }
+.continue-history-progress i { display: block; height: 100%; background: var(--liquid-accent); }
 .history-list { display: grid; }
 .history-row { display: flex; align-items: center; gap: 8px; border-top: 1px solid rgb(78 105 150 / .09); }
 .history-row:first-child { border: 0; }
@@ -346,7 +346,7 @@ defineExpose({ focusAuth, refreshStatus });
 .status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 17px; color: var(--text-tertiary); background: var(--surface-2); font-size: .73rem; white-space: nowrap; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .service-summary { display: flex; align-items: center; gap: 13px; padding: 13px 0; }
-.service-icon { display: grid; width: 42px; height: 42px; flex-shrink: 0; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 15px; color: var(--liquid-accent); background: var(--glass-bg); }
+.service-icon { display: grid; width: 36px; height: 42px; flex-shrink: 0; place-items: center; color: var(--text-secondary); }
 .service-icon svg { width: 22px; height: 22px; }
 .service-summary strong { font-size: .88rem; font-weight: 650; }
 .service-summary p { margin-top: 4px; color: var(--text-tertiary); font-size: .76rem; line-height: 1.6; }
@@ -363,7 +363,7 @@ defineExpose({ focusAuth, refreshStatus });
 .credential-loading { display: flex; align-items: center; gap: 9px; padding: 15px 0; color: var(--text-secondary); font-size: .83rem; }
 .button-spinner, .status-spinner { width: 16px; height: 16px; flex-shrink: 0; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
 .settings-row { display: flex; align-items: center; gap: 12px; min-height: 64px; color: var(--text-primary); text-decoration: none; }
-.row-icon { display: grid; width: 42px; height: 42px; flex-shrink: 0; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 15px; color: var(--liquid-accent); background: var(--glass-bg); }
+.row-icon { display: grid; width: 36px; height: 42px; flex-shrink: 0; place-items: center; color: var(--text-secondary); }
 .row-icon svg { width: 21px; height: 21px; }
 .row-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .row-copy strong { font-size: .88rem; font-weight: 650; }
@@ -376,9 +376,9 @@ defineExpose({ focusAuth, refreshStatus });
   .account-page { padding: calc(22px + var(--safe-area-top)) calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
   .page-heading { margin-bottom: 24px; }
   .page-heading h1 { font-size: 1.75rem; }
-  .profile-card { padding: 22px 20px; flex-wrap: wrap; }
+  .profile-card { padding: 8px 0 24px; flex-wrap: wrap; }
   .folder-chip { max-width: 100%; }
-  .settings-section { padding: 20px; border-radius: 26px; }
+  .settings-section { padding: 20px; border-radius: 16px; }
   .continue-history-scroll { margin-right: -20px; padding-right: 20px; }
   .history-main { gap: 10px; }
   .history-main .chevron { display: none; }

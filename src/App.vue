@@ -7,6 +7,7 @@ import Navbar from './components/layout/Navbar.vue';
 import MobileTabBar, { type MobileTab as MobileDockTab } from './components/layout/MobileTabBar.vue';
 import CategoryTabs from './components/media/CategoryTabs.vue';
 import MediaGrid from './components/media/MediaGrid.vue';
+import LibrarySpotlight from './components/media/LibrarySpotlight.vue';
 import DeleteMediaConfirm from './components/media/DeleteMediaConfirm.vue';
 import CategoryPickerSheet from './components/media/CategoryPickerSheet.vue';
 import MediaActionSheet from './components/media/MediaActionSheet.vue';
@@ -482,9 +483,15 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     <!-- 核心主区域 -->
     <main v-if="mobileTab !== 'account'" class="page-container">
     <header class="library-intro">
-      <div><p>留一点时间，给喜欢的故事</p><h1>我的片库<span>{{ !allMediaList.length && isLoading ? '正在读取…' : !allMediaList.length && loadError ? '等待重新加载' : `${allMediaList.length} 部收藏` }}</span></h1></div>
-      <button type="button" class="add-library-button" aria-label="添加影片" @click="focusMobileSearch"><Plus aria-hidden="true" /></button>
+      <div><h1>我的片库<span>{{ !allMediaList.length && isLoading ? '正在读取…' : !allMediaList.length && loadError ? '等待重新加载' : `${allMediaList.length} 部收藏` }}</span></h1></div>
+      <button type="button" class="add-library-button" aria-label="添加影片" @click="focusMobileSearch"><Plus aria-hidden="true" /><span>添加</span></button>
     </header>
+    <LibrarySpotlight
+      v-if="mediaList.length && !isLoading && !loadError"
+      :media="mediaList[0]!"
+      :category-name="categoryNames[currentCategory]"
+      @play="handleSelectMedia"
+    />
     <!-- 分类标签控制栏 -->
     <div class="category-toolbar">
       <CategoryTabs
@@ -636,34 +643,34 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 </template>
 
 <style scoped>
-.page-container { position: relative; z-index: 1; width: 100%; max-width: 1112px; margin: 0 auto; padding: 48px 24px 80px; }
-.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
-.library-intro p { color: var(--text-tertiary); font-size: .81rem; letter-spacing: .02em; }
-.library-intro h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin-top: 5px; font-size: 2.2rem; font-weight: 780; letter-spacing: -.055em; line-height: 1.3; }
+.page-container { position: relative; z-index: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 48px 40px 90px; }
+.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
+.library-intro h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px; font-size: 2.7rem; font-weight: 700; letter-spacing: -.055em; line-height: 1.2; }
 .library-intro h1 span { color: var(--text-tertiary); font-size: .78rem; font-weight: 500; letter-spacing: 0; }
-.add-library-button { display: grid; width: 52px; height: 52px; place-items: center; flex-shrink: 0; border: 1px solid rgb(255 255 255 / .09); border-radius: 50%; color: var(--liquid-accent); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
-.add-library-button svg { width: 25px; height: 25px; stroke-width: 1.8; }
-.category-toolbar { display: flex; margin-bottom: 26px; }
+.add-library-button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 7px; flex-shrink: 0; padding: 0 16px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .82rem; font-weight: 600; }
+.add-library-button:hover { background: rgb(255 255 255 / .16); }
+.check-updates-button:hover, .apply-updates-button:hover { color: var(--text-primary); background: var(--glass-bg); }
+.add-library-button svg { width: 18px; height: 18px; stroke-width: 2; }
+.category-toolbar { display: flex; margin-bottom: 24px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-bottom: 18px; }
 .section-kicker { display: none; }
 .heading-main-line { display: flex; align-items: baseline; gap: 9px; }
-.category-heading-title { font-size: 1.2rem; font-weight: 720; letter-spacing: -.035em; }
+.category-heading-title { font-size: 1.3rem; font-weight: 650; letter-spacing: -.025em; }
 .count-hint { color: var(--text-tertiary); font-size: .74rem; }
 .library-update-actions { display: flex; align-items: center; gap: 8px; }
-.check-updates-button, .apply-updates-button { min-height: 44px; border: var(--glass-border); color: var(--liquid-accent); background: var(--glass-bg); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.check-updates-button, .apply-updates-button { min-height: 44px; border: 0; color: var(--text-secondary); background: transparent; box-shadow: none; }
 .check-updates-button { position: relative; display: grid; width: 44px; place-items: center; border-radius: 50%; }
 .check-updates-button svg { width: 18px; height: 18px; }
 .apply-updates-button { padding: 0 15px; border-radius: 23px; font-size: .79rem; font-weight: 650; }
-.update-count-dot { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; color: #fff; background: var(--liquid-accent); font-size: .58rem; }
+.update-count-dot { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .58rem; }
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
   .page-container { padding: 23px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
   .library-intro { margin-bottom: 23px; }
-  .library-intro p { font-size: .74rem; }
-  .library-intro h1 { font-size: 1.85rem; gap: 10px; }
+  .library-intro h1 { font-size: 2.05rem; gap: 10px; }
   .library-intro h1 span { font-size: .68rem; }
-  .add-library-button { width: 47px; height: 47px; }
+  .add-library-button { padding: 0 12px; }
   .category-toolbar { margin-bottom: 20px; }
   .section-heading { margin-bottom: 14px; }
   .category-heading-title { font-size: 1.05rem; }
