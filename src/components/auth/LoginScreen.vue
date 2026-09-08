@@ -36,7 +36,7 @@ const submit = () => {
 
 <template>
   <main class="login-shell" :class="{ 'is-checking': checking }">
-    <section class="login-card" :aria-busy="checking || submitting">
+    <section class="login-card glass-rim" :aria-busy="checking || submitting">
       <header class="login-hero">
         <div class="brand-lockup">
           <div class="brand-mark" aria-hidden="true">
@@ -126,7 +126,7 @@ const submit = () => {
 
 <style scoped>
 .login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); }
-.login-card { position: relative; width: min(420px, 100%); padding: 40px 30px 26px; border: var(--glass-border); border-radius: 38px; background: linear-gradient(145deg, rgb(255 255 255 / .78), rgb(255 255 255 / .32)); box-shadow: var(--glass-highlight-inner), 0 30px 80px rgb(74 100 155 / .13); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+.login-card { position: relative; width: min(420px, 100%); padding: 40px 30px 26px; border: var(--glass-border); border-radius: 38px; background: var(--glass-material); box-shadow: var(--glass-highlight-inner), 0 30px 80px rgb(74 100 155 / .13); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 54px; height: 54px; overflow: hidden; border: 1px solid #fff; border-radius: 19px; box-shadow: 0 7px 18px rgb(44 81 157 / .15); }
 .brand-mark :deep(.brand-mark-image) { border-radius: inherit; }
@@ -147,7 +147,7 @@ const submit = () => {
 .password-toggle { display: grid; width: 44px; height: 44px; grid-column: 2; grid-row: 1 / span 2; align-self: center; place-items: center; margin-right: -6px; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .password-toggle svg { width: 20px; height: 20px; }
 .login-error { margin: 12px 0 0; padding: 11px 13px; border-radius: 13px; color: #a12f42; background: #fff0f2; font-size: .83rem; }
-.login-button { display: flex; width: 100%; min-height: 54px; align-items: center; justify-content: center; gap: 9px; margin-top: 20px; border: 1px solid rgb(255 255 255 / .7); border-radius: 28px; color: #fff; background: linear-gradient(150deg, #4c80e9, #2d5fc8); box-shadow: inset 0 1px rgb(255 255 255 / .38), 0 7px 20px rgb(59 110 213 / .2); font-size: .96rem; font-weight: 650; transition: filter .2s; }
+.login-button { display: flex; width: 100%; min-height: 54px; align-items: center; justify-content: center; gap: 9px; margin-top: 20px; border: 1px solid rgb(255 255 255 / .7); border-radius: 28px; color: #fff; background: linear-gradient(170deg, #6799ed, #2860c9 52%, #477cd5); box-shadow: inset 0 2px 2px rgb(255 255 255 / .65), inset 0 -2px 2px rgb(18 53 128 / .2), 0 7px 20px rgb(59 110 213 / .2); font-size: .96rem; font-weight: 650; transition: filter .2s; }
 .login-button:hover:not(:disabled) { filter: brightness(1.07); }
 .login-footer { margin-top: 27px; text-align: center; }
 .ios-install-link { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; color: var(--text-secondary); font-size: .78rem; text-decoration: none; }

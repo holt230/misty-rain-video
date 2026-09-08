@@ -356,7 +356,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 <style scoped>
 .liquid-dialog-backdrop { position: fixed; inset: 0; z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; visibility: hidden; }
 .liquid-dialog-backdrop.active { opacity: 1; visibility: visible; }
-.liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 32px; color: var(--text-primary); background: linear-gradient(145deg, rgb(255 255 255 / .97), rgb(236 242 253 / .97)); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
+.liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 32px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
 .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 24px 24px 16px; flex-shrink: 0; }
 .media-meta-row { display: flex; min-width: 0; align-items: center; gap: 14px; flex: 1; }
 .dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border: 1px solid #fff; border-radius: 14px; box-shadow: var(--glass-shadow-sm); }
@@ -371,7 +371,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 .cat-select-pill { min-height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .77rem; white-space: nowrap; }
 .cat-select-pill.active { border-color: #fff; color: var(--liquid-accent); background: #fff; box-shadow: var(--glass-shadow-sm); font-weight: 700; }
 .dialog-top-actions { flex-shrink: 0; }
-.btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: #e9eef6; box-shadow: inset 0 1px #fff; }
+.btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .btn-close-dialog svg { width: 20px; height: 20px; }
 .result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 52px; padding: 3px 4px 3px 15px; border: 1px solid #fff; border-radius: 28px; background: rgb(96 123 171 / .07); flex-shrink: 0; }
 .result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }

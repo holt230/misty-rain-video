@@ -117,7 +117,7 @@ defineExpose({ focusAuth, refreshStatus });
       <UserAvatar class="profile-avatar" :username="user.username" />
     </header>
 
-    <section class="profile-card" aria-labelledby="profile-title">
+    <section class="profile-card glass-rim" aria-labelledby="profile-title">
       <div class="profile-copy">
         <small>{{ user.role === 'admin' ? '管理员账户' : '片库账户' }}</small>
         <h2 id="profile-title">{{ user.username }}</h2>
@@ -307,13 +307,13 @@ defineExpose({ focusAuth, refreshStatus });
 .heading-kicker { color: var(--text-tertiary); font-size: .72rem; }
 .page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.05em; }
 .profile-avatar { width: 48px; height: 48px; border: 2px solid #fff; border-radius: 50%; color: #365caa; background: #dce7ff; box-shadow: var(--glass-shadow-sm); }
-.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 25px; margin-bottom: 26px; border: var(--glass-border); border-radius: 29px; background: linear-gradient(130deg, rgb(255 255 255 / .83), rgb(226 234 254 / .45)); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); }
+.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 25px; margin-bottom: 26px; border: var(--glass-border); border-radius: 29px; background: var(--glass-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); }
 .profile-copy { min-width: 0; }
 .profile-copy small { color: var(--liquid-accent); font-size: .73rem; font-weight: 600; }
 .profile-copy h2 { margin: 5px 0; overflow-wrap: anywhere; font-size: 1.3rem; font-weight: 750; letter-spacing: -.03em; }
 .profile-copy p { color: var(--text-tertiary); font-size: .79rem; }
 .folder-chip { max-width: 36%; flex-shrink: 0; overflow: hidden; padding: 6px 10px; border: 1px solid #fff; border-radius: 20px; color: var(--text-secondary); background: rgb(255 255 255 / .6); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-.settings-section { margin-top: 20px; padding: 24px; border: var(--glass-border); border-radius: 28px; background: rgb(255 255 255 / .54); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.settings-section { margin-top: 20px; padding: 24px; border: var(--glass-border); border-radius: 28px; background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
 .section-title-row > div > span { color: var(--text-tertiary); font-size: .71rem; }
 .section-title-row h2 { margin-top: 2px; color: var(--text-primary); font-size: 1.08rem; font-weight: 700; letter-spacing: -.025em; }

@@ -123,7 +123,7 @@ defineExpose({ focusSearch, scrollToTop });
 
 <template>
   <header class="liquid-navbar-wrapper">
-    <div class="liquid-navbar">
+    <div class="liquid-navbar glass-rim">
       <!-- 品牌 Logo 区域 -->
       <button type="button" class="brand-unit" aria-label="回到页面顶部" @click="scrollToTop">
         <div class="mobile-title-group">
@@ -229,7 +229,7 @@ defineExpose({ focusSearch, scrollToTop });
 
 <style scoped>
 .liquid-navbar-wrapper { position: sticky; top: 18px; z-index: 100; max-width: 1160px; margin: 0 auto; padding: 0 24px; }
-.liquid-navbar { display: flex; align-items: center; gap: 28px; padding: 12px 16px 12px 20px; border: var(--glass-border); border-radius: 32px; background: var(--glass-bg); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+.liquid-navbar { display: flex; align-items: center; gap: 28px; padding: 12px 16px 12px 20px; border: var(--glass-border); border-radius: 32px; background: var(--glass-material); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-md); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 .brand-unit { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }
 .brand-logo-badge { width: 42px; height: 42px; overflow: hidden; border-radius: 15px; box-shadow: 0 3px 8px rgb(42 73 133 / .12); }
 .brand-image { width: 100%; height: 100%; }
@@ -244,7 +244,7 @@ defineExpose({ focusSearch, scrollToTop });
 .search-lens-icon { position: absolute; top: 24px; left: 16px; display: flex; transform: translateY(-50%); color: var(--text-tertiary); pointer-events: none; }
 .clear-library-search { position: absolute; right: 3px; top: 2px; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .clear-library-search svg { width: 18px; height: 18px; }
-.liquid-dropdown { position: absolute; top: calc(100% + 10px); left: 0; right: 0; z-index: 200; display: grid; gap: 14px; max-height: min(480px, 64dvh); overflow-y: auto; overscroll-behavior: contain; padding: 18px; border: var(--glass-border); border-radius: 24px; color: var(--text-primary); background: #f7f9ff; box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
+.liquid-dropdown { position: absolute; top: calc(100% + 10px); left: 0; right: 0; z-index: 200; display: grid; gap: 14px; max-height: min(480px, 64dvh); overflow-y: auto; overscroll-behavior: contain; padding: 18px; border: var(--glass-border); border-radius: 24px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
 .dropdown-meta { display: flex; min-width: 0; align-items: center; gap: 8px; font-size: .85rem; }
 .meta-label, .meta-label-badge { flex: 0 0 auto; color: var(--liquid-accent); font-size: .73rem; font-weight: 650; }
 .meta-label-badge { padding: 4px 8px; border-radius: 8px; background: var(--liquid-accent-subtle); }
@@ -257,8 +257,9 @@ defineExpose({ focusSearch, scrollToTop });
 .account-avatar { width: 36px; height: 36px; border-radius: 50%; color: #2e549a; background: #dce7ff; }
 .account-name { max-width: 85px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; font-weight: 600; }
 @media (max-width: 640px) {
-  .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 16px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: linear-gradient(180deg, rgb(235 242 254 / .96) 0%, rgb(236 241 251 / .9) 75%, rgb(236 241 251 / 0)); }
+  .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 16px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: linear-gradient(180deg, rgb(237 244 253 / .65), rgb(237 244 253 / .22) 75%, transparent); }
   .liquid-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 12px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .liquid-navbar::after { display: none; }
   .brand-logo-badge, .brand-text-group { display: none; }
   .mobile-title-group { display: flex; min-width: 0; align-items: center; gap: 11px; }
   .mobile-brand-mark { display: block; width: 40px; height: 40px; flex-shrink: 0; overflow: hidden; border: 1px solid white; border-radius: 15px; box-shadow: 0 4px 10px rgb(71 100 161 / .13); }
@@ -266,7 +267,7 @@ defineExpose({ focusSearch, scrollToTop });
   .mobile-brand-copy strong { color: #22324c; font-size: 1.17rem; font-weight: 750; letter-spacing: -.04em; }
   .mobile-brand-copy small { color: var(--text-tertiary); font-size: .67rem; }
   .search-unit { grid-column: 1 / -1; grid-row: 2; }
-  .liquid-search-input { background: rgb(255 255 255 / .64); box-shadow: var(--glass-highlight-inner), 0 5px 20px rgb(76 105 158 / .06); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+  .liquid-search-input { background: var(--glass-material); box-shadow: var(--glass-highlight-inner), 0 7px 18px rgb(52 82 126 / .12); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
   .trailing-unit { grid-column: 2; grid-row: 1; }
   .account-capsule-btn { min-width: 46px; padding: 4px; }
   .account-name { display: none; }

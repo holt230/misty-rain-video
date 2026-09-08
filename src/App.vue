@@ -451,11 +451,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 
 <template>
   <!-- Apple 空间液态流体漫射背景 -->
-  <div v-show="!isEmbedPlayerOpen" class="liquid-spatial-canvas">
-    <div class="liquid-light-blob blob-1"></div>
-    <div class="liquid-light-blob blob-2"></div>
-    <div class="liquid-light-blob blob-3"></div>
-  </div>
+  <div v-show="!isEmbedPlayerOpen" class="liquid-spatial-canvas" aria-hidden="true"></div>
 
   <LoginScreen
     v-if="checking || !authenticated"
@@ -645,7 +641,7 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 .library-intro p { color: var(--text-tertiary); font-size: .81rem; letter-spacing: .02em; }
 .library-intro h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin-top: 5px; font-size: 2.2rem; font-weight: 780; letter-spacing: -.055em; line-height: 1.3; }
 .library-intro h1 span { color: var(--text-tertiary); font-size: .78rem; font-weight: 500; letter-spacing: 0; }
-.add-library-button { display: grid; width: 52px; height: 52px; place-items: center; flex-shrink: 0; border: 1px solid #fff; border-radius: 50%; color: var(--liquid-accent); background: linear-gradient(145deg, #fff, rgb(255 255 255 / .35)); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.add-library-button { display: grid; width: 52px; height: 52px; place-items: center; flex-shrink: 0; border: 1px solid #fff; border-radius: 50%; color: var(--liquid-accent); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .add-library-button svg { width: 25px; height: 25px; stroke-width: 1.8; }
 .category-toolbar { display: flex; margin-bottom: 26px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-bottom: 18px; }
