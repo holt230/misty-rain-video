@@ -7,7 +7,6 @@ import Navbar from './components/layout/Navbar.vue';
 import MobileTabBar, { type MobileTab as MobileDockTab } from './components/layout/MobileTabBar.vue';
 import CategoryTabs from './components/media/CategoryTabs.vue';
 import MediaGrid from './components/media/MediaGrid.vue';
-import LibrarySpotlight from './components/media/LibrarySpotlight.vue';
 import DeleteMediaConfirm from './components/media/DeleteMediaConfirm.vue';
 import CategoryPickerSheet from './components/media/CategoryPickerSheet.vue';
 import MediaActionSheet from './components/media/MediaActionSheet.vue';
@@ -483,55 +482,43 @@ const navigateMobileTab = (tab: MobileDockTab) => {
     <!-- 核心主区域 -->
     <main v-if="mobileTab !== 'account'" class="page-container">
     <header class="library-intro">
-      <div><h1>我的片库<span>{{ !allMediaList.length && isLoading ? '正在读取…' : !allMediaList.length && loadError ? '等待重新加载' : `${allMediaList.length} 部收藏` }}</span></h1></div>
-      <button type="button" class="add-library-button" aria-label="添加影片" @click="focusMobileSearch"><Plus aria-hidden="true" /><span>添加</span></button>
-    </header>
-    <LibrarySpotlight
-      v-if="mediaList.length && !isLoading && !loadError"
-      :media="mediaList[0]!"
-      :category-name="categoryNames[currentCategory]"
-      @play="handleSelectMedia"
-    />
-    <!-- 分类标签控制栏 -->
-    <div class="category-toolbar">
-      <CategoryTabs
-        v-model="currentCategory"
-        :counts="categoryCounts"
-      />
-    </div>
-
-    <!-- 列表标题与数量统计 -->
-    <div v-if="mediaList.length > 0" class="section-heading">
-      <div class="section-heading-copy">
-        <span class="section-kicker">PRIVATE LIBRARY</span>
-        <div class="heading-main-line">
-          <h2 class="category-heading-title">{{ categoryNames[currentCategory] }}</h2>
-          <span class="count-hint">{{ mediaList.length }} 部</span>
-        </div>
+      <div class="library-title">
+        <h1>我的片库</h1>
+        <p>{{ !allMediaList.length && isLoading ? '正在读取…' : !allMediaList.length && loadError ? '等待重新加载' : `${allMediaList.length} 部收藏` }}</p>
       </div>
-      <div class="library-update-actions">
+      <div class="library-actions">
         <button
-          v-if="availableUpdateMedia.length"
-          type="button"
-          class="apply-updates-button"
-          :disabled="isApplyingUpdates || isCheckingUpdates"
-          @click="applyLibraryUpdates(availableUpdateMedia)"
-        >
-          {{ isApplyingUpdates ? '更新中' : `更新 ${availableUpdateMedia.length} 部` }}
-        </button>
-        <button
+          v-if="allMediaList.length"
           type="button"
           class="check-updates-button"
           :class="{ checking: isCheckingUpdates }"
           :disabled="isCheckingUpdates || isApplyingUpdates"
           aria-label="检查片库更新"
+          title="检查片库更新"
           @click="checkLibraryUpdates(true, true)"
         >
           <RefreshCw aria-hidden="true" />
           <span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span>
         </button>
+        <button type="button" class="add-library-button" aria-label="添加影片" @click="focusMobileSearch">
+          <Plus aria-hidden="true" /><span>添加</span>
+        </button>
       </div>
+    </header>
+
+    <div class="category-toolbar">
+      <CategoryTabs v-model="currentCategory" :counts="categoryCounts" />
     </div>
+
+    <button
+      v-if="availableUpdateMedia.length"
+      type="button"
+      class="apply-updates-button"
+      :disabled="isApplyingUpdates || isCheckingUpdates"
+      @click="applyLibraryUpdates(availableUpdateMedia)"
+    >
+      {{ isApplyingUpdates ? '正在补充新剧集…' : `${availableUpdateMedia.length} 部影片有新剧集，点击更新` }}
+    </button>
 
     <!-- 影视卡片网格 -->
     <div v-if="loadError" class="inline-feedback library-load-error" role="alert">
@@ -643,36 +630,32 @@ const navigateMobileTab = (tab: MobileDockTab) => {
 </template>
 
 <style scoped>
-.page-container { position: relative; z-index: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 48px 40px 90px; }
-.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
-.library-intro h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px; font-size: 2.7rem; font-weight: 700; letter-spacing: -.055em; line-height: 1.2; }
-.library-intro h1 span { color: var(--text-tertiary); font-size: .78rem; font-weight: 500; letter-spacing: 0; }
-.add-library-button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 7px; flex-shrink: 0; padding: 0 16px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .82rem; font-weight: 600; }
+.page-container { position: relative; z-index: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 36px 40px 90px; }
+.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.library-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; min-width: 0; }
+.library-title h1 { font-size: 2rem; font-weight: 650; letter-spacing: -.035em; line-height: 1.3; }
+.library-title p { color: var(--text-tertiary); font-size: .75rem; }
+.library-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.add-library-button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 0; border-radius: 22px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .8rem; font-weight: 550; transition: background .2s; }
 .add-library-button:hover { background: rgb(255 255 255 / .16); }
-.check-updates-button:hover, .apply-updates-button:hover { color: var(--text-primary); background: var(--glass-bg); }
-.add-library-button svg { width: 18px; height: 18px; stroke-width: 2; }
-.category-toolbar { display: flex; margin-bottom: 24px; }
-.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; margin-bottom: 18px; }
-.section-kicker { display: none; }
-.heading-main-line { display: flex; align-items: baseline; gap: 9px; }
-.category-heading-title { font-size: 1.3rem; font-weight: 650; letter-spacing: -.025em; }
-.count-hint { color: var(--text-tertiary); font-size: .74rem; }
-.library-update-actions { display: flex; align-items: center; gap: 8px; }
-.check-updates-button, .apply-updates-button { min-height: 44px; border: 0; color: var(--text-secondary); background: transparent; box-shadow: none; }
-.check-updates-button { position: relative; display: grid; width: 44px; place-items: center; border-radius: 50%; }
+.add-library-button svg { width: 17px; height: 17px; stroke-width: 2; }
+.category-toolbar { display: flex; margin-bottom: 28px; border-bottom: 1px solid rgb(255 255 255 / .07); }
+.check-updates-button { position: relative; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; transition: background .2s, color .2s; }
+.check-updates-button:hover { color: var(--text-primary); background: var(--glass-bg); }
 .check-updates-button svg { width: 18px; height: 18px; }
-.apply-updates-button { padding: 0 15px; border-radius: 23px; font-size: .79rem; font-weight: 650; }
-.update-count-dot { position: absolute; top: -3px; right: -3px; display: grid; min-width: 17px; height: 17px; place-items: center; border: 1px solid rgb(255 255 255 / .09); border-radius: 20px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .58rem; }
+.apply-updates-button { display: block; width: 100%; min-height: 44px; margin-bottom: 20px; padding: 10px 16px; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: var(--glass-bg); text-align: left; font-size: .8rem; }
+.apply-updates-button:hover { background: var(--glass-bg-hover); }
+.update-count-dot { position: absolute; top: 0; right: 0; display: grid; min-width: 17px; height: 17px; padding: 0 3px; place-items: center; border-radius: 20px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .58rem; }
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
-  .page-container { padding: 23px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
-  .library-intro { margin-bottom: 23px; }
-  .library-intro h1 { font-size: 2.05rem; gap: 10px; }
-  .library-intro h1 span { font-size: .68rem; }
+  .page-container { padding: 16px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
+  .library-intro { margin-bottom: 16px; }
+  .library-title { display: grid; gap: 2px; }
+  .library-title h1 { font-size: 1.65rem; }
+  .library-title p { font-size: .69rem; }
+  .library-actions { gap: 4px; }
   .add-library-button { padding: 0 12px; }
-  .category-toolbar { margin-bottom: 20px; }
-  .section-heading { margin-bottom: 14px; }
-  .category-heading-title { font-size: 1.05rem; }
+  .category-toolbar { margin-bottom: 22px; }
 }
 </style>

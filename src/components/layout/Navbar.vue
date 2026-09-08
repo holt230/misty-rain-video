@@ -132,7 +132,6 @@ defineExpose({ focusSearch, scrollToTop });
           </span>
           <span class="mobile-brand-copy">
             <strong>烟雨影视</strong>
-            <small>私人影院</small>
           </span>
         </div>
         <div class="brand-logo-badge">
@@ -257,8 +256,8 @@ defineExpose({ focusSearch, scrollToTop });
 .account-avatar { width: 36px; height: 36px; border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
 .account-name { display: none; }
 @media (max-width: 640px) {
-  .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 16px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: rgb(11 11 13 / .9); border: 0; }
-  .liquid-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 12px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .liquid-navbar-wrapper { top: 0; padding: calc(var(--safe-area-top) + 8px) calc(20px + var(--safe-area-right)) 10px calc(20px + var(--safe-area-left)); background: rgb(11 11 13 / .9); border: 0; }
+  .liquid-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .liquid-navbar::after { display: none; }
   .brand-logo-badge, .brand-text-group { display: none; }
   .mobile-title-group { display: flex; min-width: 0; align-items: center; gap: 11px; }

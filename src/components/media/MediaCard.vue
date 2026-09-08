@@ -7,6 +7,10 @@ import type { MediaItem } from '../../types/media';
 
 const props = defineProps<{ media: MediaItem }>();
 const updateFeedback = computed(() => getLibraryUpdateFeedback(props.media));
+const qualityLabel = computed(() => {
+  const value = `${props.media.tag || ''} ${props.media.quarkQuality || ''}`;
+  return value.match(/(?:4K|8K|2160P|1080P|720P|HDR|杜比)/i)?.[0].toUpperCase() || '';
+});
 
 const emit = defineEmits<{
   (e: 'click-card', media: MediaItem): void;
@@ -34,29 +38,22 @@ const categoryLabels: Record<MediaItem['category'], string> = {
     >
       <span class="poster-viewport">
 <MediaPoster :src="media.poster" alt="" class="poster-image" loading="lazy" decoding="async" />
-        <span class="poster-vignette" aria-hidden="true"></span>
-        <span class="quality-tag">{{ media.tag || media.quarkQuality || '高清' }}</span>
+        <span v-if="qualityLabel" class="quality-tag">{{ qualityLabel }}</span>
 
         <span class="hover-play" aria-hidden="true">
           <span class="play-disk"><Play fill="currentColor" /></span>
         </span>
 
-        <span
-          v-if="media.status || media.latestEpisodeNumber || media.newEpisodeCount || updateFeedback"
-          class="status-badge"
-          :title="updateFeedback?.detail"
-          :class="{ 'has-update': (media.newEpisodeCount || 0) > 0 }"
-        >
-          <template v-if="(media.newEpisodeCount || 0) > 0">新 {{ media.newEpisodeCount }} 集</template>
-          <template v-else-if="updateFeedback">{{ updateFeedback.label }}</template>
-          <template v-else-if="media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
-          <template v-else>{{ media.status }}</template>
-        </span>
       </span>
 
       <span class="card-caption">
         <span class="media-title" :title="media.title">{{ media.title }}</span>
-        <span class="media-subtitle">{{ categoryLabels[media.category] }}</span>
+        <span class="media-subtitle" :title="updateFeedback?.detail" :class="{ 'has-update': (media.newEpisodeCount || 0) > 0 }">
+          <template v-if="(media.newEpisodeCount || 0) > 0">新增 {{ media.newEpisodeCount }} 集</template>
+          <template v-else-if="updateFeedback">{{ updateFeedback.label }}</template>
+          <template v-else-if="media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
+          <template v-else>{{ media.status || categoryLabels[media.category] }}</template>
+        </span>
       </span>
     </button>
 
@@ -100,13 +97,11 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 .card-play-target { display: flex; width: 100%; min-width: 0; flex-direction: column; gap: 12px; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; border-radius: 10px; }
 .poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border-radius: 10px; background: var(--surface-2); box-shadow: 0 6px 18px rgb(0 0 0 / .2); }
 .poster-image { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
-.poster-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, transparent 65%, rgb(0 0 0 / .65)); }
 .quality-tag { position: absolute; top: 9px; left: 9px; max-width: calc(100% - 18px); overflow: hidden; padding: 2px 6px; border-radius: 4px; color: #fff; background: rgb(0 0 0 / .65); font-size: .6rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.status-badge { position: absolute; right: 10px; bottom: 12px; left: 12px; overflow: hidden; color: #fff; text-shadow: 0 1px 5px rgb(0 0 0 / .55); font-size: .73rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.status-badge.has-update { right: auto; padding: 3px 7px; border-radius: 5px; color: #111; background: #e6e6eb; text-shadow: none; }
-.card-caption { display: grid; min-width: 0; width: 100%; gap: 3px; padding: 0 32px 0 1px; }
+.card-caption { display: grid; min-width: 0; width: 100%; gap: 4px; padding: 0 30px 0 1px; }
 .media-title { display: block; overflow: hidden; color: var(--text-primary); font-size: .9rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; }
-.media-subtitle { color: var(--text-tertiary); font-size: .73rem; }
+.media-subtitle { overflow: hidden; color: var(--text-tertiary); font-size: .72rem; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.media-subtitle.has-update { color: var(--text-primary); }
 .more-trigger { position: absolute; bottom: -3px; right: -8px; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .more-trigger::before { display: none; }
 .more-trigger:hover { color: var(--text-primary); background: var(--glass-bg); }
