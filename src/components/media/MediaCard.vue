@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { getLibraryUpdateFeedback } from '../../services/libraryUpdateFeedback';
 import { ChevronDown, Ellipsis, Play, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem } from '../../types/media';
 
-defineProps<{ media: MediaItem }>();
+const props = defineProps<{ media: MediaItem }>();
+const updateFeedback = computed(() => getLibraryUpdateFeedback(props.media));
 
 const emit = defineEmits<{
   (e: 'click-card', media: MediaItem): void;
@@ -26,7 +29,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
     <button
       type="button"
       class="card-play-target"
-      :aria-label="`播放《${media.title}》${media.latestEpisodeNumber ? `，更新至第 ${media.latestEpisodeNumber} 集` : ''}`"
+      :aria-label="`播放《${media.title}》${media.latestEpisodeNumber ? `，更新至第 ${media.latestEpisodeNumber} 集` : ''}${updateFeedback ? `，${updateFeedback.label}` : ''}`"
       @click="emit('click-card', media)"
     >
       <span class="poster-viewport">
@@ -39,13 +42,14 @@ const categoryLabels: Record<MediaItem['category'], string> = {
         </span>
 
         <span
-          v-if="media.status || media.latestEpisodeNumber || media.newEpisodeCount || media.updateMessage"
+          v-if="media.status || media.latestEpisodeNumber || media.newEpisodeCount || updateFeedback"
           class="status-badge"
+          :title="updateFeedback?.detail"
           :class="{ 'has-update': (media.newEpisodeCount || 0) > 0 }"
         >
           <template v-if="(media.newEpisodeCount || 0) > 0">新 {{ media.newEpisodeCount }} 集</template>
+          <template v-else-if="updateFeedback">{{ updateFeedback.label }}</template>
           <template v-else-if="media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
-          <template v-else-if="media.updateMessage">片源待更换</template>
           <template v-else>{{ media.status }}</template>
         </span>
       </span>

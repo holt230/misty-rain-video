@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { getLibraryUpdateFeedback } from '../../services/libraryUpdateFeedback';
 import { useDialog } from '../../composables/useDialog';
 import { ChevronRight, Download, ListFilter, RefreshCw, Trash2, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
@@ -17,6 +18,8 @@ const emit = defineEmits<{
   (e: 'update-library'): void;
   (e: 'delete'): void;
 }>();
+
+const updateFeedback = computed(() => props.media ? getLibraryUpdateFeedback(props.media) : null);
 
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.open, () => emit('cancel'));
@@ -47,6 +50,11 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
           </button>
         </header>
 
+        <div v-if="updateFeedback" class="update-feedback" role="status">
+          <strong>{{ updateFeedback.label }}</strong>
+          <p>{{ updateFeedback.detail }}</p>
+        </div>
+
         <div class="action-list">
           <button v-if="(media.newEpisodeCount || 0) > 0" type="button" class="action-item update" @click="emit('update-library')">
             <span class="action-icon" aria-hidden="true">
@@ -76,7 +84,7 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
             </span>
             <span class="action-copy">
               <strong>更换资源</strong>
-              <small>{{ media.updateMessage || '重新检索并选择片源' }}</small>
+              <small>重新检索并选择片源</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -110,6 +118,9 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 .summary-copy h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.12rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }
 .close-button { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .close-button svg { width: 19px; height: 19px; }
+.update-feedback { margin: 0 0 18px; padding: 14px; border-radius: 12px; background: var(--glass-bg); }
+.update-feedback strong { color: var(--text-primary); font-size: .84rem; font-weight: 600; }
+.update-feedback p { margin-top: 5px; color: var(--text-secondary); font-size: .78rem; line-height: 1.65; overflow-wrap: anywhere; }
 .action-list { border: 0; border-radius: 14px; overflow: hidden; }
 .action-item { display: flex; width: 100%; min-height: 76px; align-items: center; gap: 13px; padding: 12px 15px; border: 0; border-bottom: 1px solid rgb(90 116 159 / .10); color: var(--text-primary); background: transparent; text-align: left; }
 .action-item:last-child { border-bottom: 0; }

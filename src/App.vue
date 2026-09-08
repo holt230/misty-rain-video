@@ -165,9 +165,9 @@ const checkLibraryUpdates = async (force = false, notify = false) => {
       const count = summary.items.filter(item => item.newEpisodeCount > 0).length;
       const unavailableCount = summary.items.filter(item => item.updateCheckAvailable === false).length;
       const message = count
-        ? `发现 ${count} 部影片有新内容${unavailableCount ? `，另有 ${unavailableCount} 部需更换片源` : ''}`
+        ? `发现 ${count} 部影片有新内容${unavailableCount ? `，另有 ${unavailableCount} 部未能检查更新` : ''}`
         : unavailableCount
-          ? `${unavailableCount} 部片源无法继续更新，请从更多操作中更换资源`
+          ? `${unavailableCount} 部未能检查更新，可在影片“更多操作”中查看原因`
           : '片库内容已是最新';
       toast.show(message, count ? '↻' : unavailableCount ? '!' : '✓', 3200);
     }
@@ -189,7 +189,7 @@ const applyLibraryUpdates = async (mediaItems: MediaItem[]) => {
     const message = summary.transferredCount
       ? `已补充 ${summary.transferredCount} 个新正片文件${summary.failedCount ? `，${summary.failedCount} 部未完成` : ''}`
       : summary.failedCount
-        ? `${summary.failedCount} 部片源暂时无法更新，请从更多操作中更换资源`
+        ? `${summary.failedCount} 部未完成剧集补充，请稍后重试或查看具体原因`
         : '所选影片已是最新';
     toast.show(message, summary.failedCount ? '!' : '✓', 3600);
   } catch (error) {
