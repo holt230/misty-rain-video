@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type Danmaku from 'danmaku';
+import { SlidersHorizontal } from '@lucide/vue';
 import { DanmakuService, platformLabels, type DanmakuInput, type DanmakuPlatform, type DanmakuSource, type DanmakuWork, type DanmakuSegment } from '../../services/danmakuService';
 import { displayComments } from '../../services/danmakuDisplay';
 
@@ -17,6 +18,8 @@ const matching = ref(false);
 const loading = ref(false);
 const query = ref('');
 const choosing = ref(false);
+const advanced = ref(false);
+const recovery = ref<'choose' | 'retry' | ''>('');
 const fetchedAt = ref(0);
 const stale = ref(false);
 const overlay = ref<HTMLElement | null>(null);
@@ -35,14 +38,24 @@ const target = computed(() => props.video.parentElement);
 const active = computed(() => enabled.value && !nativeFullscreen.value && !hiddenPage.value);
 const refreshedLabel = computed(() => fetchedAt.value ? new Date(fetchedAt.value).toLocaleString('zh-CN', { hour12: false }) : '');
 const status = computed(() => {
-  if (!enabled.value) return '开启后自动匹配';
-  if (nativeFullscreen.value) return '系统全屏不显示网页弹幕';
-  if (matching.value) return '正在匹配弹幕…';
-  if (message.value) return message.value;
-  if (loading.value && !fetchedAt.value) return '正在加载弹幕…';
-  if (source.value) return `${platformLabels[source.value.platform]} · ${source.value.episodeTitle}${stale.value ? ' · 使用缓存' : ''}`;
-  return '未找到对应弹幕';
+  if (!enabled.value) return '';
+  if (nativeFullscreen.value) return '退出系统全屏后可看弹幕';
+  if (matching.value) return '正在找弹幕…';
+  if (loading.value && !fetchedAt.value) return '正在加载…';
+  if (recovery.value === 'choose') return '确认一下片名，就能继续查找';
+  if (recovery.value === 'retry') return '弹幕暂时没加载出来';
+  if (message.value === '当前时间段暂无弹幕') return '这里暂时没有弹幕';
+  return '';
 });
+function openChooser() {
+  choosing.value = true; expanded.value = false; advanced.value = false;
+  query.value = props.input.title;
+  if (!candidates.value.length && !matching.value) void match(true);
+}
+function toggleSettings() {
+  expanded.value = !expanded.value; choosing.value = false; advanced.value = false;
+}
+
 function destroyEngine() { renderGeneration++; engine?.destroy(); engine = null; }
 async function render() {
   const seq = ++renderGeneration;
@@ -53,15 +66,15 @@ async function render() {
     engine?.destroy();
     engine = new Renderer({ container: overlay.value, media: props.video, engine: 'dom', speed: 100,
       comments: displayComments([...segments.values()].flatMap(item => item.comments), density.value, offset.value) });
-  } catch { message.value = '弹幕显示暂不可用，请刷新页面'; }
+  } catch { message.value = '弹幕显示暂不可用，请刷新页面'; recovery.value = 'retry'; }
 }
 function reset() {
   generation++; controller.abort(); controller = new AbortController();
   pending.clear(); failedUntil.clear(); segments.clear(); destroyEngine();
-  loading.value = false; matching.value = false; message.value = ''; fetchedAt.value = 0; stale.value = false;
+  loading.value = false; matching.value = false; recovery.value = ''; message.value = ''; fetchedAt.value = 0; stale.value = false;
 }
 async function setSource(value: DanmakuSource) {
-  reset(); source.value = value; choosing.value = false;
+  reset(); source.value = value; choosing.value = false; expanded.value = false; advanced.value = false;
   offset.value = Number(localStorage.getItem(`misty_rain_danmaku_offset:${props.input.mediaKey}:${value.workId || value.id}`)) || 0;
   offset.value = Math.max(-300, Math.min(300, offset.value));
   await loadCurrent();
@@ -81,20 +94,20 @@ async function match(manual = false) {
     candidates.value = result.candidates;
     if (result.selected) await setSource(result.selected);
     else {
-      choosing.value = true;
-      message.value = result.candidates.length ? '请选择对应作品与平台' : '未找到对应弹幕，可搜索或粘贴本集平台链接';
+      recovery.value = 'choose';
+      message.value = result.candidates.length ? '选一下正在看的作品，我们会记住' : '没有找到，试试更短的片名';
     }
   } catch (error) {
-    if (seq === generation) { message.value = error instanceof Error ? error.message : '弹幕匹配失败'; choosing.value = true; }
+    if (seq === generation) { message.value = error instanceof Error ? error.message : '弹幕匹配失败'; recovery.value = 'retry'; }
   } finally { if (seq === generation) matching.value = false; }
 }
-async function choose(workId: string, platform: DanmakuPlatform) {
+async function choose(workId: string, platform?: DanmakuPlatform) {
   reset(); source.value = null; matching.value = true;
   const seq = generation;
   try {
     const selected = await DanmakuService.select(props.input, { workId, platform }, controller.signal);
     if (seq === generation) await setSource(selected);
-  } catch (error) { if (seq === generation) message.value = error instanceof Error ? error.message : '暂时无法关联'; }
+  } catch (error) { if (seq === generation) { message.value = error instanceof Error ? error.message : '暂时无法关联'; recovery.value = 'choose'; } }
   finally { if (seq === generation) matching.value = false; }
 }
 const currentIndex = () => source.value ? Math.floor(Math.max(0, props.video.currentTime - offset.value) / source.value.segmentSeconds) : 0;
@@ -112,12 +125,12 @@ async function loadSegment(index: number, force = false) {
     // Keep a small moving window; seeking back can load the shared server cache.
     for (const key of segments.keys()) if (Math.abs(key - currentIndex()) > 2) segments.delete(key);
     if (data.stale) failedUntil.set(index, Date.now() + 30_000);
-    if (index === currentIndex()) { fetchedAt.value = data.fetchedAt; stale.value = data.stale; message.value = data.comments.length ? '' : '当前时间段暂无弹幕'; }
+    if (index === currentIndex()) { recovery.value = data.stale ? 'retry' : ''; fetchedAt.value = data.fetchedAt; stale.value = data.stale; message.value = data.comments.length ? '' : '当前时间段暂无弹幕'; }
     await render();
   } catch (error) {
     if (seq === generation) {
       failedUntil.set(index, Date.now() + 30_000);
-      if (index === currentIndex()) message.value = error instanceof Error ? error.message : '弹幕暂不可用，视频可继续播放';
+      if (index === currentIndex()) { recovery.value = 'retry'; message.value = error instanceof Error ? error.message : '弹幕暂不可用，视频可继续播放'; }
     }
   } finally { if (seq === generation) { pending.delete(index); loading.value = pending.size > 0; } }
 }
@@ -126,7 +139,7 @@ async function loadCurrent(force = false) {
   const index = currentIndex();
   const cached = segments.get(index);
   if (cached) {
-    fetchedAt.value = cached.fetchedAt; stale.value = cached.stale;
+    fetchedAt.value = cached.fetchedAt; stale.value = cached.stale; recovery.value = cached.stale ? 'retry' : '';
     message.value = cached.stale ? '弹幕暂不可用，正在显示缓存' : cached.comments.length ? '' : '当前时间段暂无弹幕';
   }
   await loadSegment(index, force);
@@ -157,7 +170,7 @@ function bindVideo(video: HTMLVideoElement | null) {
 }
 watch(enabled, value => {
   localStorage.setItem('misty_rain_danmaku_enabled', String(value));
-  if (value) void match(); else { reset(); source.value = null; }
+  if (value) void match(); else { reset(); source.value = null; expanded.value = false; choosing.value = false; advanced.value = false; }
 });
 watch(active, async value => {
   if (!value) engine?.hide();
@@ -173,7 +186,7 @@ watch(offset, () => {
   void render(); void loadCurrent();
 });
 watch(() => `${props.input.mediaKey}:${props.input.episodeNumber}:${props.input.episodeTitle}`, () => {
-  query.value = ''; if (enabled.value) void match(); else { reset(); source.value = null; }
+  query.value = ''; expanded.value = false; choosing.value = false; advanced.value = false; if (enabled.value) void match(); else { reset(); source.value = null; }
 });
 watch(() => props.video, async video => { bindVideo(video); fullscreen(); await nextTick(); void render(); });
 onMounted(() => {
@@ -198,34 +211,46 @@ onBeforeUnmount(() => {
     <div class="danmaku-row">
       <button class="danmaku-toggle" type="button" role="switch" aria-label="弹幕" :aria-checked="enabled" @click="enabled = !enabled"><span aria-hidden="true">弹</span>弹幕{{ enabled ? '开' : '关' }}</button>
       <p role="status">{{ status }}</p>
-      <button v-if="enabled" type="button" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起' : choosing ? '选择弹幕' : '弹幕设置' }}</button>
+      <button v-if="enabled && recovery && !matching && !loading && !nativeFullscreen" type="button" class="danmaku-recovery" @click="recovery === 'choose' ? openChooser() : refresh()">{{ recovery === 'choose' ? '选一下片名' : '重试' }}</button>
+      <button v-if="enabled" type="button" class="danmaku-settings-toggle" aria-label="弹幕设置" :aria-expanded="expanded" @click="toggleSettings"><SlidersHorizontal aria-hidden="true" /></button>
     </div>
-    <div v-if="enabled && expanded" class="danmaku-settings">
-      <div v-if="source" class="danmaku-source">
-        <strong>{{ source.title }} {{ source.year }} · {{ platformLabels[source.platform] }}</strong>
-        <small>{{ source.episodeTitle }}</small>
-        <small v-if="refreshedLabel">获取于 {{ refreshedLabel }}{{ stale ? ' · 暂用缓存' : '' }}</small>
-      </div>
-      <div class="danmaku-actions">
-        <button type="button" :disabled="loading || matching" @click="refresh">刷新弹幕</button>
-        <button type="button" :disabled="matching" @click="choosing = !choosing">{{ choosing ? '收起来源选择' : '更换来源' }}</button>
-      </div>
-      <form v-if="choosing" class="danmaku-search" @submit.prevent="match(true)">
-        <label for="danmaku-query">搜索片名或粘贴本集平台链接</label>
-        <div><input id="danmaku-query" v-model="query" maxlength="1000" placeholder="片名，或腾讯 / 爱奇艺 / 优酷剧集链接" /><button type="submit" :disabled="matching || !query.trim()">{{ matching ? '查找中' : '查找' }}</button></div>
+    <div v-if="enabled && choosing" class="danmaku-settings">
+      <div class="danmaku-panel-heading"><strong>选一下正在看的作品</strong><button type="button" @click="choosing = false">收起</button></div>
+      <p class="danmaku-help">选对一次就会记住，平台由系统选择。</p>
+      <form class="danmaku-search" @submit.prevent="match(true)">
+        <label for="danmaku-query">片名</label>
+        <div><input id="danmaku-query" v-model="query" maxlength="1000" placeholder="输入正在看的片名" /><button type="submit" :disabled="matching || !query.trim()">{{ matching ? '查找中' : '查找' }}</button></div>
       </form>
-      <ul v-if="choosing && candidates.length" class="danmaku-candidates" aria-label="弹幕作品候选">
+      <p v-if="!matching && !candidates.length" class="danmaku-help">{{ message }}</p>
+      <p v-if="recovery === 'choose' && candidates.length" class="danmaku-help">{{ message }}</p>
+      <ul v-if="candidates.length" class="danmaku-candidates" aria-label="弹幕作品候选">
         <li v-for="work in candidates" :key="work.id">
-          <strong>{{ work.title }}</strong><small>{{ work.year }} · {{ work.categoryLabel }}</small>
-          <div><button v-for="platform in work.platforms" :key="platform" type="button" :disabled="matching" @click="choose(work.id, platform)">使用{{ platformLabels[platform] }}弹幕</button></div>
+          <button class="danmaku-work" type="button" :disabled="matching" @click="choose(work.id)"><strong>{{ work.title }}</strong><small>{{ work.year }} · {{ work.categoryLabel }}</small><span aria-hidden="true">选择</span></button>
         </li>
       </ul>
+    </div>
+    <div v-if="enabled && expanded" class="danmaku-settings">
+      <div class="danmaku-panel-heading"><strong>弹幕设置</strong><button type="button" @click="expanded = false">完成</button></div>
       <div class="danmaku-preferences">
-        <label>密度<select v-model="density" aria-label="弹幕密度"><option value="low">少量</option><option value="normal">适中</option></select></label>
-        <label>透明度 {{ Math.round(opacity * 100) }}%<input v-model.number="opacity" aria-label="弹幕透明度" type="range" min="0.3" max="1" step="0.05" /></label>
-        <div class="danmaku-offset"><span>时间校准：{{ offset > 0 ? '+' : '' }}{{ offset }} 秒</span><div><button type="button" :disabled="offset <= -300" @click="offset = Math.max(-300, offset - 1)">提前 1 秒</button><button type="button" @click="offset = 0">重置</button><button type="button" :disabled="offset >= 300" @click="offset = Math.min(300, offset + 1)">延后 1 秒</button></div></div>
+        <label>弹幕数量<select v-model="density" aria-label="弹幕数量"><option value="low">少一点</option><option value="normal">适中</option></select></label>
+        <label>清晰程度<input v-model.number="opacity" aria-label="弹幕清晰程度" type="range" min="0.3" max="1" step="0.05" /></label>
       </div>
-      <p class="danmaku-help">弹幕显示在画面上部。iPhone 系统全屏不显示网页弹幕；获取时间不代表平台数据的实时更新时间。</p>
+      <button type="button" :disabled="matching" @click="openChooser">弹幕和影片对不上</button>
+      <button type="button" class="danmaku-more" :aria-expanded="advanced" @click="advanced = !advanced">{{ advanced ? '收起更多选项' : '更多选项' }}</button>
+      <div v-if="advanced" class="danmaku-advanced">
+        <div v-if="source" class="danmaku-source"><strong>{{ source.title }} · {{ platformLabels[source.platform] }}</strong><small>{{ source.episodeTitle }}</small><small v-if="refreshedLabel">获取于 {{ refreshedLabel }}{{ stale ? ' · 暂用缓存' : '' }}</small></div>
+        <p v-if="message" class="danmaku-help">{{ message }}</p>
+        <div class="danmaku-actions">
+          <button type="button" :disabled="loading || matching" @click="refresh">刷新弹幕</button>
+          <template v-if="source?.workId"><button v-for="platform in (['qq', 'qiyi', 'youku'] as DanmakuPlatform[])" :key="platform" type="button" :disabled="matching || source.platform === platform" @click="choose(source.workId, platform)">{{ platformLabels[platform] }}</button></template>
+        </div>
+        <form class="danmaku-search" @submit.prevent="match(true)">
+          <label for="danmaku-link">手动关联本集平台链接</label>
+          <div><input id="danmaku-link" v-model="query" maxlength="1000" placeholder="腾讯 / 爱奇艺 / 优酷剧集链接" /><button type="submit" :disabled="matching || !query.trim()">关联</button></div>
+        </form>
+        <div class="danmaku-offset"><span>时间校准：{{ offset > 0 ? '+' : '' }}{{ offset }} 秒</span><div><button type="button" :disabled="offset <= -300" @click="offset = Math.max(-300, offset - 1)">提前 1 秒</button><button type="button" @click="offset = 0">重置</button><button type="button" :disabled="offset >= 300" @click="offset = Math.min(300, offset + 1)">延后 1 秒</button></div></div>
+        <p class="danmaku-help">iPhone 系统全屏不显示网页弹幕；获取时间不代表平台数据的实时更新时间。</p>
+      </div>
     </div>
   </div>
 </template>
@@ -258,4 +283,15 @@ onBeforeUnmount(() => {
 .danmaku-candidates { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
 .danmaku-candidates li { display: grid; gap: 6px; }
 .danmaku-help { margin: 0; }
+.danmaku-row .danmaku-settings-toggle { display: grid; place-items: center; width: 44px; flex: 0 0 44px; padding: 10px; background: transparent; color: var(--text-secondary); }
+.danmaku-settings-toggle svg { width: 18px; height: 18px; }
+.danmaku-recovery { flex-shrink: 0; }
+.danmaku-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .8rem; }
+.danmaku-candidates .danmaku-work { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; width: 100%; padding: 12px; text-align: left; }
+.danmaku-work small { grid-column: 1; }
+.danmaku-work span { grid-column: 2; grid-row: 1 / 3; align-self: center; color: var(--text-secondary); }
+.danmaku-more { justify-self: start; color: var(--text-secondary); }
+.danmaku-advanced { display: grid; gap: 14px; }
+.danmaku-row p { overflow-wrap: anywhere; }
+
 </style>

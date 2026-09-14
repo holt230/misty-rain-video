@@ -107,6 +107,24 @@ test('a manual work is remembered per user while episode URLs remain scoped to t
   assert.ok((await service.match('bob', input)).selected);
   assert.equal((await service.match('bob', { ...input, episodeNumber: 3 })).selected, null);
 });
+test('a work choice automatically uses the first platform that has this episode', async t => {
+  const attempts = [];
+  const service = new DanmakuService(directory(t), {
+    catalog: {
+      details: async () => ({ ...work, category: '2', episodes: [{ platform: 'qq' }, { platform: 'qiyi' }] }),
+      episode: async (id, platform, number) => {
+        attempts.push(platform);
+        if (platform === 'qq') throw Error('没有对应集数');
+        return { title: work.title, episode: { url: 'https://www.iqiyi.com/v_abc123.html', title: `第${number}集` } };
+      }
+    },
+    providers: { resolveUrl: async () => ({ ...source, platform: 'qiyi' }) }
+  });
+  const selected = await service.select('alice', { ...input, workId: work.id });
+  assert.equal(selected.platform, 'qiyi');
+  assert.deepEqual(attempts, ['qq', 'qiyi']);
+  assert.equal((await service.match('alice', input)).selected.platform, 'qiyi');
+});
 test('API authentication and origin checks also protect danmaku endpoints', async () => {
   const res = () => ({ headersSent: false, setHeader() {}, end(body) { this.body = JSON.parse(body); this.headersSent = true; } });
   const rejected = res();

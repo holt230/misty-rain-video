@@ -81,7 +81,7 @@ test('seeking requests the actual segment and a failed response remains a danmak
     button('弹幕关').click(); await flush(); await flush();
     view.video.currentTime = 65; view.video.dispatchEvent(new dom.window.Event('seeked')); await flush();
     assert.ok(view.calls.some(call => call.url.includes('index=2')));
-    assert.match(document.querySelector('[role="status"]').textContent, /暂时无法连接弹幕服务/);
+    assert.match(document.querySelector('[role="status"]').textContent, /弹幕暂时没加载出来/);
     assert.equal(view.video.currentTime, 65); assert.equal(view.video.paused, true);
   } finally { view.app.unmount(); }
 });
@@ -90,10 +90,11 @@ test('ambiguous works offer selection, remember the selected source, and support
     : url.includes('/select') ? source : defaultResponse(url));
   try {
     button('弹幕关').click(); await flush();
-    button('选择弹幕').click(); await nextTick();
-    button('使用腾讯视频弹幕').click(); await flush(); await flush();
+    button('选一下片名').click(); await nextTick();
+    button('选择').click(); await flush(); await flush();
     assert.ok(view.calls.some(call => call.url.includes('/select')));
-    assert.match(document.querySelector('[role="status"]').textContent, /腾讯视频/);
+    const selectCall = view.calls.find(call => call.url.includes('/select'));
+    assert.equal(JSON.parse(selectCall.options.body).platform, undefined);
     view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
     assert.equal(document.querySelector('.danmaku-overlay').style.visibility, 'hidden');
     assert.match(document.querySelector('[role="status"]').textContent, /系统全屏/);
@@ -111,7 +112,9 @@ test('changing episodes ignores the previous request and fetches the new match',
     finishes[0].resolve({ selected: source, candidates: [], status: 'matched' }); await flush();
     assert.equal(view.calls.filter(call => call.url.includes('/segment')).length, 0);
     finishes[1].resolve({ selected: { ...source, episodeTitle: '第2集' }, candidates: [], status: 'matched' }); await flush(); await flush();
-    assert.match(document.querySelector('[role="status"]').textContent, /第2集/);
+    document.querySelector('button[aria-label="弹幕设置"]').click(); await nextTick();
+    button('更多选项').click(); await nextTick();
+    assert.match(document.querySelector('.danmaku-source').textContent, /第2集/);
   } finally { view.app.unmount(); }
 });
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });
@@ -120,7 +123,8 @@ test('manual refresh and time correction use the new segment; unmount removes th
   const view = mount(defaultResponse);
   try {
     button('弹幕关').click(); await flush(); await flush();
-    button('弹幕设置').click(); await nextTick();
+    document.querySelector('button[aria-label="弹幕设置"]').click(); await nextTick();
+    button('更多选项').click(); await nextTick();
     button('刷新弹幕').click(); await flush();
     assert.ok(view.calls.some(call => call.url.includes('refresh=1')));
     view.video.currentTime = 29;

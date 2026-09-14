@@ -72,13 +72,24 @@ export class DanmakuService {
       if (typeof input.url !== 'string' || input.url.length > 1000) throw invalid('剧集链接无效');
       const source = await this.providers.resolveUrl(input.url.trim());
       selected = { ...source, workId: '', title: input.title, episodeTitle: `${input.episodeTitle || '当前剧集'}（手动关联）`, year: '', segmentSeconds: segmentSeconds[source.platform] };
-    } else selected = await this.source(input, input.workId, input.platform);
+    } else if (input.platform) selected = await this.source(input, input.workId, input.platform);
+    else {
+      // A viewer chooses the work; choose a platform that actually lists this episode.
+      const work = await this.catalog.details(input.workId);
+      let lastError;
+      for (const platform of ['qq', 'qiyi', 'youku']) {
+        if (work.category !== '3' && !work.episodes.some(item => item.platform === platform)) continue;
+        try { selected = await this.source(input, input.workId, platform); break; }
+        catch (error) { lastError = error; }
+      }
+      if (!selected) throw lastError || invalid('这部作品暂时没有本集弹幕，可稍后再试');
+    }
     const file = this.mappingPath(user, input.mediaKey), saved = read(file) || {};
     if (input.url) {
       saved.episodes ||= {};
       saved.episodes[`${input.episodeNumber}:${input.episodeTitle}`] = selected;
       const keys = Object.keys(saved.episodes); if (keys.length > 500) delete saved.episodes[keys[0]];
-    } else { saved.workId = input.workId; saved.platform = input.platform; saved.episodes = {}; }
+    } else { saved.workId = input.workId; saved.platform = selected.platform; saved.episodes = {}; }
     write(file, saved);
     return selected;
   }
