@@ -18,14 +18,16 @@ RUN APP_BASE_PATH="$APP_BASE_PATH" pnpm build
 
 FROM ghcr.io/holt230/misty-rain-video:search-amd64 AS resource-search
 
-FROM ${NODE_IMAGE} AS runner
-WORKDIR /app
+FROM base AS runner
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5173
 
 COPY --from=builder --chown=node:node /app/package.json ./package.json
+COPY --from=builder --chown=node:node /app/pnpm-lock.yaml ./pnpm-lock.yaml
+RUN --mount=type=cache,id=misty-rain-pnpm,target=/pnpm/store \
+    pnpm install --prod --frozen-lockfile
 COPY --from=builder --chown=node:node /app/dist ./dist
 COPY --from=builder --chown=node:node /app/server.js ./server.js
 COPY --from=builder --chown=node:node /app/server ./server
