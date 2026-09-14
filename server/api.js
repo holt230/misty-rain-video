@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRequestBody, readWebResponseText, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
 import { AuthService } from './auth.js';
+import { DanmakuService } from './danmaku/service.js';
 import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, QuarkCredentialStore } from './storage.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
@@ -42,6 +43,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     credentialStore,
     posterService: new PosterService(dataDir),
     resourceSearch: new ResourceSearchService(),
+    danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
   };
@@ -272,6 +274,25 @@ export const handleApiRequest = async (request, response, context) => {
     const userData = context.userContext(user);
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method || '')) {
       context.authService.assertSameOrigin(request);
+    }
+
+    if (pathname.startsWith('/api/danmaku/')) {
+      const service = context.danmaku;
+      if (pathname === '/api/danmaku/segment' && request.method === 'GET') {
+        service.limit(user.folder, 'segment');
+        sendSuccess(response, await service.segment(
+          { platform: url.searchParams.get('platform'), id: url.searchParams.get('id') },
+          Number(url.searchParams.get('index')), url.searchParams.get('refresh') === '1'
+        ));
+        return true;
+      }
+      if (request.method === 'POST' && ['/api/danmaku/match', '/api/danmaku/select'].includes(pathname)) {
+        service.limit(user.folder, 'match');
+        const input = await readRequestBody(request, 8 * 1024);
+        const result = pathname.endsWith('/match') ? await service.match(user.folder, input) : await service.select(user.folder, input);
+        sendSuccess(response, result);
+        return true;
+      }
     }
 
     if (pathname === '/api/resource-search' && request.method === 'GET') {

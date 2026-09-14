@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
+import DanmakuControls from './DanmakuControls.vue';
 import { playbackHealth } from '../../services/playbackHealth';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
@@ -1296,6 +1297,12 @@ defineExpose({ retry });
               <button v-if="prolongedBuffering" type="button" class="buffer-retry" @click="retry">重新连接</button>
             </div>
           </div>
+
+          <DanmakuControls
+            v-if="phase === 'ready' && videoRef && currentEpisode && media"
+            :video="videoRef"
+            :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
+          />
 
           <div v-if="phase === 'ready' && sources.length" class="player-toolbar" aria-label="播放操作">
             <button
