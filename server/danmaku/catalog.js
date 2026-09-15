@@ -23,6 +23,8 @@ export function automaticWork(input, candidates) {
   return matches.length === 1 ? matches[0] : null;
 }
 const error = message => Object.assign(new Error(message), { statusCode: 502, code: 'DANMAKU_CATALOG_UNAVAILABLE' });
+export const missingEpisode = (message = '本集暂未收录弹幕，可稍后再试或查看作品是否选对') =>
+  Object.assign(new Error(message), { statusCode: 404, code: 'DANMAKU_EPISODE_NOT_FOUND' });
 export function validateWorkId(id) {
   const match = String(id).match(/^([1-4]):([A-Za-z0-9]{5,40})$/);
   if (!match) throw Object.assign(new Error('作品编号无效'), { statusCode: 400 });
@@ -95,11 +97,11 @@ export class DanmakuCatalog {
       }
       const key = normalizeTitle(episodeTitle);
       const exact = episodes.filter(item => normalizeTitle(item.title) === key);
-      if (exact.length !== 1) throw error('综艺分期无法准确对应，请粘贴这一期的平台链接');
+      if (exact.length !== 1) throw missingEpisode('综艺分期无法准确对应，请粘贴这一期的平台链接');
       return { ...work, episode: exact[0] };
     }
     const episode = episodes.find(item => item.platform === platform && item.number === number);
-    if (!episode) throw error('该来源没有对应集数，请选择其他来源或粘贴本集链接');
+    if (!episode) throw missingEpisode('该来源没有对应集数，请选择其他来源或粘贴本集链接');
     return { ...work, episode };
   }
 }

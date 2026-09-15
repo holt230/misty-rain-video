@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type Danmaku from 'danmaku';
 import { SlidersHorizontal } from '@lucide/vue';
-import { DanmakuService, platformLabels, type DanmakuInput, type DanmakuPlatform, type DanmakuSource, type DanmakuWork, type DanmakuSegment } from '../../services/danmakuService';
+import { DanmakuService, DanmakuRequestError, platformLabels, type DanmakuInput, type DanmakuPlatform, type DanmakuSource, type DanmakuWork, type DanmakuSegment } from '../../services/danmakuService';
 import { displayComments } from '../../services/danmakuDisplay';
 
 const props = defineProps<{ video: HTMLVideoElement; input: DanmakuInput }>();
@@ -20,6 +20,7 @@ const query = ref('');
 const choosing = ref(false);
 const advanced = ref(false);
 const recovery = ref<'choose' | 'retry' | ''>('');
+const recoveryHint = ref('');
 const fetchedAt = ref(0);
 const stale = ref(false);
 const overlay = ref<HTMLElement | null>(null);
@@ -34,6 +35,7 @@ let engine: Danmaku | null = null;
 let observer: ResizeObserver | null = null;
 let interval: number | null = null;
 let boundVideo: HTMLVideoElement | null = null;
+let retryAction: (() => Promise<void>) | null = null;
 const target = computed(() => props.video.parentElement);
 const active = computed(() => enabled.value && !nativeFullscreen.value && !hiddenPage.value);
 const refreshedLabel = computed(() => fetchedAt.value ? new Date(fetchedAt.value).toLocaleString('zh-CN', { hour12: false }) : '');
@@ -41,7 +43,9 @@ const status = computed(() => {
   if (!enabled.value) return '';
   if (nativeFullscreen.value) return '退出系统全屏后可看弹幕';
   if (matching.value) return '正在找弹幕…';
+  if (loading.value && recovery.value === 'retry') return '正在重试…';
   if (loading.value && !fetchedAt.value) return '正在加载…';
+  if (recovery.value && recoveryHint.value) return recoveryHint.value;
   if (recovery.value === 'choose') return '确认一下片名，就能继续查找';
   if (recovery.value === 'retry') return '弹幕暂时没加载出来';
   if (message.value === '当前时间段暂无弹幕') return '这里暂时没有弹幕';
@@ -50,10 +54,18 @@ const status = computed(() => {
 function openChooser() {
   choosing.value = true; expanded.value = false; advanced.value = false;
   query.value = props.input.title;
-  if (!candidates.value.length && !matching.value) void match(true);
+  if (!candidates.value.length && !matching.value) void match(query.value);
 }
 function toggleSettings() {
   expanded.value = !expanded.value; choosing.value = false; advanced.value = false;
+}
+function matchFailure(error: unknown) {
+  message.value = error instanceof Error ? error.message : '弹幕暂时没加载出来';
+  const code = error instanceof DanmakuRequestError ? error.code : '';
+  recovery.value = code === 'DANMAKU_EPISODE_NOT_FOUND' ? 'choose' : 'retry';
+  recoveryHint.value = code === 'DANMAKU_EPISODE_NOT_FOUND' ? '本集暂未收录弹幕'
+    : code === 'DANMAKU_SOURCE_UNAVAILABLE' ? '弹幕来源连接失败，请重试'
+    : code === 'DANMAKU_CATALOG_UNAVAILABLE' ? '弹幕目录暂不可用，请重试' : '';
 }
 
 function destroyEngine() { renderGeneration++; engine?.destroy(); engine = null; }
@@ -71,7 +83,8 @@ async function render() {
 function reset() {
   generation++; controller.abort(); controller = new AbortController();
   pending.clear(); failedUntil.clear(); segments.clear(); destroyEngine();
-  loading.value = false; matching.value = false; recovery.value = ''; message.value = ''; fetchedAt.value = 0; stale.value = false;
+  loading.value = false; matching.value = false; recovery.value = ''; recoveryHint.value = ''; retryAction = null;
+  message.value = ''; fetchedAt.value = 0; stale.value = false;
 }
 async function setSource(value: DanmakuSource) {
   reset(); source.value = value; choosing.value = false; expanded.value = false; advanced.value = false;
@@ -79,11 +92,12 @@ async function setSource(value: DanmakuSource) {
   offset.value = Math.max(-300, Math.min(300, offset.value));
   await loadCurrent();
 }
-async function match(manual = false) {
+async function match(queryText = '') {
   reset(); source.value = null; candidates.value = []; matching.value = true;
+  const inputQuery = queryText.trim();
+  retryAction = () => match(inputQuery);
   const seq = generation;
   try {
-    const inputQuery = manual ? query.value.trim() : '';
     if (/^https?:\/\//i.test(inputQuery)) {
       const selected = await DanmakuService.select(props.input, { url: inputQuery }, controller.signal);
       if (seq === generation) await setSource(selected);
@@ -98,16 +112,17 @@ async function match(manual = false) {
       message.value = result.candidates.length ? '选一下正在看的作品，我们会记住' : '没有找到，试试更短的片名';
     }
   } catch (error) {
-    if (seq === generation) { message.value = error instanceof Error ? error.message : '弹幕匹配失败'; recovery.value = 'retry'; }
+    if (seq === generation) matchFailure(error);
   } finally { if (seq === generation) matching.value = false; }
 }
 async function choose(workId: string, platform?: DanmakuPlatform) {
   reset(); source.value = null; matching.value = true;
+  retryAction = () => choose(workId, platform);
   const seq = generation;
   try {
     const selected = await DanmakuService.select(props.input, { workId, platform }, controller.signal);
     if (seq === generation) await setSource(selected);
-  } catch (error) { if (seq === generation) { message.value = error instanceof Error ? error.message : '暂时无法关联'; recovery.value = 'choose'; } }
+  } catch (error) { if (seq === generation) matchFailure(error); }
   finally { if (seq === generation) matching.value = false; }
 }
 const currentIndex = () => source.value ? Math.floor(Math.max(0, props.video.currentTime - offset.value) / source.value.segmentSeconds) : 0;
@@ -125,12 +140,15 @@ async function loadSegment(index: number, force = false) {
     // Keep a small moving window; seeking back can load the shared server cache.
     for (const key of segments.keys()) if (Math.abs(key - currentIndex()) > 2) segments.delete(key);
     if (data.stale) failedUntil.set(index, Date.now() + 30_000);
-    if (index === currentIndex()) { recovery.value = data.stale ? 'retry' : ''; fetchedAt.value = data.fetchedAt; stale.value = data.stale; message.value = data.comments.length ? '' : '当前时间段暂无弹幕'; }
+    if (index === currentIndex()) {
+      recovery.value = data.stale ? 'retry' : ''; recoveryHint.value = data.stale ? '弹幕更新失败，正在显示缓存' : '';
+      fetchedAt.value = data.fetchedAt; stale.value = data.stale; message.value = data.comments.length ? '' : '当前时间段暂无弹幕';
+    }
     await render();
   } catch (error) {
     if (seq === generation) {
       failedUntil.set(index, Date.now() + 30_000);
-      if (index === currentIndex()) { recovery.value = 'retry'; message.value = error instanceof Error ? error.message : '弹幕暂不可用，视频可继续播放'; }
+      if (index === currentIndex()) { recovery.value = 'retry'; recoveryHint.value = ''; message.value = error instanceof Error ? error.message : '弹幕暂不可用，视频可继续播放'; }
     }
   } finally { if (seq === generation) { pending.delete(index); loading.value = pending.size > 0; } }
 }
@@ -140,6 +158,7 @@ async function loadCurrent(force = false) {
   const cached = segments.get(index);
   if (cached) {
     fetchedAt.value = cached.fetchedAt; stale.value = cached.stale; recovery.value = cached.stale ? 'retry' : '';
+    recoveryHint.value = cached.stale ? '弹幕更新失败，正在显示缓存' : '';
     message.value = cached.stale ? '弹幕暂不可用，正在显示缓存' : cached.comments.length ? '' : '当前时间段暂无弹幕';
   }
   await loadSegment(index, force);
@@ -148,7 +167,12 @@ async function loadCurrent(force = false) {
     if (!Number.isFinite(props.video.duration) || nextStart < props.video.duration) void loadSegment(index + 1);
   }
 }
-function refresh() { message.value = ''; if (source.value) void loadCurrent(true); else void match(); }
+function refresh() {
+  if (loading.value || matching.value) return;
+  if (source.value) void loadCurrent(true);
+  else if (retryAction) void retryAction();
+  else void match();
+}
 function visibility() { hiddenPage.value = document.hidden; }
 function fullscreen() {
   nativeFullscreen.value = Boolean(document.fullscreenElement === props.video || (props.video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen);
@@ -217,12 +241,12 @@ onBeforeUnmount(() => {
     <div v-if="enabled && choosing" class="danmaku-settings">
       <div class="danmaku-panel-heading"><strong>选一下正在看的作品</strong><button type="button" @click="choosing = false">收起</button></div>
       <p class="danmaku-help">选对一次就会记住，平台由系统选择。</p>
-      <form class="danmaku-search" @submit.prevent="match(true)">
+      <form class="danmaku-search" @submit.prevent="match(query)">
         <label for="danmaku-query">片名</label>
         <div><input id="danmaku-query" v-model="query" maxlength="1000" placeholder="输入正在看的片名" /><button type="submit" :disabled="matching || !query.trim()">{{ matching ? '查找中' : '查找' }}</button></div>
       </form>
       <p v-if="!matching && !candidates.length" class="danmaku-help">{{ message }}</p>
-      <p v-if="recovery === 'choose' && candidates.length" class="danmaku-help">{{ message }}</p>
+      <p v-if="recovery && candidates.length" class="danmaku-help">{{ message }}</p>
       <ul v-if="candidates.length" class="danmaku-candidates" aria-label="弹幕作品候选">
         <li v-for="work in candidates" :key="work.id">
           <button class="danmaku-work" type="button" :disabled="matching" @click="choose(work.id)"><strong>{{ work.title }}</strong><small>{{ work.year }} · {{ work.categoryLabel }}</small><span aria-hidden="true">选择</span></button>
@@ -244,7 +268,7 @@ onBeforeUnmount(() => {
           <button type="button" :disabled="loading || matching" @click="refresh">刷新弹幕</button>
           <template v-if="source?.workId"><button v-for="platform in (['qq', 'qiyi', 'youku'] as DanmakuPlatform[])" :key="platform" type="button" :disabled="matching || source.platform === platform" @click="choose(source.workId, platform)">{{ platformLabels[platform] }}</button></template>
         </div>
-        <form class="danmaku-search" @submit.prevent="match(true)">
+        <form class="danmaku-search" @submit.prevent="match(query)">
           <label for="danmaku-link">手动关联本集平台链接</label>
           <div><input id="danmaku-link" v-model="query" maxlength="1000" placeholder="腾讯 / 爱奇艺 / 优酷剧集链接" /><button type="submit" :disabled="matching || !query.trim()">关联</button></div>
         </form>

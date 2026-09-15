@@ -35,7 +35,15 @@ export function parseVideoUrl(value) {
     let platform, id;
     if (url.hostname === 'v.qq.com') { platform = 'qq'; id = url.pathname.match(/\/([a-zA-Z0-9]{11})\.html$/)?.[1]; }
     if (['www.iqiyi.com', 'iqiyi.com'].includes(url.hostname)) { platform = 'qiyi'; id = url.pathname.match(/^\/v_([a-zA-Z0-9]+)\.html$/)?.[1]; }
-    if (url.hostname === 'v.youku.com') { platform = 'youku'; id = url.pathname.match(/^\/v_show\/id_(X[a-zA-Z0-9=]+)\.html$/)?.[1]; }
+    if (url.hostname === 'v.youku.com') {
+      platform = 'youku';
+      id = url.pathname.match(/^\/v_show\/id_(X[a-zA-Z0-9=]+)\.html$/)?.[1];
+      // Current catalogue links put the episode ID in a query parameter.
+      // Canonicalize it before stripping tracking parameters, or a second parse loses the ID.
+      if (url.pathname === '/video' && url.searchParams.getAll('vid').length === 1) id = url.searchParams.get('vid');
+      if (!/^X[a-zA-Z0-9=]{4,79}$/.test(id || '')) return null;
+      return { platform, id, url: `https://v.youku.com/v_show/id_${id}.html` };
+    }
     return id && id.length < 80 ? { platform, id, url: `https://${url.hostname}${url.pathname}` } : null;
   } catch { return null; }
 }

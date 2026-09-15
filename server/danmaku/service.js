@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DanmakuProviders, segmentSeconds, validateSource, platforms } from './providers.js';
-import { DanmakuCatalog, automaticWork } from './catalog.js';
+import { DanmakuCatalog, automaticWork, missingEpisode, validateWorkId } from './catalog.js';
 
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const read = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
@@ -42,26 +42,39 @@ export class DanmakuService {
     if (source.platform !== platform) throw invalid('剧集来源不一致');
     return { ...source, workId, title: work.title, episodeTitle: work.episode.title, year: work.year, segmentSeconds: segmentSeconds[platform] };
   }
+  async sourceForWork(input, workId, preferred) {
+    validateWorkId(workId);
+    const order = [...new Set([preferred, ...Object.keys(platforms)])].filter(platform => Object.hasOwn(platforms, platform));
+    let unavailable;
+    for (const platform of order) {
+      try { return await this.source(input, workId, platform); }
+      catch (error) {
+        // A network/format error does not prove that the episode is absent.
+        if (error.code !== 'DANMAKU_EPISODE_NOT_FOUND') unavailable ||= error;
+      }
+    }
+    if (unavailable) throw Object.assign(new Error('作品已找到，弹幕来源暂时连接失败，请重试', { cause: unavailable }), {
+      code: 'DANMAKU_SOURCE_UNAVAILABLE', statusCode: 502
+    });
+    throw missingEpisode();
+  }
   async match(user, raw) {
     const input = validateInput(raw);
     const saved = read(this.mappingPath(user, input.mediaKey));
     const epKey = `${input.episodeNumber}:${input.episodeTitle}`;
     if (!input.query && saved?.episodes?.[epKey]) return { selected: saved.episodes[epKey], candidates: [], status: 'matched' };
     if (!input.query && saved?.workId) {
-      try { return { selected: await this.source(input, saved.workId, saved.platform), candidates: [], status: 'matched' }; }
-      catch { /* Keep the saved choice, but let the user correct a missing episode. */ }
+      // Keep the confirmed work identity when an episode disappears from one platform.
+      const selected = await this.sourceForWork(input, saved.workId, saved.platform);
+      if (selected.platform !== saved.platform) write(this.mappingPath(user, input.mediaKey), { ...saved, platform: selected.platform });
+      return { selected, candidates: [], status: 'matched' };
     }
     const candidates = await this.catalog.search(input.query || input.title);
     const exact = input.query ? null : automaticWork(input, candidates);
     if (exact) {
-      for (const platform of ['qq', 'qiyi', 'youku'].filter(p => exact.platforms.includes(p))) {
-        try {
-          const selected = await this.source(input, exact.id, platform);
-          // Remember a successful exact match, including the original work identity.
-          write(this.mappingPath(user, input.mediaKey), { workId: exact.id, platform, episodes: saved?.episodes || {} });
-          return { selected, candidates, status: 'matched' };
-        } catch { /* Another platform may list the same, exact episode. */ }
-      }
+      const selected = await this.sourceForWork(input, exact.id);
+      write(this.mappingPath(user, input.mediaKey), { workId: exact.id, platform: selected.platform, episodes: saved?.episodes || {} });
+      return { selected, candidates, status: 'matched' };
     }
     return { selected: null, candidates, status: candidates.length ? 'choose' : 'missing' };
   }
@@ -73,17 +86,7 @@ export class DanmakuService {
       const source = await this.providers.resolveUrl(input.url.trim());
       selected = { ...source, workId: '', title: input.title, episodeTitle: `${input.episodeTitle || '当前剧集'}（手动关联）`, year: '', segmentSeconds: segmentSeconds[source.platform] };
     } else if (input.platform) selected = await this.source(input, input.workId, input.platform);
-    else {
-      // A viewer chooses the work; choose a platform that actually lists this episode.
-      const work = await this.catalog.details(input.workId);
-      let lastError;
-      for (const platform of ['qq', 'qiyi', 'youku']) {
-        if (work.category !== '3' && !work.episodes.some(item => item.platform === platform)) continue;
-        try { selected = await this.source(input, input.workId, platform); break; }
-        catch (error) { lastError = error; }
-      }
-      if (!selected) throw lastError || invalid('这部作品暂时没有本集弹幕，可稍后再试');
-    }
+    else selected = await this.sourceForWork(input, input.workId);
     const file = this.mappingPath(user, input.mediaKey), saved = read(file) || {};
     if (input.url) {
       saved.episodes ||= {};
@@ -98,9 +101,9 @@ export class DanmakuService {
     if (!Number.isInteger(index) || index < 0 || index * segmentSeconds[source.platform] > 24 * 3600) throw invalid('弹幕时间段无效');
     const key = `${source.platform}:${source.id}:${index}`, file = path.join(this.directory, 'segments', `${hash(key)}.json`);
     const cached = read(file), now = this.now();
-    if (cached && now - cached.fetchedAt < (force ? 5_000 : 600_000)) return { ...cached, stale: false };
+    if (!force && cached && now - cached.fetchedAt < 600_000) return { ...cached, stale: false };
     if (this.pending.has(key)) return this.pending.get(key);
-    if (this.cooldowns.get(key) > now) {
+    if (!force && this.cooldowns.get(key) > now) {
       if (cached) return { ...cached, stale: true };
       throw Object.assign(new Error('弹幕暂不可用，请稍后刷新'), { statusCode: 503 });
     }
@@ -109,6 +112,7 @@ export class DanmakuService {
     const task = (async () => {
       try {
         const comments = await this.providers.segment(source, index);
+        this.cooldowns.delete(key);
         const result = { comments, index, segmentSeconds: segmentSeconds[source.platform], fetchedAt: this.now() };
         write(file, result); this.prune(); return { ...result, stale: false };
       } catch {
