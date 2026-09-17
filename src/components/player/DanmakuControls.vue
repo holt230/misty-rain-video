@@ -6,6 +6,7 @@ import { DanmakuService, DanmakuRequestError, platformLabels, type DanmakuInput,
 import { displayComments } from '../../services/danmakuDisplay';
 
 const props = defineProps<{ video: HTMLVideoElement; input: DanmakuInput }>();
+const emit = defineEmits<{ (event: 'enabled-change', enabled: boolean): void }>();
 const enabled = ref(localStorage.getItem('misty_rain_danmaku_enabled') === 'true');
 const expanded = ref(false);
 const opacity = ref(Math.max(.3, Math.min(1, Number(localStorage.getItem('misty_rain_danmaku_opacity')) || .75)));
@@ -194,6 +195,7 @@ function bindVideo(video: HTMLVideoElement | null) {
 }
 watch(enabled, value => {
   localStorage.setItem('misty_rain_danmaku_enabled', String(value));
+  emit('enabled-change', value);
   if (value) void match(); else { reset(); source.value = null; expanded.value = false; choosing.value = false; advanced.value = false; }
 });
 watch(active, async value => {
@@ -215,6 +217,7 @@ watch(() => `${props.input.mediaKey}:${props.input.episodeNumber}:${props.input.
 watch(() => props.video, async video => { bindVideo(video); fullscreen(); await nextTick(); void render(); });
 onMounted(() => {
   bindVideo(props.video); fullscreen();
+  emit('enabled-change', enabled.value);
   observer = new ResizeObserver(() => engine?.resize());
   if (overlay.value) observer.observe(overlay.value);
   interval = window.setInterval(() => { if (!props.video.paused) void loadCurrent(); }, 1000);
@@ -222,6 +225,7 @@ onMounted(() => {
   if (enabled.value) void match();
 });
 onBeforeUnmount(() => {
+  emit('enabled-change', false);
   reset(); bindVideo(null); observer?.disconnect(); if (interval !== null) window.clearInterval(interval);
   document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', fullscreen);
 });
@@ -317,5 +321,9 @@ onBeforeUnmount(() => {
 .danmaku-more { justify-self: start; color: var(--text-secondary); }
 .danmaku-advanced { display: grid; gap: 14px; }
 .danmaku-row p { overflow-wrap: anywhere; }
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .danmaku-overlay { inset: calc(10px + var(--safe-area-top)) calc(8px + var(--safe-area-right)) auto calc(8px + var(--safe-area-left)); }
+}
 
 </style>

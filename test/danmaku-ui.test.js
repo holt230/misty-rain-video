@@ -34,6 +34,7 @@ function mount(handler) {
   Object.defineProperty(video, 'paused', { configurable: true, get: () => true });
   Object.defineProperty(video.parentElement, 'clientWidth', { configurable: true, value: 402 });
   const calls = [];
+  const enabledStates = [];
   globalThis.fetch = async (url, options) => {
     calls.push({ url: String(url), options });
     const data = await handler(String(url), options);
@@ -41,8 +42,8 @@ function mount(handler) {
     return new Response(JSON.stringify({ code: 0, data }), { headers: { 'Content-Type': 'application/json' } });
   };
   const props = reactive({ video: markRaw(video), input: { ...input } });
-  const app = createApp({ render: () => h(Component, props) }); app.mount('#mount');
-  return { app, props, calls, video };
+  const app = createApp({ render: () => h(Component, { ...props, onEnabledChange: value => enabledStates.push(value) }) }); app.mount('#mount');
+  return { app, props, calls, video, enabledStates };
 }
 function defaultResponse(url) {
   if (url.includes('/match')) return { selected: source, candidates: [], status: 'matched' };
@@ -56,12 +57,15 @@ test('disabled makes no requests; enabled matches, loads and mounts the renderer
   const view = mount(defaultResponse);
   try {
     await flush(); assert.equal(view.calls.length, 0);
+    assert.deepEqual(view.enabledStates, [false]);
     button('弹幕关').click(); await flush(); await flush();
     assert.ok(view.calls.some(call => call.url.includes('/match'))); assert.ok(view.calls.some(call => call.url.includes('/segment')));
     assert.equal(document.querySelector('.danmaku-toggle').getAttribute('aria-checked'), 'true');
+    assert.equal(view.enabledStates.at(-1), true);
     assert.ok(document.querySelector('.danmaku-overlay').childElementCount > 0);
     assert.equal(document.querySelectorAll('.danmaku-overlay img').length, 0);
     button('弹幕开').click(); await flush();
+    assert.equal(view.enabledStates.at(-1), false);
     assert.equal(document.querySelector('.danmaku-overlay').childElementCount, 0);
   } finally { view.app.unmount(); }
 });
