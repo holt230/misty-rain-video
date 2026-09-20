@@ -65,11 +65,9 @@ const videoAspectRatio = ref(16 / 9);
 const pictureFit = ref<'contain' | 'cover'>('contain');
 const prolongedBuffering = ref(false);
 const interruptionPosition = ref(0);
-const danmakuEnabled = ref(false);
 const landscapeInline = ref(false);
 let playbackWatchdog: number | null = null;
 let fullscreenNoticeRevealed = false;
-let inlinePlaybackNoticeAt = 0;
 const manualPlayRequired = ref(false);
 const playbackHasStarted = ref(false);
 const detectedAudioTracks = ref<PlaybackAudioTrack[]>([]);
@@ -144,17 +142,6 @@ const landscapeMedia = typeof window !== 'undefined'
 
 const syncLandscapePlayback = () => {
   landscapeInline.value = Boolean(isMobilePlaybackDevice && landscapeMedia?.matches);
-};
-
-const keepDanmakuInline = () => {
-  if (!isIOSPlaybackDevice || !danmakuEnabled.value) return;
-  const video = videoRef.value as NativeFullscreenVideo | null;
-  try { video?.webkitExitFullscreen?.(); } catch { /* WebKit may already be leaving fullscreen. */ }
-  const now = Date.now();
-  if (now - inlinePlaybackNoticeAt > 2_500) {
-    inlinePlaybackNoticeAt = now;
-    toast.show('弹幕已开启，横屏时使用页面内播放', '弹', 2600);
-  }
 };
 
 const soundEffectOptions: SoundEffectOption[] = [
@@ -1240,7 +1227,7 @@ defineExpose({ retry });
               class="video-element"
               :style="{ objectFit: pictureFit }"
               controls
-              :controlslist="danmakuEnabled ? 'nodownload noremoteplayback nofullscreen' : 'nodownload noremoteplayback'"
+              controlslist="nodownload noremoteplayback"
               playsinline
               :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
               crossorigin="anonymous"
@@ -1259,7 +1246,6 @@ defineExpose({ retry });
               @pause="handlePause"
               @ended="handleEnded"
               @error="handleVideoError"
-              @webkitbeginfullscreen="keepDanmakuInline"
             >
               <track
                 v-for="subtitle in playback?.subtitles || []"
@@ -1331,7 +1317,6 @@ defineExpose({ retry });
             v-if="phase === 'ready' && videoRef && currentEpisode && media"
             :video="videoRef"
             :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
-            @enabled-change="danmakuEnabled = $event"
           />
 
           <div v-if="phase === 'ready' && sources.length" class="player-toolbar" aria-label="播放操作">
