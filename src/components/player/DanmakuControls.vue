@@ -4,7 +4,6 @@ import type Danmaku from 'danmaku';
 import { SlidersHorizontal } from '@lucide/vue';
 import { DanmakuService, DanmakuRequestError, platformLabels, type DanmakuInput, type DanmakuPlatform, type DanmakuSource, type DanmakuWork, type DanmakuSegment } from '../../services/danmakuService';
 import { displayComments } from '../../services/danmakuDisplay';
-import { nativeDanmakuTrack } from '../../services/nativeDanmakuTrack';
 
 const props = defineProps<{ video: HTMLVideoElement; input: DanmakuInput }>();
 const enabled = ref(localStorage.getItem('misty_rain_danmaku_enabled') === 'true');
@@ -36,7 +35,6 @@ let engine: Danmaku | null = null;
 let observer: ResizeObserver | null = null;
 let interval: number | null = null;
 let boundVideo: HTMLVideoElement | null = null;
-const nativeAvailable = ref(true);
 let retryAction: (() => Promise<void>) | null = null;
 const target = computed(() => props.video.parentElement);
 const canLoad = computed(() => enabled.value && !hiddenPage.value);
@@ -44,7 +42,7 @@ const active = computed(() => canLoad.value && !nativeFullscreen.value);
 const refreshedLabel = computed(() => fetchedAt.value ? new Date(fetchedAt.value).toLocaleString('zh-CN', { hour12: false }) : '');
 const status = computed(() => {
   if (!enabled.value) return '';
-  if (nativeFullscreen.value) return nativeAvailable.value ? '系统全屏尝试使用字幕式弹幕' : '此浏览器不支持全屏弹幕，请退出全屏观看';
+  if (nativeFullscreen.value) return '系统播放器不显示飘屏弹幕，请使用网页横屏播放';
   if (matching.value) return '正在找弹幕…';
   if (loading.value && recovery.value === 'retry') return '正在重试…';
   if (loading.value && !fetchedAt.value) return '正在加载…';
@@ -71,18 +69,6 @@ function matchFailure(error: unknown) {
     : code === 'DANMAKU_CATALOG_UNAVAILABLE' ? '弹幕目录暂不可用，请重试' : '';
 }
 
-function clearNativeTrack() {
-  if (boundVideo) nativeDanmakuTrack(boundVideo).clear();
-}
-function disposeNativeTrack() {
-  if (boundVideo) nativeDanmakuTrack(boundVideo).suspend();
-}
-function syncNativeTrack() {
-  if (!boundVideo) return;
-  nativeAvailable.value = nativeDanmakuTrack(boundVideo).sync(enabled.value && nativeFullscreen.value,
-    displayComments([...segments.values()].flatMap(item => item.comments), density.value, offset.value));
-}
-
 function destroyEngine() { renderGeneration++; engine?.destroy(); engine = null; }
 async function render() {
   const seq = ++renderGeneration;
@@ -100,7 +86,6 @@ function reset() {
   pending.clear(); failedUntil.clear(); segments.clear(); destroyEngine();
   loading.value = false; matching.value = false; recovery.value = ''; recoveryHint.value = ''; retryAction = null;
   message.value = ''; fetchedAt.value = 0; stale.value = false;
-  clearNativeTrack();
 }
 async function setSource(value: DanmakuSource) {
   reset(); source.value = value; choosing.value = false; expanded.value = false; advanced.value = false;
@@ -160,7 +145,7 @@ async function loadSegment(index: number, force = false) {
       recovery.value = data.stale ? 'retry' : ''; recoveryHint.value = data.stale ? '弹幕更新失败，正在显示缓存' : '';
       fetchedAt.value = data.fetchedAt; stale.value = data.stale; message.value = data.comments.length ? '' : '当前时间段暂无弹幕';
     }
-    await render(); syncNativeTrack();
+    await render();
   } catch (error) {
     if (seq === generation) {
       failedUntil.set(index, Date.now() + 30_000);
@@ -192,10 +177,9 @@ function refresh() {
 function visibility() { hiddenPage.value = document.hidden; }
 function fullscreen() {
   nativeFullscreen.value = Boolean(document.fullscreenElement === props.video || (props.video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }).webkitDisplayingFullscreen);
-  syncNativeTrack();
 }
-function beginFullscreen() { nativeFullscreen.value = true; syncNativeTrack(); }
-function endFullscreen() { nativeFullscreen.value = false; syncNativeTrack(); }
+function beginFullscreen() { nativeFullscreen.value = true; }
+function endFullscreen() { nativeFullscreen.value = false; }
 function seek() { engine?.clear(); void loadCurrent(); }
 function rateChange() { void render(); }
 function bindVideo(video: HTMLVideoElement | null) {
@@ -203,7 +187,6 @@ function bindVideo(video: HTMLVideoElement | null) {
     boundVideo.removeEventListener('seeked', seek); boundVideo.removeEventListener('ratechange', rateChange);
     boundVideo.removeEventListener('webkitbeginfullscreen', beginFullscreen); boundVideo.removeEventListener('webkitendfullscreen', endFullscreen);
   }
-  disposeNativeTrack();
   boundVideo = video;
   if (video) {
     video.addEventListener('seeked', seek); video.addEventListener('ratechange', rateChange);
@@ -212,7 +195,6 @@ function bindVideo(video: HTMLVideoElement | null) {
 }
 watch(enabled, value => {
   localStorage.setItem('misty_rain_danmaku_enabled', String(value));
-  syncNativeTrack();
   if (value) void match(); else { reset(); source.value = null; expanded.value = false; choosing.value = false; advanced.value = false; }
 });
 watch(active, async value => {
@@ -222,11 +204,11 @@ watch(active, async value => {
 watch([density, opacity], () => {
   localStorage.setItem('misty_rain_danmaku_density', density.value);
   localStorage.setItem('misty_rain_danmaku_opacity', String(opacity.value));
-  void render(); syncNativeTrack();
+  void render();
 });
 watch(offset, () => {
   if (source.value) localStorage.setItem(`misty_rain_danmaku_offset:${props.input.mediaKey}:${source.value.workId || source.value.id}`, String(offset.value));
-  void render(); syncNativeTrack(); void loadCurrent();
+  void render(); void loadCurrent();
 });
 watch(() => `${props.input.mediaKey}:${props.input.episodeNumber}:${props.input.episodeTitle}`, () => {
   query.value = ''; expanded.value = false; choosing.value = false; advanced.value = false; if (enabled.value) void match(); else { reset(); source.value = null; }
@@ -292,7 +274,7 @@ onBeforeUnmount(() => {
           <div><input id="danmaku-link" v-model="query" maxlength="1000" placeholder="腾讯 / 爱奇艺 / 优酷剧集链接" /><button type="submit" :disabled="matching || !query.trim()">关联</button></div>
         </form>
         <div class="danmaku-offset"><span>时间校准：{{ offset > 0 ? '+' : '' }}{{ offset }} 秒</span><div><button type="button" :disabled="offset <= -300" @click="offset = Math.max(-300, offset - 1)">提前 1 秒</button><button type="button" @click="offset = 0">重置</button><button type="button" :disabled="offset >= 300" @click="offset = Math.min(300, offset + 1)">延后 1 秒</button></div></div>
-        <p class="danmaku-help">系统全屏尝试以短句字幕显示弹幕，优先保留影片字幕；实际支持取决于浏览器。获取时间不代表平台数据的实时更新时间。</p>
+        <p class="danmaku-help">使用播放条右侧的横屏图标，弹幕会随视频一起飘屏。获取时间不代表平台数据的实时更新时间。</p>
       </div>
     </div>
   </div>

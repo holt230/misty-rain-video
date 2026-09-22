@@ -25,7 +25,7 @@
     "probe:quark-transfer": "node scripts/quark-transfer-probe.mjs",
     "import:quark": "node scripts/import-quark-library.mjs",
     "verify:quark": "node scripts/verify-quark-library.mjs",
-    "test:danmaku": "node --test test/danmaku.test.js test/danmaku-ui.test.js"
+    "test:danmaku": "node --test test/danmaku.test.js test/danmaku-ui.test.js test/mobile-player-ui.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

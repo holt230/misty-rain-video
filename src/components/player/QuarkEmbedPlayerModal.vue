@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
 import DanmakuControls from './DanmakuControls.vue';
+import MobilePlaybackControls from './MobilePlaybackControls.vue';
 import { playbackHealth } from '../../services/playbackHealth';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
@@ -15,6 +16,7 @@ import {
 } from '../../services/quarkStreamService';
 import { useToast } from '../../composables/useToast';
 import { useDialog } from '../../composables/useDialog';
+import { useMobileLandscape } from '../../composables/useMobileLandscape';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 
 const props = defineProps<{
@@ -65,7 +67,6 @@ const videoAspectRatio = ref(16 / 9);
 const pictureFit = ref<'contain' | 'cover'>('contain');
 const prolongedBuffering = ref(false);
 const interruptionPosition = ref(0);
-const landscapeInline = ref(false);
 let playbackWatchdog: number | null = null;
 let fullscreenNoticeRevealed = false;
 const manualPlayRequired = ref(false);
@@ -136,13 +137,7 @@ let episodeCompletionHandled = false;
 const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-const landscapeMedia = typeof window !== 'undefined'
-  ? window.matchMedia('(orientation: landscape) and (max-height: 500px)')
-  : null;
-
-const syncLandscapePlayback = () => {
-  landscapeInline.value = Boolean(isMobilePlaybackDevice && landscapeMedia?.matches);
-};
+const { immersive, rotated, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen);
 
 const soundEffectOptions: SoundEffectOption[] = [
   { value: 'original', label: '原声', hint: '不做处理' },
@@ -1130,6 +1125,7 @@ type NativeFullscreenVideo = HTMLVideoElement & {
 };
 
 const close = () => {
+  resetLandscape();
   void persistProgress(true, false, true);
   phase.value = 'idle';
   requestSequence += 1;
@@ -1140,6 +1136,7 @@ const close = () => {
 
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, () => {
+  if (immersive.value) { toggleWebFullscreen(); return; }
   if (document.fullscreenElement || (videoRef.value as NativeFullscreenVideo | null)?.webkitDisplayingFullscreen) return;
   close();
 });
@@ -1170,20 +1167,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', handlePageHide);
   window.removeEventListener('pageshow', handlePageShow);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
-  landscapeMedia?.removeEventListener?.('change', syncLandscapePlayback);
-  window.removeEventListener('resize', syncLandscapePlayback);
-  window.removeEventListener('orientationchange', syncLandscapePlayback);
 });
 
 onMounted(() => {
-  syncLandscapePlayback();
   playbackWatchdog = window.setInterval(monitorPlayback, 1_000);
   window.addEventListener('pagehide', handlePageHide);
   window.addEventListener('pageshow', handlePageShow);
   document.addEventListener('visibilitychange', handleVisibilityChange);
-  landscapeMedia?.addEventListener?.('change', syncLandscapePlayback);
-  window.addEventListener('resize', syncLandscapePlayback, { passive: true });
-  window.addEventListener('orientationchange', syncLandscapePlayback, { passive: true });
 });
 
 defineExpose({ retry });
@@ -1193,7 +1183,8 @@ defineExpose({ retry });
   <div
     class="player-backdrop"
     ref="dialogRef"
-    :class="{ active: isOpen, 'landscape-inline': landscapeInline }"
+    :class="{ active: isOpen, 'landscape-inline': immersive, 'rotated-player': rotated }"
+    :style="immersiveStyle"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
@@ -1226,7 +1217,7 @@ defineExpose({ retry });
               ref="videoRef"
               class="video-element"
               :style="{ objectFit: pictureFit }"
-              controls
+              :controls="!isMobilePlaybackDevice"
               controlslist="nodownload noremoteplayback"
               playsinline
               :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
@@ -1256,6 +1247,11 @@ defineExpose({ retry });
                 :src="subtitle.url"
               />
             </video>
+
+            <MobilePlaybackControls
+              v-if="isMobilePlaybackDevice && videoRef && phase === 'ready' && !manualPlayRequired"
+              :video="videoRef" :expanded="immersive" @fullscreen="toggleWebFullscreen"
+            />
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
@@ -1669,20 +1665,22 @@ defineExpose({ retry });
   .episode-copy { display: none; }
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
-@media (max-height: 500px) and (orientation: landscape) {
-  .player-backdrop.landscape-inline { height: var(--app-viewport-height); padding: 0; background: #000; }
-  .landscape-inline .player-window { position: relative; width: 100%; height: var(--app-viewport-height); border: 0; border-radius: 0; background: #000; box-shadow: none; }
-  .landscape-inline .player-header { position: absolute; z-index: 4; top: var(--safe-area-top); right: var(--safe-area-right); min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
-  .landscape-inline .title-block, .landscape-inline .text-action { display: none; }
-  .landscape-inline .header-actions { pointer-events: auto; }
-  .landscape-inline .icon-button { color: #fff; background: rgb(15 17 22 / .58); }
-  .landscape-inline .player-layout, .landscape-inline .video-column { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
-  .landscape-inline .video-column { padding: 0; background: #000; }
-  .landscape-inline .video-stage { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
-  .landscape-inline .video-column > .danmaku-controls,
-  .landscape-inline .player-toolbar,
-  .landscape-inline .playback-settings,
-  .landscape-inline .episode-panel { display: none; }
-}
+.player-backdrop.landscape-inline { height: var(--player-height, 100dvh); padding: 0; background: #000; }
+.landscape-inline .player-window { position: relative; width: 100%; height: var(--player-height, 100dvh); border: 0; border-radius: 0; background: #000; box-shadow: none; }
+.landscape-inline .player-header { position: absolute; z-index: 4; top: var(--safe-area-top); right: var(--safe-area-right); min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
+.landscape-inline .title-block, .landscape-inline .text-action { display: none; }
+.landscape-inline .header-actions { pointer-events: auto; }
+.landscape-inline .icon-button { color: #fff; background: rgb(15 17 22 / .58); }
+.landscape-inline .player-layout, .landscape-inline .video-column { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.landscape-inline .video-column { padding: 0; background: #000; }
+.landscape-inline .video-stage { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
+.landscape-inline .video-column > .danmaku-controls,
+.landscape-inline .player-toolbar,
+.landscape-inline .playback-settings,
+.landscape-inline .episode-panel { display: none; }
+.rotated-player .player-window { position: absolute; top: 50%; left: 50%; width: var(--player-height); height: var(--player-width); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
+.rotated-player .player-header { top: 0; right: 0; }
+.rotated-player .video-stage { --safe-area-top: 0px; --safe-area-right: 0px; --safe-area-left: 0px; }
+
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 </style>

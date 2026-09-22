@@ -105,7 +105,7 @@ test('seeking requests the actual segment and a failed response remains a danmak
     assert.equal(view.video.currentTime, 65); assert.equal(view.video.paused, true);
   } finally { view.app.unmount(); }
 });
-test('ambiguous works offer selection, remember the selected source, and switch to native fullscreen cues', async () => {
+test('ambiguous works offer selection, remember the selected source, and keep native fullscreen free of synthetic subtitle tracks', async () => {
   const view = mount(url => url.includes('/match') ? { selected: null, candidates: [{ id: '2:ABCdef', title: '测试剧', year: '2024', categoryLabel: '电视剧', platforms: ['qq'] }], status: 'choose' }
     : url.includes('/select') ? source : defaultResponse(url));
   try {
@@ -117,28 +117,23 @@ test('ambiguous works offer selection, remember the selected source, and switch 
     assert.equal(JSON.parse(selectCall.options.body).platform, undefined);
     view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
     assert.equal(document.querySelector('.danmaku-overlay').style.visibility, 'hidden');
-    assert.equal(view.nativeTrack.mode, 'showing');
-    assert.ok(view.nativeTrack.cues.length > 0);
-    assert.equal(view.nativeTrack.cues[0].text, '&lt;img src=x onerror=alert(1)&gt;');
+    assert.equal(view.tracks.length, 0);
+    assert.match(document.querySelector('[role="status"]').textContent, /系统播放器不显示飘屏弹幕/);
     view.video.dispatchEvent(new dom.window.Event('webkitendfullscreen')); await flush();
-    assert.equal(view.nativeTrack.mode, 'hidden');
-    assert.equal(view.nativeTrack.cues.length, 0);
+    assert.equal(view.tracks.length, 0);
     assert.equal(document.querySelector('.danmaku-overlay').style.visibility, 'visible');
   } finally { view.app.unmount(); }
 });
-test('entering native fullscreen while matching still loads cues when the response arrives', async () => {
-  let finish;
-  const view = mount(url => url.includes('/match') ? new Promise(resolve => { finish = resolve; }) : defaultResponse(url));
+test('container fullscreen keeps the scrolling renderer visible without adding captions', async () => {
+  const view = mount(defaultResponse);
   try {
-    button('弹幕关').click(); await flush();
-    view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
-    assert.equal(view.nativeTrack.mode, 'showing');
-    assert.equal(view.nativeTrack.cues.length, 0);
-    finish({ selected: source, candidates: [], status: 'matched' }); await flush(); await flush();
-    assert.ok(view.calls.some(call => call.url.includes('/segment')));
-    assert.equal(view.nativeTrack.mode, 'showing');
-    assert.ok(view.nativeTrack.cues.length > 0);
-  } finally { view.app.unmount(); }
+    button('弹幕关').click(); await flush(); await flush();
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: view.video.parentElement });
+    document.dispatchEvent(new dom.window.Event('fullscreenchange')); await flush();
+    assert.equal(document.querySelector('.danmaku-overlay').style.visibility, 'visible');
+    assert.ok(document.querySelector('.danmaku-overlay').childElementCount > 0);
+    assert.equal(view.tracks.length, 0);
+  } finally { Object.defineProperty(document, 'fullscreenElement', { configurable: true, value: null }); view.app.unmount(); }
 });
 test('changing episodes ignores the previous request and fetches the new match', async () => {
   const finishes = [];
@@ -154,87 +149,6 @@ test('changing episodes ignores the previous request and fetches the new match',
     button('更多选项').click(); await nextTick();
     assert.match(document.querySelector('.danmaku-source').textContent, /第2集/);
   } finally { view.app.unmount(); }
-});
-test('native refresh preserves off selection, reuses cues and never duplicates the track on remount', async () => {
-  const view = mount(defaultResponse);
-  try {
-    button('弹幕关').click(); await flush(); await flush();
-    view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
-    const track = view.nativeTrack, cue = track.cues[0];
-    track.mode = 'disabled';
-    view.video.currentTime = 35; view.video.dispatchEvent(new dom.window.Event('seeked')); await flush();
-    assert.equal(track.mode, 'disabled');
-    assert.equal(track.cues[0], cue);
-    Object.defineProperty(view.video, 'webkitDisplayingFullscreen', { value: true });
-    view.remount(); await flush(); await flush();
-    assert.equal(view.tracks.length, 1);
-    assert.equal(view.nativeTrack, track);
-    assert.equal(track.mode, 'disabled');
-    assert.ok(track.cues.length);
-  } finally { view.app.unmount(); }
-  assert.equal(view.nativeTrack.cues.length, 0);
-});
-test('native entry and segment refresh preserve film subtitles', async () => {
-  const view = mount(defaultResponse);
-  try {
-    const film = view.video.addTextTrack('subtitles', '中文字幕'); film.mode = 'showing';
-    button('弹幕关').click(); await flush(); await flush();
-    view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
-    assert.equal(view.nativeTrack.mode, 'hidden');
-    assert.equal(film.mode, 'showing');
-    view.video.currentTime = 35; view.video.dispatchEvent(new dom.window.Event('seeked')); await flush();
-    assert.equal(view.nativeTrack.mode, 'hidden');
-    assert.equal(film.mode, 'showing');
-    view.nativeTrack.mode = 'showing'; film.mode = 'disabled';
-    view.video.currentTime = 65; view.video.dispatchEvent(new dom.window.Event('seeked')); await flush();
-    assert.equal(view.nativeTrack.mode, 'showing');
-    // Simulate selecting the film subtitle from native controls during playback.
-    view.nativeTrack.mode = 'disabled'; film.mode = 'showing';
-    view.video.currentTime = 95; view.video.dispatchEvent(new dom.window.Event('seeked')); await flush();
-    assert.equal(view.nativeTrack.mode, 'disabled'); assert.equal(film.mode, 'showing');
-  } finally { view.app.unmount(); }
-});
-test('dense native comments use bounded text and non-overlapping cues', async () => {
-  const view = mount(url => url.includes('/match') ? defaultResponse(url) : {
-    ...defaultResponse(url), comments: Array.from({ length: 20 }, (_, i) => ({ time: i, text: `${i} ${'很长的弹幕'.repeat(12)}`, mode: 'rtl' }))
-  });
-  localStorage.setItem('misty_rain_danmaku_density', 'normal');
-  view.remount();
-  try {
-    button('弹幕关').click(); await flush(); await flush();
-    view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
-    const cues = view.nativeTrack.cues;
-    assert.ok(cues.length > 1);
-    for (let i = 0; i < cues.length; i++) {
-      assert.ok(Array.from(cues[i].text).length <= 36);
-      assert.ok(cues[i].text.endsWith('…'));
-      if (i) assert.ok(cues[i].startTime >= cues[i - 1].endTime);
-    }
-    button('弹幕开').click(); await flush();
-    assert.equal(view.nativeTrack.cues.length, 0);
-    assert.equal(view.nativeTrack.mode, 'hidden');
-  } finally { view.app.unmount(); }
-});
-test('unavailable or failing native track APIs do not become a network error', async () => {
-  for (const fail of ['missing', 'create', 'cue']) {
-    const view = mount(defaultResponse);
-    if (fail === 'missing') view.video.addTextTrack = undefined;
-    if (fail === 'create') view.video.addTextTrack = () => { throw new Error('Unsupported'); };
-    if (fail === 'cue') {
-      const create = view.video.addTextTrack;
-      view.video.addTextTrack = (...args) => {
-        const track = create(...args); track.addCue = () => { throw new Error('Unsupported cue'); }; return track;
-      };
-    }
-    try {
-      button('弹幕关').click(); await flush(); await flush();
-      view.video.dispatchEvent(new dom.window.Event('webkitbeginfullscreen')); await flush();
-      assert.match(document.querySelector('[role="status"]').textContent, /不支持全屏弹幕/);
-      view.video.dispatchEvent(new dom.window.Event('webkitendfullscreen')); await flush();
-      assert.equal(document.querySelector('[role="status"]').textContent, '');
-      assert.equal(document.querySelector('.danmaku-overlay').style.visibility, 'visible');
-    } finally { view.app.unmount(); }
-  }
 });
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });
 
