@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resourceSearchKeyword } from './searchTitle.js';
 
 const DEFAULT_SEARCH_URLS = [
   'http://127.0.0.1:8888/api/search',
@@ -17,7 +18,7 @@ const ENDPOINT_FAILURE_BASE_COOLDOWN_MS = 8 * 1000;
 const ENDPOINT_FAILURE_MAX_COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 120;
 const MAX_RESULTS = 100;
-const SEARCH_CACHE_REVISION = 4;
+const SEARCH_CACHE_REVISION = 5;
 const COMPLETION_TIMEOUT_MS = 30_000;
 const FOLLOW_UP_DELAYS_MS = [5_000, 15_000];
 
@@ -134,8 +135,9 @@ const mergePayloads = payloads => {
 export class ResourceSearchService {
   constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), timeoutMs = requestTimeoutMs(),
     source = configuredSearchSource(), aggregationMs = RESULT_AGGREGATION_WINDOW_MS, dataDir, now = Date.now,
-    maxConcurrent = 4, completionTimeoutMs = COMPLETION_TIMEOUT_MS, followUpDelaysMs = FOLLOW_UP_DELAYS_MS } = {}) {
+    exclude = () => false, maxConcurrent = 4, completionTimeoutMs = COMPLETION_TIMEOUT_MS, followUpDelaysMs = FOLLOW_UP_DELAYS_MS } = {}) {
     this.fetchImpl = fetchImpl;
+    this.exclude = exclude;
     this.urls = urls;
     this.timeoutMs = timeoutMs;
     this.source = source;
@@ -162,6 +164,7 @@ export class ResourceSearchService {
   }
 
   async search(rawKeyword, { force = false, allowStale = !force, priority = 'interactive' } = {}) {
+    this.cleanup();
     const keyword = normalizeKeyword(rawKeyword);
     if (!keyword) throw createSearchError('请输入有效片名', 'RESOURCE_SEARCH_KEYWORD_REQUIRED', 400);
     const key = keyword.toLocaleLowerCase('zh-CN');
@@ -170,7 +173,7 @@ export class ResourceSearchService {
     const stale = allowStale && cached && !cached.isEmpty && this.now() - cached.createdAt <= STALE_CACHE_TTL_MS;
     let job = this.inFlight.get(key);
     if (!job) {
-      const limit = priority === 'background' ? Math.max(1, this.maxConcurrent - 2) : this.maxConcurrent;
+      const limit = priority !== 'interactive' ? Math.max(1, this.maxConcurrent - 2) : this.maxConcurrent;
       if (this.inFlight.size >= limit) {
         if (stale) return this.#publicResult(cached, true);
         throw createSearchError('正在处理其他检索，请稍后重试', 'RESOURCE_SEARCH_BUSY', 503);
@@ -189,7 +192,14 @@ export class ResourceSearchService {
     }
   }
 
+  cleanup() {
+    let changed = false;
+    for (const [key, entry] of this.cache) if (this.now() - entry.createdAt > STALE_CACHE_TTL_MS) { this.cache.delete(key); changed = true; }
+    if (changed) this.#persist();
+  }
+
   peek(rawKeyword) {
+    this.cleanup();
     const key = normalizeKeyword(rawKeyword).toLocaleLowerCase('zh-CN');
     const entry = this.cache.get(key);
     if (!entry || this.now() - entry.createdAt > STALE_CACHE_TTL_MS) return null;
@@ -303,7 +313,7 @@ export class ResourceSearchService {
 
   async #fetchEndpoint(channel, keyword, { timeoutMs = this.timeoutMs, refresh = false } = {}) {
     const url = new URL(channel.endpoint);
-    url.searchParams.set('kw', keyword);
+    url.searchParams.set('kw', resourceSearchKeyword(keyword) || keyword);
     url.searchParams.set('res', 'merge');
     url.searchParams.set('src', channel.source);
     url.searchParams.set('cloud_types', 'quark');
@@ -361,19 +371,26 @@ export class ResourceSearchService {
   }
 
   #publicResult(entry, stale = false, refreshing = false) {
-    return { ...entry.data, stale, refreshing, partial: Boolean(entry.partial), cachedAt: new Date(entry.createdAt).toISOString(),
+    const items = entry.data.merged_by_type.quark.filter(item => !this.exclude(item));
+    return { ...entry.data, total: items.length, merged_by_type: { quark: items }, stale, refreshing, partial: Boolean(entry.partial), cachedAt: new Date(entry.createdAt).toISOString(),
       ...(refreshing ? { message: entry.isEmpty ? '检索引擎仍在搜索，结果会自动出现…' : '先展示已找到的候选，正在补充其余来源…' }
         : stale ? { message: '暂用最近检索结果；添加时会验证链接' }
           : entry.partial ? { message: '部分来源暂不可用，已展示找到的候选；添加时会验证链接' } : {}) };
   }
 
   #remember(keyword, data, partial) {
+    this.cleanup();
     const key = keyword.toLocaleLowerCase('zh-CN');
     const entry = { createdAt: this.now(), data, partial, isEmpty: !data.total, revision: SEARCH_CACHE_REVISION };
     this.cache.delete(key);
     this.cache.set(key, entry);
     while (this.cache.size > MAX_CACHE_ENTRIES) this.cache.delete(this.cache.keys().next().value);
-    if (this.cacheFile && !entry.isEmpty) {
+    if (!entry.isEmpty) this.#persist();
+    return entry;
+  }
+
+  #persist() {
+    if (this.cacheFile) {
       try {
         fs.mkdirSync(path.dirname(this.cacheFile), { recursive: true });
         const temp = `${this.cacheFile}.${process.pid}.tmp`;
@@ -381,6 +398,5 @@ export class ResourceSearchService {
         fs.renameSync(temp, this.cacheFile);
       } catch { /* Search still works when the cache volume is read-only. */ }
     }
-    return entry;
   }
 }

@@ -70,19 +70,36 @@ const clock = ms => {
   const seconds = Math.floor(ms / 1000);
   return `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
 };
-const plainText = value => value.replace(/\{\\[^}]*\}/g, '').replace(/<[^>]*>/g, '')
-  .replace(/\\[Nn]/g, '\n').replace(/\\h/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const entities = { amp: '&', lt: '<', gt: '>', nbsp: '\u00a0', lrm: '\u200e', rlm: '\u200f', quot: '"', apos: "'" };
+const decodeEntities = value => value.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|nbsp|lrm|rlm|quot|apos);/gi, (entity, name) => {
+  if (!name.startsWith('#')) return entities[name.toLowerCase()] || entity;
+  const point = /^#x/i.test(name) ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
+  return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
+});
+const plainText = (value, ass) => {
+  // ASS has its own escapes; treating every subtitle as ASS corrupts literal
+  // backslashes. Decode text entities only after removing actual cue markup so
+  // an encoded tag stays visible text, never executable HTML.
+  const text = ass ? value.replace(/\{\\[^}]*\}/g, '').replace(/\\[Nn]/g, '\n').replace(/\\h/g, ' ')
+    : decodeEntities(value.replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/?(?:b|i|u|s|font|ruby|rt|c|v|lang)(?:\.[^\s>]+)?(?:\s[^>]*)?>|<\d{1,3}:\d{2}(?::\d{2})?\.\d{3}>/gi, ''));
+  return text.replace(/\r\n?/g, '\n').replace(/\n(?:[ \t]*\n)+/g, '\n')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+};
 export const subtitleToVtt = (input, filename = '') => {
   const text = String(input).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const cues = [];
+  const ass = /\.(?:ass|ssa)$/i.test(filename) || /^\s*\[Script Info\]/i.test(text);
   const add = (start, end, content) => {
     const from = timestamp(start); const to = timestamp(end);
-    if (from !== null && to !== null && to > from && content.trim()) cues.push(`${clock(from)} --> ${clock(to)}\n${plainText(content).trim()}`);
+    const caption = plainText(content, ass).trim();
+    if (from !== null && to !== null && to > from && caption) cues.push(`${clock(from)} --> ${clock(to)} align:center\n${caption}`);
   };
-  if (/\.(?:ass|ssa)$/i.test(filename) || /^\s*\[Script Info\]/i.test(text)) {
+  if (ass) {
     let format = ['layer', 'start', 'end', 'style', 'name', 'marginl', 'marginr', 'marginv', 'effect', 'text'];
     let inEvents = false;
-    for (const line of text.split('\n')) {
+    for (const record of text.split('\n')) {
+      const line = record.trimStart();
       if (/^\s*\[/.test(line)) inEvents = /^\s*\[Events\]/i.test(line);
       if (!inEvents) continue;
       if (/^Format:/i.test(line)) format = line.slice(7).split(',').map(value => value.trim().toLowerCase());

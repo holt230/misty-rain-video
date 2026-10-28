@@ -1,22 +1,26 @@
 import crypto from 'node:crypto';
+import {parseBilibiliUrl,resolveBilibili,parseBilibiliSegment} from './bilibili.js';
 import { inflateSync } from 'node:zlib';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 
-export const platforms = { qq: '腾讯视频', qiyi: '爱奇艺', youku: '优酷' };
-export const segmentSeconds = { qq: 30, qiyi: 300, youku: 60 };
+export const platforms = { qq: '腾讯视频', qiyi: '爱奇艺', youku: '优酷', bilibili:'哔哩哔哩' };
+export const segmentSeconds = { qq: 30, qiyi: 300, youku: 60, bilibili:360 };
 const fail = message => Object.assign(new Error(message), { code: 'DANMAKU_UNAVAILABLE', statusCode: 502 });
 const md5 = value => crypto.createHash('md5').update(value).digest('hex');
 const array = value => value == null ? [] : Array.isArray(value) ? value : [value];
 
 // Fixed upstreams only. User input is never fetched as a URL; redirects are rejected.
 export async function upstream(url, options = {}) {
-  const allowed = new Set(['api.so.360kan.com', 'api.web.360kan.com', 'pbaccess.video.qq.com', 'dm.video.qq.com', 'cmts.iqiyi.com', 'pcw-api.iq.com', 'acs.youku.com', 'log.mmstat.com']);
+  const allowed = new Set(['api.so.360kan.com', 'api.web.360kan.com', 'pbaccess.video.qq.com', 'dm.video.qq.com', 'cmts.iqiyi.com', 'pcw-api.iq.com', 'acs.youku.com', 'log.mmstat.com', 'api.bilibili.com', 'b23.tv']);
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' || !allowed.has(parsed.hostname) || parsed.port || parsed.username || parsed.password) throw fail('弹幕数据地址无效');
+  const {allowRedirect,...requestOptions}=options;
+  if(allowRedirect&&parsed.hostname!=='b23.tv')throw fail('不支持重定向');
   const response = await fetch(parsed, {
-    ...options, redirect: 'error', signal: AbortSignal.timeout(8_000),
+    ...requestOptions, redirect: allowRedirect?'manual':'error', signal: AbortSignal.timeout(8_000),
     headers: { 'User-Agent': 'Mozilla/5.0', ...options.headers }
   });
+  if(allowRedirect&&[301,302,303,307,308].includes(response.status)){await response.body?.cancel();return {location:response.headers.get('location')};}
   if (!response.ok) { await response.body?.cancel(); throw fail('弹幕平台暂时无法连接'); }
   const chunks = []; let size = 0;
   for await (const chunk of response.body) {
@@ -29,6 +33,7 @@ export async function upstream(url, options = {}) {
 }
 
 export function parseVideoUrl(value) {
+  const bili=parseBilibiliUrl(value);if(bili)return bili;
   try {
     const url = new URL(String(value));
     if (!['http:', 'https:'].includes(url.protocol) || url.port || url.username || url.password) return null;
@@ -49,7 +54,7 @@ export function parseVideoUrl(value) {
 }
 export function validateSource(source) {
   if (!source || !Object.hasOwn(platforms, source.platform)) throw fail('请选择有效的弹幕来源');
-  const pattern = source.platform === 'qq' ? /^[a-zA-Z0-9]{11}$/ : source.platform === 'qiyi' ? /^\d{4,20}$/ : /^X[a-zA-Z0-9=]{4,79}$/;
+  const pattern = source.platform === 'bilibili' ? /^[1-9]\d{0,18}$/ : source.platform === 'qq' ? /^[a-zA-Z0-9]{11}$/ : source.platform === 'qiyi' ? /^\d{4,20}$/ : /^X[a-zA-Z0-9=]{4,79}$/;
   if (!pattern.test(source.id)) throw fail('弹幕剧集编号无效');
   return source;
 }
@@ -94,9 +99,10 @@ export function parseYouku(data, start, end) {
 
 export class DanmakuProviders {
   constructor(request = upstream) { this.request = request; this.guest = null; this.guestTask = null; }
-  async resolveUrl(url) {
+  async resolveUrl(url, episodeNumber=1) {
     const source = parseVideoUrl(url);
-    if (!source) throw fail('请粘贴腾讯、爱奇艺或优酷的具体剧集链接');
+    if (!source) throw fail('请粘贴 B 站、腾讯、爱奇艺或优酷的具体剧集链接');
+    if(source.platform==='bilibili')return validateSource(await resolveBilibili(source,this.request,episodeNumber));
     if (source.platform === 'qiyi') {
       const result = await this.request(`https://pcw-api.iq.com/api/decode/${source.id}?platformId=3&modeCode=intl&langCode=sg`);
       // Preserve TVIDs as strings even when they exceed JavaScript's safe integer range.
@@ -125,6 +131,10 @@ export class DanmakuProviders {
   async segment(source, index) {
     validateSource(source);
     const start = index * segmentSeconds[source.platform], end = start + segmentSeconds[source.platform];
+    if(source.platform==='bilibili'){
+      const result=await this.request(`https://api.bilibili.com/x/v2/dm/web/seg.so?${new URLSearchParams({type:'1',oid:source.id,segment_index:String(index+1)})}`,{headers:{Referer:'https://www.bilibili.com/'}});
+      return parseBilibiliSegment(result.bytes,start,end);
+    }
     if (source.platform === 'qq') {
       const result = await this.request(`https://dm.video.qq.com/barrage/segment/${source.id}/t/v1/${start * 1000}/${end * 1000}`);
       return parseTencent(result.json(), start, end);

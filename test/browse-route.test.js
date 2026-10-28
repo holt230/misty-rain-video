@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const dir=fs.mkdtempSync('.local-runtime/browse-route-test-');const out=path.resolve(dir,'route.mjs');
+await build({entryPoints:['src/services/browseRoute.ts'],outfile:out,bundle:true,format:'esm',platform:'node',logLevel:'silent'});
+const {defaultBrowseState,browseRoute,parseBrowseRoute}=await import(pathToFileURL(out));
+test.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+test('catalog URLs round-trip category, country, facets and popularity without private state',()=>{const state=defaultBrowseState('tv','美国');state.filters.genre='科幻';state.filters.year='2026';const url=browseRoute(state);const result=parseBrowseRoute(url);assert.deepEqual(result,state);assert.match(url,/^#\/browse\?/);assert.equal(result.sort,'popularity');assert.equal(parseBrowseRoute('#/discover'),null);});
+test('unknown query values cannot create a hidden filter; anime calendar preserves its chosen weekday',()=>{const invalid=parseBrowseRoute('#/browse?category=invalid&genre=invalid&country=invalid&year=wrong&sort=recommended&day=99');assert.equal(invalid.category,'tv');assert.equal(invalid.sort,'popularity');assert.deepEqual(invalid.filters,{genre:'',country:'',year:''});const state=defaultBrowseState('anime');state.calendar=true;state.weekday=7;assert.deepEqual(parseBrowseRoute(browseRoute(state)),state);});

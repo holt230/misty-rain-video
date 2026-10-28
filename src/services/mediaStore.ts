@@ -12,8 +12,8 @@ const hydrateMedia = (items: MediaItem[]): MediaItem[] => items.map(item => ({
 
 export class MediaStore {
   /** 从当前账户的服务端片库拉取数据（同一账户跨终端同步）。 */
-  static async getAllMedia(): Promise<MediaItem[]> {
-    const resp = await authFetch(API_URL);
+  static async getAllMedia(signal?: AbortSignal): Promise<MediaItem[]> {
+    const resp = await authFetch(API_URL, { signal });
     const json = await resp.json().catch(() => ({}));
     if (!resp.ok || json.code !== 0 || !Array.isArray(json.data)) {
       throw new Error(json.message || '读取片库失败');
@@ -70,7 +70,7 @@ export class MediaStore {
   /**
    * 从服务端持久化数据库删除指定卡片
    */
-  static async removeMedia(media: MediaItem): Promise<MediaItem[]> {
+  static async removeMedia(media: MediaItem): Promise<void> {
     const params = new URLSearchParams({ id: media.id });
     if (media.quarkFid) params.set('quarkFid', media.quarkFid);
     const resp = await authFetch(`${API_URL}?${params}`, { method: 'DELETE' });
@@ -78,7 +78,6 @@ export class MediaStore {
     if (!resp.ok || json.code !== 0) {
       throw new Error(json.message || '删除失败，请稍后重试');
     }
-    return this.getAllMedia();
   }
 
   /** 保存用户选择的展示分类；不会移动或删除网盘文件。 */
@@ -92,6 +91,16 @@ export class MediaStore {
     if (!resp.ok || json.code !== 0) {
       throw new Error(json.message || '分类更新失败');
     }
+  }
+
+  static async updateTitle(media: MediaItem, title: string): Promise<MediaItem> {
+    const resp = await authFetch(`${API_URL}/title`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quarkFid: media.quarkFid, title })
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || json.code !== 0 || !json.data) throw new Error(json.message || '名称修改失败');
+    return hydrateMedia([json.data])[0]!;
   }
 
   static async checkLibraryUpdates(force = false): Promise<LibraryUpdateSummary> {

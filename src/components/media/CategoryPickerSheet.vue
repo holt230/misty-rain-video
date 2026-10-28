@@ -37,7 +37,7 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
       aria-labelledby="category-picker-title"
       @click.self="!saving && emit('cancel')"
     >
-      <section class="picker-sheet glass-rim">
+      <section class="picker-sheet">
         <div class="drag-handle" aria-hidden="true"></div>
         <div class="sheet-heading">
           <div>
@@ -78,22 +78,36 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
 
 <style scoped>
 .picker-backdrop { position: fixed; inset: 0; z-index: 1750; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.picker-sheet { width: min(440px, 100%); padding: 24px; border-radius: 30px; }
+.picker-sheet { width: min(440px, 100%); padding: 24px; border-radius:20px; }
 .drag-handle { display: none; }
-.sheet-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.sheet-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .sheet-heading > div { min-width: 0; }
-.sheet-heading span { color: var(--text-tertiary); font-size: .74rem; }
-.sheet-heading h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.13rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }
+.sheet-heading span { color: var(--text-tertiary); font-size: .74rem; font-weight: 500; }
+.sheet-heading h2 { margin-top: 3px; color: var(--text-primary); font-size: 1.15rem; font-weight:650; overflow-wrap: anywhere; line-height: 1.4; letter-spacing: -.02em; }
 .close-button { display: grid; width: 44px; height: 44px; place-items: center; flex-shrink: 0; border-radius: 50%; }
 .close-button svg { width: 19px; height: 19px; }
 .category-options { display: grid; gap: 10px; }
-.category-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 72px; padding: 12px 15px; border: 1px solid; border-radius: 22px; color: var(--text-primary); text-align: left; }
-.option-icon { display: grid; width: 38px; height: 38px; place-items: center; flex-shrink: 0; border: 1px solid var(--divider); border-radius: 50%; color: transparent; background: rgb(124 148 188 / .08); }
-.active .option-icon { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
-.option-icon svg { width: 20px; height: 20px; }
-.option-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.category-option { background:transparent; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 12px 16px; border: 1px solid var(--divider); border-radius:12px; color: var(--text-primary); text-align: left; transition: transform .15s, background .15s; }
+.category-option:active { transform: scale(.98); }
+.option-icon { display: grid; width: 34px; height: 34px; place-items: center; flex-shrink: 0; border: 1px solid var(--divider); border-radius: 50%; color: transparent; background:var(--surface-2); }
+.active .option-icon { color:var(--accent-ink); background:var(--liquid-accent); }
+.category-option.active { background:var(--surface-2); border-color:var(--text-tertiary); }
+.option-icon svg { width: 18px; height: 18px; }
+.option-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .option-copy strong { font-size: .94rem; font-weight: 650; }
-.option-copy small { color: var(--text-tertiary); font-size: .75rem; }
-.current-badge { color: var(--liquid-accent); font-size: .73rem; }
-@media (max-width: 640px) { .picker-backdrop { align-items: flex-end; padding: 0; } .picker-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 22px; border-radius: 10px; } }
+.option-copy small { color: var(--text-tertiary); font-size: .74rem; }
+.current-badge { padding: 2px 8px; border-radius:999px; background:var(--divider); background:transparent; color:var(--text-secondary); font-size: .72rem; font-weight: 600; }
+@media (max-width: 640px) {
+  .picker-backdrop { align-items:flex-end; padding:max(8px,var(--safe-area-top)) max(8px,var(--safe-area-right)) max(8px,var(--safe-area-bottom)) max(8px,var(--safe-area-left)); }
+  .picker-sheet { padding-top: 12px; border-radius:20px; }
+  .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 18px; border-radius:999px; background:var(--divider); }
+}
+.picker-backdrop { background:var(--dialog-backdrop,rgb(0 0 0 / .6)); }
+.picker-sheet { max-height:calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 32px); overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider); background:var(--surface-elevated,var(--surface-1)); box-shadow:0 24px 80px #0005; animation:sheet-enter .18s ease; }
+button { cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
+button:focus-visible { outline:2px solid var(--text-primary); outline-offset:-2px; }
+.close-button { border:0; color:var(--text-secondary); background:transparent; }
+@keyframes sheet-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+@media(max-width:640px) { .picker-sheet { padding:16px 20px 20px; } }
+@media(prefers-reduced-motion:reduce) { .picker-sheet { animation:none; } button { transition:none; } }
 </style>

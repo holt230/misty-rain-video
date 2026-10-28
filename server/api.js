@@ -1,15 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readRequestBody, readWebResponseText, sendError, sendJson, sendSuccess, pipeWebResponse } from './http.js';
+import { readRequestBody, sendError, sendJson, sendSuccess } from './http.js';
 import { AuthService } from './auth.js';
 import { DanmakuService } from './danmaku/service.js';
 import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, PlayerPreferencesStore, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
 import { LibraryMaintenance } from './libraryMaintenance.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
-import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
+import { isGenericPoster, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
+import { ShareAvailability } from './shareAvailability.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
+import { DiscoveryService } from './discoveryService.js';
+import { CatalogSearch } from './catalogSearch.js';
+import { CatalogBrowse } from './catalogBrowse.js';
+import { CatalogDetails } from './catalogDetails.js';
+import { SiteSettings } from './siteSettings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,17 +46,28 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     userContexts.set(key, value);
     return value;
   };
+  const quarkGateway = new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient });
+  const shareAvailability = new ShareAvailability({ dataDir, probe: input => quarkGateway.probeShare(input) });
   const context = {
     authService,
+    siteSettings: new SiteSettings(dataDir),
     userContext,
     credentialStore,
-    posterService: new PosterService(dataDir),
-    resourceSearch: new ResourceSearchService({ dataDir }),
+    posterService: new PosterService(dataDir, {
+      resolveThumbnail: (item, user) => quarkGateway.getLibraryThumbnail(item.quarkFid, user),
+      fetchThumbnail: (url, signal) => quarkGateway.fetchMedia(url, undefined, 'thumbnail', '', { signal })
+    }),
+    resourceSearch: new ResourceSearchService({ dataDir, exclude: item => shareAvailability.isUnavailable(item.url) }),
+    shareAvailability,
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
-    quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
+    quarkGateway
   };
   context.libraryMaintenance = new LibraryMaintenance(context);
+  context.discovery = new DiscoveryService({ dataDir, posterService: context.posterService });
+  context.catalogSearch = new CatalogSearch({ discovery: context.discovery });
+  context.catalogBrowse = new CatalogBrowse({ catalogSearch: context.catalogSearch });
+  context.catalogDetails = new CatalogDetails({ dataDir, discovery: context.discovery });
   return context;
 };
 
@@ -70,12 +87,13 @@ const readLibrary = async (context, user, userData) => {
     return {
       ...saved,
       ...item,
+      title: userData.libraryViewRepository.titleFor?.(item.quarkFid) || item.title,
       poster: saved.poster || item.poster || '',
       desc: saved.desc || item.desc,
       quarkShareUrl: saved.quarkShareUrl || item.quarkShareUrl
     };
   });
-  const enriched = await context.posterService.enrich(cards);
+  const enriched = await context.posterService.enrich(cards, user);
   const grouped = new Map();
   const normalizeTitle = value => String(value || '')
     .normalize('NFKC')
@@ -103,7 +121,7 @@ const readLibrary = async (context, user, userData) => {
     };
   }).map(item => ({
     ...item,
-    poster: item.poster || LEGACY_DEFAULT_POSTER,
+    poster: isGenericPoster(item.poster) ? '' : item.poster,
     desc: String(item.desc || '').replace(/夸克\s*(?:网盘)?/gi, '云端网盘').replace(/\bSVIP\b/gi, '高清播放')
   }));
 };
@@ -117,6 +135,7 @@ const readLibrarySources = async (context, user, userData) => {
       || {};
     return {
       ...item,
+      title: userData.libraryViewRepository.titleFor?.(item.quarkFid) || item.title,
       quarkShareUrl: saved.quarkShareUrl || item.quarkShareUrl || '',
       quarkPasscode: saved.quarkPasscode || item.quarkPasscode || '',
       quarkSelectionFids: saved.quarkSelectionFids
@@ -124,7 +143,34 @@ const readLibrarySources = async (context, user, userData) => {
   });
 };
 
-const persistablePoster = value => isGenericPoster(value) || /\/api\/media-posters\//.test(value) ? '' : value;
+const importLibraryShare = async (context, card, user) => {
+  try { return await context.quarkGateway.importShare(card, user); }
+  catch (error) {
+    if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && card.quarkShareUrl) context.shareAvailability?.markUnavailable(card.quarkShareUrl);
+    else if (card.quarkShareUrl) context.shareAvailability?.recordFailure?.({ shareUrl: card.quarkShareUrl, passcode: card.quarkPasscode }, error);
+    throw error;
+  }
+};
+
+const persistablePoster = value => isGenericPoster(value) || /\/api\/(?:media-posters|discovery\/posters)\//.test(value) ? '' : value;
+
+const historyMedia = (media, userData, metadata) => {
+  if (media.catalogId && !media.quarkFid) {
+    const saved = (metadata || userData.mediaRepository?.all?.() || []).find(item => item.catalogId === media.catalogId && item.quarkFid);
+    if (saved) media = { ...media, ...saved, poster: media.poster || saved.poster };
+  }
+  const fid = media.quarkFid || (String(media.id || '').startsWith('quark:') ? media.id.slice(6) : '');
+  const title = userData.libraryViewRepository?.titleFor?.(fid) || media.title;
+  return { ...media, title, poster: isGenericPoster(media.poster) || title !== media.title ? '' : media.poster };
+};
+
+const readHistory = async (context, user, userData) => {
+  const entries = userData.playbackHistory.all();
+  const metadata = userData.mediaRepository?.all?.() || [];
+  // History is a snapshot of progress; title and cover use current library metadata.
+  const media = await context.posterService.enrich(entries.map(entry => historyMedia(entry.media, userData, metadata)), user);
+  return entries.map((entry, index) => ({ ...entry, media: media[index] }));
+};
 
 const publicPlaybackStatus = status => ({
   isConfigured: Boolean(status?.isConfigured),
@@ -134,31 +180,6 @@ const publicPlaybackStatus = status => ({
   isAuthenticated: Boolean(status?.isAuthenticated),
   ...(status?.nickname ? { nickname: status.nickname } : {})
 });
-
-const forwardedPrefix = request => {
-  const value = String(request.headers['x-forwarded-prefix'] || '').split(',')[0].trim();
-  if (!value || value === '/' || !/^\/[a-zA-Z0-9._~/-]+$/.test(value) || value.includes('..')) return '';
-  return value.replace(/\/+$/, '');
-};
-
-const rewriteHlsManifest = (manifest, baseUrl, session, gateway, publicPrefix = '', requestProfile = 'web', requestCookie = '') => {
-  const register = value => {
-    const upstreamUrl = new URL(value, baseUrl).toString();
-    const assetId = gateway.registerAsset(session, upstreamUrl, requestProfile, requestCookie);
-    return `${publicPrefix}/api/player/sessions/${encodeURIComponent(session.id)}/assets/${encodeURIComponent(assetId)}`;
-  };
-
-  return manifest.split(/\r?\n/).map(line => {
-    if (!line) return line;
-    if (!line.startsWith('#')) return register(line.trim());
-    return line.replace(/URI=("|')([^"']+)(\1)/g, (_match, quote, uri) => `URI=${quote}${register(uri)}${quote}`);
-  }).join('\n');
-};
-
-const isManifestResponse = (upstream, upstreamUrl, forceHls = false) => {
-  const contentType = upstream.headers.get('content-type') || '';
-  return forceHls || /mpegurl|m3u8/i.test(contentType) || /\.m3u8(?:$|\?)/i.test(upstreamUrl);
-};
 
 const createProxyRequestController = (request, response) => {
   const controller = new AbortController();
@@ -179,57 +200,6 @@ const createProxyRequestController = (request, response) => {
   };
 };
 
-const proxyUpstream = async ({ request, response, gateway, session, upstreamUrl, forceHls = false, requestProfile = 'web', requestCookie = '' }) => {
-  const proxyRequest = createProxyRequestController(request, response);
-  try {
-    const upstream = await gateway.fetchMedia(
-      upstreamUrl,
-      request.headers.range,
-      requestProfile,
-      requestCookie,
-      { method: request.method, signal: proxyRequest.signal }
-    );
-    if (isManifestResponse(upstream, upstreamUrl, forceHls) && upstream.ok) {
-      const manifest = await readWebResponseText(upstream);
-      const rewritten = rewriteHlsManifest(manifest, upstreamUrl, session, gateway, forwardedPrefix(request), requestProfile, requestCookie);
-      response.statusCode = upstream.status;
-      response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-      response.setHeader('Cache-Control', 'no-store');
-      response.end(rewritten);
-      return;
-    }
-    await pipeWebResponse(upstream, response);
-  } finally {
-    proxyRequest.cleanup();
-  }
-};
-
-const fetchStreamWithRefresh = async ({ gateway, sessionId, sourceId, source, range, method, signal, user }) => {
-  let currentSource = source;
-  let refreshed = false;
-  while (true) {
-    try {
-      const upstream = await gateway.fetchMedia(
-        currentSource.upstreamUrl,
-        range,
-        currentSource.requestProfile,
-        currentSource.requestCookie,
-        { method, signal }
-      );
-      // Media nodes also use 412 when a signed playback URL has expired or its
-      // signature preconditions no longer match. Refresh the source once just
-      // like the other expiry responses before returning an upstream error.
-      const shouldRefresh = [401, 403, 410, 412].includes(upstream.status);
-      if (!shouldRefresh || refreshed) return { source: currentSource, upstream };
-      await upstream.body?.cancel().catch(() => {});
-    } catch (error) {
-      if (error?.code !== 'STREAM_NETWORK_ERROR' || refreshed) throw error;
-    }
-    currentSource = await gateway.refreshStreamSource(sessionId, sourceId, user);
-    refreshed = true;
-  }
-};
-
 export const handleApiRequest = async (request, response, context) => {
   const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
   const pathname = url.pathname;
@@ -245,6 +215,11 @@ export const handleApiRequest = async (request, response, context) => {
   try {
     if (pathname === '/api/health' && request.method === 'GET') {
       sendSuccess(response, { status: 'ok' });
+      return true;
+    }
+
+    if (pathname === '/api/site-settings' && request.method === 'GET') {
+      sendSuccess(response, context.siteSettings.public());
       return true;
     }
 
@@ -282,6 +257,13 @@ export const handleApiRequest = async (request, response, context) => {
       context.authService.assertSameOrigin(request);
     }
 
+    if (pathname === '/api/site-settings' && request.method === 'PUT') {
+      if (user.role !== 'admin') throw Object.assign(new Error('仅管理员可以修改站点信息'), { statusCode: 403 });
+      const input = await readRequestBody(request, 2500_000);
+      sendSuccess(response, context.siteSettings.update(input));
+      return true;
+    }
+
     if (pathname.startsWith('/api/danmaku/')) {
       const service = context.danmaku;
       if (pathname === '/api/danmaku/segment' && request.method === 'GET') {
@@ -292,10 +274,11 @@ export const handleApiRequest = async (request, response, context) => {
         ));
         return true;
       }
-      if (request.method === 'POST' && ['/api/danmaku/match', '/api/danmaku/select'].includes(pathname)) {
+      if (request.method === 'POST' && ['/api/danmaku/match', '/api/danmaku/select', '/api/danmaku/options'].includes(pathname)) {
         service.limit(user.folder, 'match');
         const input = await readRequestBody(request, 8 * 1024);
-        const result = pathname.endsWith('/match') ? await service.match(user.folder, input) : await service.select(user.folder, input);
+        const result = pathname.endsWith('/match') ? await service.match(user.folder, input)
+          : pathname.endsWith('/options') ? await service.options(input) : await service.select(user.folder, input);
         sendSuccess(response, result);
         return true;
       }
@@ -308,7 +291,64 @@ export const handleApiRequest = async (request, response, context) => {
         return true;
       }
       const force = url.searchParams.get('refresh') === '1';
-      sendSuccess(response, await context.resourceSearch.search(keyword, { force, allowStale: true }));
+      sendSuccess(response, await context.resourceSearch.search(keyword, { force, allowStale: true, priority: url.searchParams.get('background') === '1' ? 'prefetch' : 'interactive' }));
+      return true;
+    }
+
+    if (pathname === '/api/resource-search/validate' && request.method === 'POST') {
+      const input = await readRequestBody(request, 64 * 1024);
+      sendSuccess(response, await context.shareAvailability.inspect(input.items, { force: input.force === true }));
+      return true;
+    }
+
+    const subjectContentMatch = pathname.match(/^\/api\/catalog\/subjects\/([^/]+)\/(photos|comments)$/);
+    if (subjectContentMatch && request.method === 'GET') {
+      response.setHeader('Cache-Control', 'private, no-store');
+      sendSuccess(response, await context.catalogDetails.content.get(subjectContentMatch[1], subjectContentMatch[2], url.searchParams.get('start') || '0'));
+      return true;
+    }
+    const subjectMatch = pathname.match(/^\/api\/catalog\/subjects\/([^/]+)$/);
+    if (subjectMatch && request.method === 'GET') {
+      response.setHeader('Cache-Control', 'private, no-store');
+      sendSuccess(response, await context.catalogDetails.get(subjectMatch[1]));
+      return true;
+    }
+    const detailImageMatch = pathname.match(/^\/api\/catalog\/detail-images\/([a-zA-Z0-9_-]+)$/);
+    if (detailImageMatch && ['GET', 'HEAD'].includes(request.method)) {
+      const asset = await context.catalogDetails.assets.read(detailImageMatch[1], 'catalog');
+      response.setHeader('Content-Type', asset.contentType);
+      response.setHeader('Content-Length', asset.bytes.length);
+      response.setHeader('Cache-Control', 'private, max-age=300');
+      response.end(request.method === 'HEAD' ? undefined : asset.bytes);
+      return true;
+    }
+    if (pathname === '/api/catalog/browse' && request.method === 'GET') {
+      sendSuccess(response, await context.catalogBrowse.get(Object.fromEntries(url.searchParams)));
+      return true;
+    }
+    if (pathname === '/api/catalog/search' && request.method === 'GET') {
+      sendSuccess(response, await context.catalogSearch.search(url.searchParams.get('q')));
+      return true;
+    }
+    if (pathname === '/api/discovery' && request.method === 'GET') {
+      sendSuccess(response, await context.discovery.get(url.searchParams.get('category') || 'all'));
+      return true;
+    }
+    const discoveryPosterMatch = pathname.match(/^\/api\/discovery\/posters\/([^/]+)$/);
+    if (discoveryPosterMatch && ['GET', 'HEAD'].includes(request.method)) {
+      const id = decodeURIComponent(discoveryPosterMatch[1]);
+      const poster = await context.discovery.poster(id, context.catalogDetails?.cachedPosterSource?.(id));
+      const asset = context.posterService.getAsset(path.basename(poster.poster));
+      if (!asset) throw Object.assign(new Error('封面暂时不可用'), { statusCode: 503 });
+      response.statusCode = 200;
+      response.setHeader('Content-Type', asset.contentType);
+      response.setHeader('Content-Length', asset.size);
+      const etag = `"${path.basename(poster.poster)}"`;
+      response.setHeader('Cache-Control', 'private, no-cache');
+      response.setHeader('ETag', etag);
+      if (request.headers['if-none-match'] === etag) { response.statusCode = 304; response.removeHeader('Content-Length'); response.end(); return true; }
+      if (request.method === 'HEAD') response.end();
+      else fs.createReadStream(asset.filePath).pipe(response);
       return true;
     }
 
@@ -330,7 +370,38 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/quark/share-details' && request.method === 'POST') {
       const input = await readRequestBody(request);
-      sendSuccess(response, await context.quarkGateway.getShareDetails(input));
+      try {
+        const result = await context.quarkGateway.getShareDetails(input, user);
+        context.shareAvailability?.recordContents?.(input, result.videoCount);
+        sendSuccess(response, result);
+      }
+      catch (error) {
+        if (error?.code === 'QUARK_SHARE_UNAVAILABLE') context.shareAvailability?.markUnavailable(input.shareUrl);
+        else context.shareAvailability?.recordFailure?.(input, error);
+        throw error;
+      }
+      return true;
+    }
+
+    const shareThumbnail = pathname.match(/^\/api\/quark\/share-thumbnails\/([a-zA-Z0-9_-]+)$/);
+    if (shareThumbnail && ['GET','HEAD'].includes(request.method)) {
+      const asset = await context.quarkGateway.shareThumbnails.read(shareThumbnail[1], user.username);
+      response.statusCode = 200;
+      response.setHeader('Content-Type',asset.contentType);
+      response.setHeader('Content-Length',asset.bytes.length);
+      response.setHeader('Cache-Control','private, no-store');
+      response.end(request.method === 'HEAD' ? undefined : asset.bytes);
+      return true;
+    }
+
+    const episodeThumbnail = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/episodes\/([^/]+)\/thumbnail$/);
+    if (episodeThumbnail && ['GET','HEAD'].includes(request.method)) {
+      const asset = await context.quarkGateway.getEpisodeThumbnail(decodeURIComponent(episodeThumbnail[1]),decodeURIComponent(episodeThumbnail[2]),user);
+      response.statusCode = 200;
+      response.setHeader('Content-Type',asset.contentType);
+      response.setHeader('Content-Length',asset.bytes.length);
+      response.setHeader('Cache-Control','private, no-store');
+      response.end(request.method === 'HEAD' ? undefined : asset.bytes);
       return true;
     }
 
@@ -347,7 +418,8 @@ export const handleApiRequest = async (request, response, context) => {
           throw error;
         }
         if (/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(item.quarkShareUrl || '')) {
-          const imported = await context.quarkGateway.importShare(item, user);
+          const imported = await importLibraryShare(context, item, user);
+          if (typeof item.catalogId === 'string') await context.discovery.poster(item.catalogId).catch(() => {});
           if (imported.replacedFid) {
             userData.mediaRepository.removeFid(imported.replacedFid);
             userData.playbackHistory.removeByMediaFid(imported.replacedFid);
@@ -382,9 +454,11 @@ export const handleApiRequest = async (request, response, context) => {
           throw error;
         }
         if (quarkFid) {
+          const catalogId = userData.mediaRepository.all?.().find(item => item.quarkFid === quarkFid)?.catalogId;
           const result = await context.quarkGateway.trashLibraryItem(quarkFid, user);
           userData.mediaRepository.removeFid(quarkFid);
           userData.playbackHistory.removeByMediaFid(quarkFid);
+          if (catalogId) userData.playbackHistory.removeUnlinkedCatalog(catalogId);
           sendSuccess(response, result, '当前影片目录已移入回收站');
         } else {
           userData.mediaRepository.remove(id);
@@ -393,6 +467,28 @@ export const handleApiRequest = async (request, response, context) => {
         }
         return true;
       }
+    }
+
+    if (pathname === '/api/media-cards/title' && request.method === 'PATCH') {
+      const body = await readRequestBody(request, 4096);
+      const title = typeof body.title === 'string' ? body.title.trim() : '';
+      const fid = typeof body.quarkFid === 'string' ? body.quarkFid.trim() : '';
+      if (!fid || fid.length > 240 || !title || title.length > 120 || /[\u0000-\u001f\u007f]/.test(title)) {
+        throw Object.assign(new Error('名称不能为空，最多 120 个字符'), { statusCode: 400, code: 'INVALID_MEDIA_TITLE' });
+      }
+      const library = await context.quarkGateway.listLibrary(user);
+      const item = library.find(card => card.quarkFid === fid);
+      if (!item) throw Object.assign(new Error('影片不在当前账号的片库中'), { statusCode: 403, code: 'MEDIA_FOLDER_FORBIDDEN' });
+      const previousTitle = userData.libraryViewRepository.titleFor(fid) || item.title;
+      const category = userData.libraryViewRepository.categoryFor(previousTitle);
+      const saved = userData.mediaRepository.all().find(card => card.quarkFid === fid) || {};
+      const [renamed] = await context.posterService.enrich([{
+        ...saved, ...item, title, category: category || item.category, poster: persistablePoster(saved.poster || item.poster || '')
+      }], user);
+      userData.libraryViewRepository.setTitle(fid, title);
+      if (category) userData.libraryViewRepository.setCategory(title, category);
+      sendSuccess(response, renamed, '名称已修改');
+      return true;
     }
 
     if (pathname === '/api/media-cards/category' && request.method === 'PATCH') {
@@ -460,7 +556,7 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/playback-history') {
       if (request.method === 'GET') {
-        sendSuccess(response, userData.playbackHistory.all());
+        sendSuccess(response, await readHistory(context, user, userData));
         return true;
       }
       if (request.method === 'PUT') {
@@ -482,7 +578,10 @@ export const handleApiRequest = async (request, response, context) => {
           quarkShareUrl: String(media.quarkShareUrl || '').slice(0, 2048),
           quarkPasscode: String(media.quarkPasscode || '').slice(0, 32),
           quarkFid: String(media.quarkFid || '').slice(0, 240),
-          quarkQuality: String(media.quarkQuality || '').slice(0, 120)
+          quarkQuality: String(media.quarkQuality || '').slice(0, 120),
+          catalogId: String(media.catalogId || '').slice(0, 80),
+          year: String(media.year || '').slice(0,12),
+          danmakuKey: String(media.danmakuKey || '').slice(0,256)
         };
         if (body.playbackSessionId !== undefined) {
           if (typeof body.playbackSessionId !== 'string' || !body.playbackSessionId || body.playbackSessionId.length > 240) {
@@ -493,7 +592,7 @@ export const handleApiRequest = async (request, response, context) => {
         const duration = Math.max(0, Math.min(Number(body.duration) || 0, 60 * 60 * 48));
         const position = Math.max(0, Math.min(Number(body.position) || 0, duration || 60 * 60 * 48));
         const entry = userData.playbackHistory.save({
-          media: safeMedia,
+          media: historyMedia(safeMedia, userData),
           episodeFid: String(body.episodeFid).slice(0, 240),
           episodeNumber: Math.max(0, Number(body.episodeNumber) || 0),
           episodeTitle: String(body.episodeTitle || '').slice(0, 240),
@@ -509,13 +608,14 @@ export const handleApiRequest = async (request, response, context) => {
     const historyMatch = pathname.match(/^\/api\/playback-history\/([^/]+)$/);
     if (historyMatch && request.method === 'DELETE') {
       const id = decodeURIComponent(historyMatch[1]);
-      sendSuccess(response, userData.playbackHistory.remove(id), '播放记录已删除');
+      userData.playbackHistory.remove(id);
+      sendSuccess(response, userData.playbackHistory.all(), '播放记录已删除');
       return true;
     }
 
     if (pathname === '/api/library/import' && request.method === 'POST') {
       const item = await readRequestBody(request);
-      const imported = await context.quarkGateway.importShare(item, user);
+      const imported = await importLibraryShare(context, item, user);
       if (imported.replacedFid) {
         userData.mediaRepository.removeFid(imported.replacedFid);
         userData.playbackHistory.removeByMediaFid(imported.replacedFid);
@@ -559,7 +659,7 @@ export const handleApiRequest = async (request, response, context) => {
         const body = await readRequestBody(request);
         await context.quarkGateway.saveCookie(body.cookie || '');
         const status = await context.quarkGateway.getPlaybackStatus();
-        sendSuccess(response, publicPlaybackStatus(status), '片库与播放 Cookie 已验证并安全保存');
+        sendSuccess(response, publicPlaybackStatus(status), '片库 Cookie 已验证并安全保存');
         return true;
       }
     }
@@ -580,8 +680,17 @@ export const handleApiRequest = async (request, response, context) => {
 
     if ((pathname === '/api/player/sessions' || pathname === '/api/quark/resolve') && request.method === 'POST') {
       const body = await readRequestBody(request);
-      const session = await context.quarkGateway.createPlaybackSession(body, user);
-      sendSuccess(response, session);
+      try {
+        const session = await context.quarkGateway.createPlaybackSession(body, user, userData.playbackCache);
+        if (session.cachedOnly && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
+        else if (body.shareUrl && !body.quarkFid) context.shareAvailability?.recordContents?.(body, session.episodes.length);
+        sendSuccess(response, session);
+      }
+      catch (error) {
+        if (error?.code === 'QUARK_SHARE_UNAVAILABLE' && body.shareUrl) context.shareAvailability?.markUnavailable(body.shareUrl);
+        else if (body.shareUrl) context.shareAvailability?.recordFailure?.(body, error);
+        throw error;
+      }
       return true;
     }
 
@@ -601,53 +710,26 @@ export const handleApiRequest = async (request, response, context) => {
     if (streamMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       const sessionId = decodeURIComponent(streamMatch[1]);
       const sourceId = decodeURIComponent(streamMatch[2]);
-      const { session, source } = context.quarkGateway.getStreamSource(sessionId, sourceId, user);
-      if ((source.directOnly || source.delivery === 'direct') && url.searchParams.get('delivery') !== 'proxy') {
-        const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
-        if (location) {
-          response.statusCode = 302;
-          response.setHeader('Location', location);
-          response.setHeader('Referrer-Policy', 'no-referrer');
-          response.setHeader('Cache-Control', 'no-store');
-          response.end();
-          return true;
-        }
-      }
-      const proxyRequest = createProxyRequestController(request, response);
-      try {
-        const refreshed = await fetchStreamWithRefresh({
-          gateway: context.quarkGateway,
-          sessionId,
-          sourceId,
-          source,
-          range: request.headers.range,
-          method: request.method,
-          signal: proxyRequest.signal,
-          user
-        });
-        const upstream = refreshed.upstream;
-        const activeSource = refreshed.source;
+      context.quarkGateway.getStreamSource(sessionId, sourceId, user);
+      if (url.searchParams.get('delivery') === 'proxy') throw Object.assign(new Error('服务器中转已禁用，请刷新播放器使用直连'), { code:'VIDEO_RELAY_DISABLED', statusCode:409 });
+      const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
+      if (!location) throw Object.assign(new Error('当前画质不能直连，请更换画质或片源'), { code:'DIRECT_SOURCE_UNAVAILABLE', statusCode:409 });
+      response.statusCode = 302;
+      response.setHeader('Location', location);
+      response.setHeader('Referrer-Policy','no-referrer');
+      response.setHeader('Cache-Control','no-store');
+      response.end();
+      return true;
+    }
 
-        if (isManifestResponse(upstream, activeSource.upstreamUrl, activeSource.isHls) && upstream.ok) {
-          const manifest = await readWebResponseText(upstream);
-          response.statusCode = upstream.status;
-          response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-          response.setHeader('Cache-Control', 'no-store');
-          response.end(rewriteHlsManifest(
-            manifest,
-            activeSource.upstreamUrl,
-            session,
-            context.quarkGateway,
-            forwardedPrefix(request),
-            activeSource.requestProfile,
-            activeSource.requestCookie
-          ));
-        } else {
-          await pipeWebResponse(upstream, response);
-        }
-      } finally {
-        proxyRequest.cleanup();
-      }
+    const embeddedMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/embedded-subtitles\/([^/]+)$/);
+    if (embeddedMatch && request.method === 'GET') {
+      const controller = createProxyRequestController(request, response);
+      try {
+        const result = await context.quarkGateway.getEmbeddedSubtitles(decodeURIComponent(embeddedMatch[1]), decodeURIComponent(embeddedMatch[2]), Number(url.searchParams.get('time') || 0), user, { signal: controller.signal });
+        response.setHeader('Cache-Control', 'no-store');
+        sendSuccess(response, result);
+      } finally { controller.cleanup(); }
       return true;
     }
 
@@ -664,21 +746,8 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
-    const assetMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/assets\/([^/]+)$/);
-    if (assetMatch && (request.method === 'GET' || request.method === 'HEAD')) {
-      const sessionId = decodeURIComponent(assetMatch[1]);
-      const assetId = decodeURIComponent(assetMatch[2]);
-      const { session, asset } = context.quarkGateway.getAsset(sessionId, assetId, user);
-      await proxyUpstream({
-        request,
-        response,
-        gateway: context.quarkGateway,
-        session,
-        upstreamUrl: asset.upstreamUrl,
-        requestProfile: asset.requestProfile,
-        requestCookie: asset.requestCookie
-      });
-      return true;
+    if (/^\/api\/player\/sessions\/[^/]+\/assets\//.test(pathname)) {
+      throw Object.assign(new Error('服务器视频中转已禁用，请重新打开影片'), { code:'VIDEO_RELAY_DISABLED', statusCode:410 });
     }
 
     sendJson(response, 404, { code: 'API_NOT_FOUND', message: '接口不存在' });

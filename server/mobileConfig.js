@@ -60,8 +60,8 @@ const profileIdentifier = () => {
   return sanitized || 'com.mistyrain.video';
 };
 
-const createProfile = (appUrl, iconBase64) => {
-  const label = String(process.env.APP_DISPLAY_NAME || '烟雨影视').trim() || '烟雨影视';
+const createProfile = (appUrl, iconBase64, displayName) => {
+  const label = String(displayName || process.env.APP_DISPLAY_NAME || '烟雨影视').trim() || '烟雨影视';
   const identifier = profileIdentifier();
   const launchUrl = webClipProfileUrl(appUrl);
   const profileUuid = deterministicUuid(`misty-rain-profile:${launchUrl}`);
@@ -101,7 +101,7 @@ const createProfile = (appUrl, iconBase64) => {
 </plist>`;
 };
 
-export const handleMobileConfigRequest = (request, response, { distDir }) => {
+export const handleMobileConfigRequest = (request, response, { distDir, siteSettings }) => {
   const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
   if (url.pathname === '/launch/ios') {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -125,7 +125,7 @@ export const handleMobileConfigRequest = (request, response, { distDir }) => {
     response.end();
     return true;
   }
-  const body = createProfile(publicAppUrl(request), readIcon(distDir));
+  const body = createProfile(publicAppUrl(request), siteSettings?.value.icons?.[180] || readIcon(distDir), siteSettings?.value.name);
   response.statusCode = 200;
   response.setHeader('Content-Type', 'application/x-apple-aspen-config');
   response.setHeader('Content-Disposition', 'attachment; filename="misty-rain.mobileconfig"');

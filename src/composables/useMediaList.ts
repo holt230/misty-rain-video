@@ -3,6 +3,7 @@ import type { MediaItem, CategoryType, LibraryUpdateStatus } from '../types/medi
 import { MediaStore } from '../services/mediaStore';
 import { useToast } from './useToast';
 import { getLibrarySaveFeedback } from '../services/libraryFeedback';
+import { sameMediaIdentity } from '../services/historyIdentity';
 
 export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const toast = useToast();
@@ -25,19 +26,38 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     anime: '动漫'
   };
 
-  /** 从当前登录账户对应的云端目录拉取最新片单。 */
-  const refreshList = async (silent = false) => {
-    try {
-      if (!silent) isLoading.value = true;
-      const data = await MediaStore.getAllMedia();
-      allMediaList.value = data;
-      loadError.value = '';
-    } catch (err) {
-      loadError.value = '片库读取失败，请检查网络或片库认证后重试。';
-      console.warn('[useMediaList] 刷新失败:', err);
-    } finally {
-      if (!silent) isLoading.value = false;
-    }
+  let revision = 0;
+  let refreshTask: Promise<void> | null = null;
+  let refreshController: AbortController | null = null;
+  const canRefresh = () => mounted && isEnabled() && !isPaused() && isDocumentVisible();
+  const cancelRefresh = () => {
+    revision++;
+    refreshController?.abort();
+    refreshController = null;
+    refreshTask = null;
+    isLoading.value = false;
+  };
+  /** Coalesce focus/poll reads and never let a pre-mutation snapshot replace new data. */
+  const refreshList = (silent = false): Promise<void> => {
+    if (!canRefresh()) return Promise.resolve();
+    if (refreshTask) return refreshTask;
+    const current = revision;
+    const controller = refreshController = new AbortController();
+    if (!silent) isLoading.value = true;
+    const task: Promise<void> = Promise.resolve().then(async () => {
+      try {
+        if (controller.signal.aborted) return;
+        const data = await MediaStore.getAllMedia(controller.signal);
+        if (current !== revision || !canRefresh() || controller.signal.aborted) return;
+        allMediaList.value = data; loadError.value = '';
+      } catch (err) {
+        if (current === revision && canRefresh() && !controller.signal.aborted) loadError.value = '收藏读取失败，请稍后重试';
+      } finally {
+        if (refreshTask === task) { refreshTask = null; refreshController = null; isLoading.value = false; }
+      }
+    });
+    refreshTask = task;
+    return task;
   };
 
   // 当前分类下的影视列表
@@ -74,14 +94,10 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   /** 保存影视到当前账户的片库。 */
   const saveMedia = async (item: MediaItem) => {
     try {
-      toast.show(item.quarkFid
-        ? `正在验证《${item.title}》的新片源...`
-        : item.title === '待识别片名' ? '正在验证分享链接并添加到片库…'
-        : `正在转存《${item.title}》到云端片库...`, '↻', 2200);
       const result = await MediaStore.saveMedia(item);
-      allMediaList.value = result.items;
+      revision++; allMediaList.value = result.items;
       loadError.value = '';
-      toast.show(result.message, '✓', 3200);
+      toast.show(item.quarkFid ? '片源已更新' : '已加入收藏', '✓', 2200);
     } catch (error) {
       toast.show(getLibrarySaveFeedback(error).title, '!', 3500);
       throw error;
@@ -91,7 +107,8 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   /** 从当前账户的片库移除影视。 */
   const removeMedia = async (media: MediaItem) => {
     try {
-      allMediaList.value = await MediaStore.removeMedia(media);
+      await MediaStore.removeMedia(media);
+      revision++; allMediaList.value = allMediaList.value.filter(item => !sameMediaIdentity(item,media));
       toast.show(`《${media.title}》已移入回收站`, '✓', 2500);
     } catch (error) {
       toast.show(error instanceof Error ? error.message : '删除失败', '!', 3200);
@@ -102,6 +119,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const updateMediaCategory = async (media: MediaItem, category: CategoryType) => {
     try {
       await MediaStore.updateCategory(media.title, category);
+      revision++;
       allMediaList.value = allMediaList.value.map(item => item.title === media.title
         ? { ...item, category }
         : item);
@@ -115,6 +133,14 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
 
   const setLibraryUpdates = (items: LibraryUpdateStatus[]) => {
     libraryUpdates.value = Object.fromEntries(items.map(item => [item.quarkFid, item]));
+  };
+
+  const updateMediaTitle = async (media: MediaItem, title: string) => {
+    const updated = await MediaStore.updateTitle(media, title);
+    revision++;
+    allMediaList.value = allMediaList.value.map(item => sameMediaIdentity(item, media) ? updated : item);
+    toast.show('名称已修改', '✓');
+    return updated;
   };
 
   // 窗口激活时静默同步；后台不保留 15 秒高频轮询，避免移动端
@@ -139,12 +165,13 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const syncEnabledState = () => {
     stopPolling();
     if (!isEnabled()) {
+      cancelRefresh();
       allMediaList.value = [];
       loadError.value = '';
       libraryUpdates.value = {};
       return;
     }
-    if (isPaused() || !isDocumentVisible()) return;
+    if (isPaused() || !isDocumentVisible()) { cancelRefresh(); return; }
     void refreshList();
     startPolling();
   };
@@ -152,6 +179,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   const onVisibilityChange = () => {
     if (!isDocumentVisible()) {
       stopPolling();
+      cancelRefresh();
       return;
     }
     if (isEnabled() && !isPaused()) {
@@ -174,10 +202,11 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
 
   onUnmounted(() => {
     mounted = false;
+    cancelRefresh();
+    stopPolling();
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      stopPolling();
     }
   });
 
@@ -194,6 +223,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
     setLibraryUpdates,
     saveMedia,
     removeMedia,
-    updateMediaCategory
+    updateMediaCategory,
+    updateMediaTitle
   };
 }

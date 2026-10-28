@@ -21,6 +21,7 @@ test('删除影片后，晚到的历史读取和进度回调都不能恢复该�
   const app = vue.createApp({ setup() { state = usePlaybackHistory(enabled); return () => vue.h('div'); } });
   app.mount(document.querySelector('#app'));
   t.after(() => app.unmount());
+  await Promise.resolve(); // The coalesced read starts in a microtask.
   const media = { id: 'quark:deleted', quarkFid: 'deleted', title: '同名影片' };
   const entry = { id: 'history', media, updatedAt: '2026-10-13T00:00:00Z' };
   state.updateLocalHistory(entry);

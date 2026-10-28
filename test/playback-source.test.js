@@ -38,7 +38,7 @@ test('原生 HLS 设备优先转码直连，旧的杜比视界偏好不会锁定
   const all = [direct, native4k, nativeSuper];
   assert.equal(selectInitialPlaybackSource(all, { mobile: true, preferNativeHls: true, preferred: 'dolby_vision', preferredDelivery: 'direct' }), nativeSuper);
   assert.equal(selectInitialPlaybackSource(all, { preferNativeHls: true, preferred: '4k', preferredDelivery: 'direct' }), native4k);
-  assert.equal(selectInitialPlaybackSource([...all, compatible], { preferNativeHls: true, preferred: 'super', preferredDelivery: 'proxy' }), compatible);
+  assert.equal(selectInitialPlaybackSource([...all, compatible], { preferNativeHls: true, preferred: 'super', preferredDelivery: 'proxy' }), nativeSuper);
 });
 
 test('混合直连和 HLS 来源时，旧的超高清偏好不会继续锁定中转', () => {
@@ -52,13 +52,14 @@ test('直连提供多个画质时，手机仍优先较低开销的超高清', ()
   assert.equal(selectInitialPlaybackSource([direct, efficient], { mobile: true }), efficient);
 });
 
-test('用户明确选择的中转画质仍可保留', () => {
-  assert.equal(selectInitialPlaybackSource([direct, compatible], { preferred: 'super', preferredDelivery: 'proxy' }), compatible);
+test('旧中转偏好被忽略，只有直连源可被选择', () => {
+  assert.equal(selectInitialPlaybackSource([direct, compatible], { preferred: 'super', preferredDelivery: 'proxy' }), direct);
+  assert.equal(selectInitialPlaybackSource([compatible]), undefined);
 });
 
 test('不自动选择格式兼容性未知的原文件，空列表安全返回', () => {
   const original = { ...direct, id: 'original', resolution: 'original', width: 0, height: 0 };
-  assert.equal(selectInitialPlaybackSource([hls4k, compatible, original]), compatible);
+  assert.equal(selectInitialPlaybackSource([hls4k, compatible, original]), original);
   assert.equal(selectInitialPlaybackSource([]), undefined);
 });
 

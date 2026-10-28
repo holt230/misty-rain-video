@@ -3,6 +3,9 @@ export type CategoryType = 'tv' | 'movie' | 'variety' | 'anime';
 export interface MediaItem {
   id: string;
   title: string;
+  catalogId?: string;          // 发现页元数据身份，用于复用确定的海报
+  danmakuKey?: string;         // 用户主动换源时沿用原影片的弹幕关联
+  year?: string;
   category: CategoryType;      // 所属类型：电视剧、电影、综艺、动漫
   tag: string;                 // 最多单个标签 (例如: 4K 夸克)
   poster: string;              // 封面海报
@@ -16,6 +19,7 @@ export interface MediaItem {
   quarkSelectionFids?: string[]; // 选择保存的分享文件/文件夹；不填写表示全部保存
   quarkFid?: string;           // 烟雨影视片库中的夸克目录 ID
   quarkQuality?: string;       // 夸克画质 (如: 4K 臻彩)
+  startEpisodeFid?: string;    // 文件浏览器明确选择的首播文件，首次保存进度后清除
   localEpisodeCount?: number;  // 当前片库中的正片数量
   sourceEpisodeCount?: number; // 原片源中的正片数量
   latestEpisodeNumber?: number;// 原片源最新集数

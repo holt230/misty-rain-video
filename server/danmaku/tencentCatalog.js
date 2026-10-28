@@ -107,8 +107,9 @@ export class TencentCatalog {
     const episodes = [...unique.values()].filter(episode => !ambiguous.has(episode.number)).sort((a, b) => a.number - b.number);
     const known = this.works.get(workId);
     // 重启后仍能按已保存的专辑 ID 读取，不依赖再次搜索网盘中的别名。
-    const title = known?.title || text(episodes[0]?.title.replace(/\s+第\s*\d+\s*集.*$/, ''));
+    const title = known?.title || text(episodes[0]?.title.replace(/\s+第\s*\d+\s*[集话].*$/, ''));
     if (!title || !episodes.length) throw unavailable();
-    return { id: workId, title, year: known?.year || '', category: '2', categoryLabel: '电视剧', episodes };
+    const category=workId.startsWith('qq:4:')?'4':'2';
+    return { id: workId, title, year: known?.year || '', category, categoryLabel: category==='4'?'动漫':'电视剧', episodes };
   }
 }

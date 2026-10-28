@@ -1,7 +1,6 @@
 {
   "name": "烟雨影视",
   "short_name": "烟雨影视",
-  "description": "移动优先的个人云端影视片库",
   "id": "./",
   "start_url": "./?source=pwa",
   "scope": "./",

@@ -387,3 +387,19 @@ test('无法避免的非法响应仍按上游故障处理，不截断为成功�
   await assert.rejects(search.search('测试'), error => error.code === 'RESOURCE_SEARCH_UNAVAILABLE');
   assert.equal(search.cache.size, 0);
 });
+
+test('expired search metadata is evicted on access and prefetch reserves interactive capacity',async()=>{
+ let clock=1000000;const service=create({now:()=>clock,fetchImpl:async()=>reply('valid')});
+ await service.search('缓存剧');await flush();assert.ok(service.cache.size);
+ clock+=12*60*60*1000+1;assert.equal(service.peek('缓存剧'),null);assert.equal(service.cache.size,0);
+ const pending=gate();const limited=create({maxConcurrent:3,fetchImpl:()=>pending.promise.then(()=>reply('ok'))});
+ const first=limited.search('后台剧',{priority:'prefetch'});
+ await assert.rejects(limited.search('第二部',{priority:'prefetch'}),{code:'RESOURCE_SEARCH_BUSY'});
+ const interactive=limited.search('手动剧');pending.resolve(reply('ok'));await Promise.all([first,interactive]);
+});
+
+test('expired persisted source candidates are removed from disk when accessed',async t=>{
+ const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'misty-expire-cache-'));t.after(()=>fs.rmSync(dataDir,{recursive:true,force:true}));
+ let clock=1000000;const service=create({dataDir,now:()=>clock,fetchImpl:async()=>reply('saved')});await service.search('测试剧');await flush();
+ clock+=12*60*60*1000+1;service.peek('测试剧');assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir,'resource_search_cache.json'),'utf8')),[]);
+});

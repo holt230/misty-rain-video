@@ -61,7 +61,18 @@ const resolveStaticFile = pathname => {
 const server = http.createServer(async (request, response) => {
   try {
     if (handleBasePath(request, response, basePath)) return;
-    if (handleMobileConfigRequest(request, response, { distDir })) return;
+    if (handleMobileConfigRequest(request, response, { distDir, siteSettings: apiContext.siteSettings })) return;
+    const siteUrl = new URL(request.url || '/', 'http://localhost');
+    const siteIcon = siteUrl.pathname.match(/^\/api\/site\/icon\/(180|192|512)\.png$/);
+    if (siteIcon && ['GET', 'HEAD'].includes(request.method)) {
+      setPageSecurityHeaders(response);
+      const bytes = apiContext.siteSettings.icon(Number(siteIcon[1]), distDir);
+      if (!bytes) { response.statusCode = 404; response.end(); return; }
+      response.setHeader('Content-Type', 'image/png');
+      response.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+      response.setHeader('Content-Length', bytes.length);
+      response.end(request.method === 'HEAD' ? undefined : bytes); return;
+    }
     if (await handleApiRequest(request, response, apiContext)) return;
     setPageSecurityHeaders(response);
 
@@ -89,7 +100,9 @@ const server = http.createServer(async (request, response) => {
       response.end();
       return;
     }
-    fs.createReadStream(filePath).pipe(response);
+    if (path.basename(filePath) === 'index.html') response.end(apiContext.siteSettings.html(fs.readFileSync(filePath, 'utf8'), basePath));
+    else if (extension === '.webmanifest') response.end(JSON.stringify(apiContext.siteSettings.manifest(JSON.parse(fs.readFileSync(filePath, 'utf8')))));
+    else fs.createReadStream(filePath).pipe(response);
   } catch (error) {
     if (!response.headersSent) {
       response.statusCode = 500;
@@ -104,6 +117,7 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, host, () => {
   console.log(`[烟雨影视] 服务已启动：http://${host}:${port}`);
   apiContext.libraryMaintenance.start();
+  apiContext.discovery.start();
 });
 
 let isShuttingDown = false;
@@ -113,6 +127,7 @@ const shutdown = signal => {
   console.log(`[烟雨影视] 收到 ${signal}，正在安全停止服务...`);
   bundledResourceSearch?.stop();
   apiContext.libraryMaintenance.stop();
+  apiContext.discovery.stop();
   server.close(error => {
     if (error) {
       console.error('[烟雨影视] 停止服务失败', error);

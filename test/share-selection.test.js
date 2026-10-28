@@ -45,7 +45,9 @@ const createGateway = t => {
     if (url.pathname.endsWith('/share/sharepage/detail')) {
       const parent = url.searchParams.get('pdir_fid');
       listReads.push(parent);
-      return reply({ list: tree.get(parent) || [] });
+      const items=tree.get(parent)||[];
+      const page=Number(url.searchParams.get('_page'))||1, size=Number(url.searchParams.get('_size'))||10;
+      return Response.json({code:0,metadata:{_page:page,_size:size,_total:items.length},data:{list:items.slice((page-1)*size,page*size)}});
     }
     if (url.pathname.endsWith('/file/sort')) return reply({ list: drive.get(url.searchParams.get('pdir_fid')) || [] });
     if (url.pathname.endsWith('/file') && init.method === 'POST') {
@@ -213,4 +215,46 @@ test('多个季包含相同集号时，详情保留各季的文件与实际集�
   const details = await gateway.getShareDetails(shareInput);
   assert.equal(details.episodeCount, 4);
   assert.equal(details.entries.filter(entry => entry.episodeNumber === 1).length, 2);
+});
+
+
+test('movie years in brackets are not mistaken for thousands of episodes', async t => {
+  const { gateway, tree } = createGateway(t);
+  tree.set('0', [file('year', '潜伏6（2026）1080p.mkv'), file('episode', '动画 第2026集.mp4')]);
+  const details = await gateway.getShareDetails(shareInput);
+  assert.notEqual(details.entries.find(item => item.fid === 'year').episodeNumber, 2026);
+  assert.equal(details.entries.find(item => item.fid === 'episode').episodeNumber, 2026);
+});
+
+test('details expose actual thumbnails, aggregate folder sizes and dates; playback retains every version so the clicked file stays selectable', async t => {
+  const {gateway,tree}=createGateway(t);
+  tree.set('0',[folder('wrap','第一季')]);
+  tree.set('wrap',[
+    {...file('low','S01E01.720p.mp4'),size:1000,video_width:1280,video_height:720,thumbnail:'https://cdn.example.test/low?token=private',updated_at:1760000000000},
+    {...file('high','S01E01.4K.mp4'),size:4000,video_width:3840,video_height:2160}
+  ]);
+  const details=await gateway.getShareDetails(shareInput);
+  assert.equal(details.totalSize,5000);assert.equal(details.entries.find(item=>item.fid==='wrap').size,5000);
+  const low=details.entries.find(item=>item.fid==='low');assert.match(low.thumbnail,/^\/api\/quark\/share-thumbnails\//);assert.ok(low.updatedAt);assert.doesNotMatch(JSON.stringify(details),/cdn.example|token=private/);
+  const selected=await gateway.createPlaybackSession({...shareInput,episodeFid:'low'});
+  assert.ok(selected.episodes.some(e=>e.fid==='low'));assert.ok(selected.episodes.some(e=>e.fid==='high'));assert.equal(selected.episodes.length,2);
+  await assert.rejects(gateway.createPlaybackSession({...shareInput,episodeFid:'foreign'}),{code:'EPISODE_NOT_FOUND'});
+});
+
+test('playback episodes expose owner-scoped renewable thumbnails without extra directory scans or transfers',async t=>{
+ const f=createGateway(t);
+ f.tree.get('s1')[0].big_thumbnail='https://cdn.example.test/episode.png?private-signature=secret';
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/qcoAAAAASUVORK5CYII=','base64');
+ let imageReads=0;f.gateway.fetchMedia=async()=>{imageReads++;return new Response(png)};
+ const session=await f.gateway.createPlaybackSession({shareUrl:'https://pan.quark.cn/s/fixture',title:'测试剧'});
+ const episode=session.episodes.find(item=>item.fid==='e1');assert.match(episode.thumbnail,/\/episodes\/e1\/thumbnail$/);assert.doesNotMatch(JSON.stringify(session),/private-signature|cdn.example/);
+ const reads=f.listReads.length;
+ assert.equal((await f.gateway.getEpisodeThumbnail(session.sessionId,'e1')).contentType,'image/png');
+ await f.gateway.getEpisodeThumbnail(session.sessionId,'e1');assert.equal(imageReads,1);assert.equal(f.listReads.length,reads);assert.equal(f.writes.length,0);
+ await assert.rejects(f.gateway.getEpisodeThumbnail(session.sessionId,'e1',{username:'other',role:'user',folder:'other'}),{statusCode:403});
+ f.gateway.sessions.get(session.sessionId).thumbnailHandles.get('e1').expires=0;
+ await f.gateway.getEpisodeThumbnail(session.sessionId,'e1');assert.equal(imageReads,2);
+ f.gateway.shareThumbnails.remove(f.gateway.sessions.get(session.sessionId).thumbnailHandles.get('e1').id);
+ await f.gateway.getEpisodeThumbnail(session.sessionId,'e1');assert.equal(imageReads,3);
+ await assert.rejects(f.gateway.getEpisodeThumbnail(session.sessionId,'missing'),{statusCode:404});
 });

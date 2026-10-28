@@ -17,16 +17,13 @@ export const selectInitialPlaybackSource = (
   available: PlaybackSource[],
   { preferred = '', preferredDelivery = '', mobile = false, respectPreference = true, preferNativeHls = false } = {}
 ) => {
-  const nativeHls = preferNativeHls ? available.filter(source => source.delivery === 'direct' && source.isHls) : [];
-  // 原生 HLS 设备优先转码流，不能被历史上的杜比 MKV 选择锁定。
-  const preferredPool = nativeHls.length && preferredDelivery !== 'proxy' ? nativeHls : available;
-  // 新版明确手选的画质和传输方式优先；旧版只保存分辨率，不能因此一直中转。
-  if (respectPreference && preferredDelivery) {
-    const explicit = preferredPool.find(source => source.resolution === preferred && source.delivery === preferredDelivery);
-    if (explicit) return explicit;
-  }
-  const direct = nativeHls.length ? nativeHls : available.filter(source => source.delivery === 'direct' && source.resolution !== 'original');
-  const pool = direct.length ? direct : available;
+  const direct = available.filter(source => source.delivery === 'direct');
+  const nativeHls = preferNativeHls ? direct.filter(source => source.isHls) : [];
+  const progressive = direct.filter(source => !source.isHls && source.resolution !== 'original');
+  const transcoded = direct.filter(source => source.resolution !== 'original');
+  const pool = nativeHls.length ? nativeHls : progressive.length ? progressive : transcoded.length ? transcoded : direct;
+  // Previously saved relay choices cannot opt playback back into server traffic.
+  if (preferredDelivery === 'proxy') preferred = '';
   const efficient = pool.filter(source => source.width || source.height
     ? source.width <= 1920 && source.height <= 1080
     : !['2k', '4k', 'dolby_vision', 'source', 'original'].includes(source.resolution));

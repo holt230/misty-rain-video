@@ -21,26 +21,81 @@ export function useQuarkTransfer() {
 
   interface SearchProgress { server: boolean; public: boolean; supplemented: boolean; notice: string; error: string }
   const isCurrent = (sequence: number) => sequence === searchSequence && isOpen.value;
-  const append = (items: ResourceItem[]) => {
-    const combined = new Map(quarkResources.value.map(item => [item.url, item]));
-    for (const item of items) combined.set(item.url, item);
-    quarkResources.value = [...combined.values()];
-  };
+  const candidates = new Map<string, ResourceItem>();
+  const rejected = new Set<string>();
+  let candidateRevision = 0;
+  let validationRunning = false;
+  let activeProgress: SearchProgress | null = null;
+  let forceValidation = false;
+  let invalidCount = 0;
   const showProgress = (progress: SearchProgress) => {
-    searchPending.value = progress.server || progress.public;
+    searchPending.value = progress.server || progress.public || validationRunning;
     searchError.value = !quarkResources.value.length && !searchPending.value ? progress.error : '';
-    searchNotice.value = searchPending.value
-      ? quarkResources.value.length ? '已显示当前候选，正在补充其他来源…' : '正在继续搜索，找到结果后会自动显示…'
-      : progress.supplemented ? '已通过备用来源补充候选；添加时会验证链接' : progress.notice;
+    searchNotice.value = validationRunning ? '正在检查资源内容…'
+      : invalidCount ? `已排除 ${invalidCount} 条不可用资源`
+        : searchPending.value ? quarkResources.value.length ? '已显示当前候选，正在补充其他来源…' : '正在继续搜索，找到结果后会自动显示…'
+          : progress.supplemented ? '已通过备用来源补充候选' : progress.notice;
+  };
+  const validateCandidates = async (sequence: number) => {
+    if (validationRunning || !isCurrent(sequence)) return;
+    validationRunning = true;
+    if (activeProgress) showProgress(activeProgress);
+    const deadline = Date.now() + 30_000;
+    try {
+      while (isCurrent(sequence) && Date.now() < deadline) {
+        const batch = [...candidates.values()];
+        const revision = candidateRevision;
+        const force = forceValidation; forceValidation = false;
+        const result = await engine.validateResources(batch, force);
+        if (!isCurrent(sequence)) return;
+        const statuses = new Map(result.entries.map(entry => [entry.url, entry]));
+        const visible: ResourceItem[] = [];
+        for (const item of candidates.values()) {
+          const entry = statuses.get(item.url);
+          if (!entry || entry.password !== (item.password || '')) continue;
+          if (entry.status === 'unavailable' || entry.status === 'deferred') { rejected.add(item.url); candidates.delete(item.url); continue; }
+          if (entry.status !== 'pending') visible.push({ ...item, linkStatus: entry.status });
+        }
+        invalidCount = rejected.size;
+        quarkResources.value = visible;
+        if (activeProgress) showProgress(activeProgress);
+        if (!result.pending && revision === candidateRevision) break;
+        await new Promise(resolve => setTimeout(resolve, 1_000));
+      }
+    } catch (error) {
+      if (isCurrent(sequence)) {
+        searchSequence++; validationRunning = false; searchPending.value = false; activeProgress = null;
+        quarkResources.value = [];
+        searchError.value = error instanceof Error ? error.message : '链接校验失败';
+      }
+    } finally {
+      if (isCurrent(sequence)) { validationRunning = false; if (activeProgress) showProgress(activeProgress); }
+    }
+  };
+  const append = (items: ResourceItem[]) => {
+    for (const item of items) {
+      if (rejected.has(item.url) || (!candidates.has(item.url) && candidates.size >= 100)) continue;
+      const previous = candidates.get(item.url);
+      candidates.set(item.url, { ...item, password: item.password || previous?.password });
+    }
+    candidateRevision++;
+    void validateCandidates(searchSequence);
+  };
+  const rejectResource = (url: string) => {
+    rejected.add(url); candidates.delete(url); candidateRevision++;
+    quarkResources.value = quarkResources.value.filter(item => item.url !== url);
+    invalidCount = rejected.size;
+    if (activeProgress) showProgress(activeProgress);
+    toast.show('已移除不可用片源', '!', 2800);
   };
   const supplementSearch = async (keyword: string, sequence: number, progress: SearchProgress, force: boolean) => {
     try {
       const result = await engine.supplement(keyword, { force });
       if (!isCurrent(sequence)) return;
       if (result.success) {
-        const before = quarkResources.value.length;
+        const before = candidates.size;
         append(result.quarkItems);
-        progress.supplemented = quarkResources.value.length > before;
+        progress.supplemented = candidates.size > before;
       }
     } finally {
       if (isCurrent(sequence)) {
@@ -81,6 +136,9 @@ export function useQuarkTransfer() {
   const searchResources = async (keyword: string, force = false) => {
     const normalizedKeyword = keyword.trim();
     if (!currentMedia.value || !normalizedKeyword) return;
+    if (!currentMedia.value.quarkFid && currentMedia.value.title !== normalizedKeyword) {
+      currentMedia.value = { ...currentMedia.value, title: normalizedKeyword, poster: '', catalogId: undefined, year: undefined, desc: '' };
+    }
     const sequence = ++searchSequence;
     searchKeyword.value = normalizedKeyword;
     isOpen.value = true;
@@ -89,6 +147,8 @@ export function useQuarkTransfer() {
     searchNotice.value = '';
     searchPending.value = false;
     quarkResources.value = [];
+    candidates.clear(); rejected.clear(); candidateRevision++;
+    validationRunning = false; activeProgress = null; invalidCount = 0; forceValidation = force;
 
     try {
       const res = await engine.search(normalizedKeyword, { force });
@@ -100,6 +160,7 @@ export function useQuarkTransfer() {
         notice: res.message || '',
         error: res.success ? '' : res.message || '资源检索服务暂时不可用，请稍后重试'
       };
+      activeProgress = progress;
       if (res.success) append(res.quarkItems.length ? res.quarkItems : res.items.filter(i => i.driveType === 'quark'));
       showProgress(progress);
       if (progress.server) void followSearch(normalizedKeyword, sequence, progress);
@@ -132,6 +193,16 @@ export function useQuarkTransfer() {
     searchKeyword.value = '';
   };
 
+  const openResourceSearch = (media:MediaItem) => {
+    closeTransferModal();candidates.clear();rejected.clear();activeProgress=null;validationRunning=false;
+    currentMedia.value=media;quarkResources.value=[];isOpen.value=true;
+  };
+
+  const openShare = (media:MediaItem,resource:ResourceItem) => {
+    closeTransferModal();candidates.clear();rejected.clear();activeProgress=null;validationRunning=false;
+    currentMedia.value=media;quarkResources.value=[resource];searchKeyword.value='';isOpen.value=true;
+  };
+
   const retrySearch = () => {
     if (currentMedia.value && !isAnalyzing.value) {
       void searchResources(searchKeyword.value || currentMedia.value.title, true);
@@ -150,8 +221,11 @@ export function useQuarkTransfer() {
     searchPending,
     searchKeyword,
     openTransferModal,
+    openResourceSearch,
+    openShare,
     refreshResources,
     closeTransferModal,
-    retrySearch
+    retrySearch,
+    rejectResource
   };
 }

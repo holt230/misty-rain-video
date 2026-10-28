@@ -11,3 +11,11 @@ test('记录同步删除按目录或媒体ID匹配，不按片名扩大删除范
   assert.equal(sameMediaIdentity({ id: 'same', quarkFid: 'one' }, { id: 'same', quarkFid: 'two' }), false);
   assert.equal(sameMediaIdentity({ id: 'one' }, { id: 'two' }), false);
 });
+
+test('发现播放与保存片库关联，但两个明确的网盘目录仍按各自身份处理', () => {
+  const direct = { id: 'discovery:douban-1', catalogId: 'douban-1' };
+  const saved = { id: 'quark:one', quarkFid: 'one', catalogId: 'douban-1' };
+  assert.equal(sameMediaIdentity(direct, saved), true);
+  assert.equal(sameMediaIdentity(saved, { ...saved, id: 'quark:two', quarkFid: 'two' }), false);
+  assert.equal(sameMediaIdentity(direct, { ...saved, catalogId: 'douban-2' }), false);
+});

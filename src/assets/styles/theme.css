@@ -1,33 +1,33 @@
-:root { --nav-background: rgb(11 11 13 / .92); --divider: rgb(255 255 255 / .09); --switch-track: #3b4450; --switch-knob: #d8dfe9; }
+:root { --nav-background: rgb(8 9 11 / .97); --divider: rgb(255 255 255 / .085); --switch-track: #3a3c42; --switch-knob: #e0e0e4; }
 :root[data-theme='light'] {
   color-scheme: light;
-  --liquid-canvas: #f4f6fa; --liquid-canvas-subtle: #edf0f6; --app-atmosphere: #f4f6fa;
-  --surface-1: #fff; --surface-2: #f0f3f8; --surface-3: #e1e6ef; --surface-elevated: #fff;
-  --text-primary: #1b2432; --text-secondary: #475467; --text-tertiary: #667085; --text-quaternary: #768195; --text-muted: #667085;
-  --accent-rgb: 51 85 138; --liquid-accent: #33558a; --liquid-accent-strong: #25416c; --liquid-accent-hover: #25416c;
-  --liquid-accent-glow: rgb(51 85 138 / .08); --liquid-accent-subtle: rgb(51 85 138 / .09); --liquid-accent-muted: rgb(51 85 138 / .14); --accent-ink: #fff;
+  --liquid-canvas: #fcfcfc; --liquid-canvas-subtle: #f1f2f3; --app-atmosphere: #fcfcfc;
+  --surface-1: #fff; --surface-2: #f1f2f3; --surface-3: #e5e6e9; --surface-elevated: #fff;
+  --text-primary: #191a1e; --text-secondary: #52545b; --text-tertiary: #6b6d74; --text-quaternary: #777982; --text-muted: #6b6d74;
+  --accent-rgb: 36 38 43; --liquid-accent: #191a1f; --liquid-accent-strong: #111215; --liquid-accent-hover: #3d4047;
+  --liquid-accent-glow: rgb(36 38 43 / .06); --liquid-accent-subtle: rgb(36 38 43 / .07); --liquid-accent-muted: rgb(36 38 43 / .13); --accent-ink: #fff;
   --success: #257053; --success-subtle: rgb(37 112 83 / .08); --danger: #a2364f; --danger-surface: #fff1f3;
-  --glass-bg: rgb(34 55 85 / .035); --glass-bg-hover: rgb(34 55 85 / .07); --glass-bg-active: rgb(34 55 85 / .09);
-  --glass-material: linear-gradient(145deg, rgb(255 255 255 / .95), rgb(255 255 255 / .85));
-  --glass-floating-material: linear-gradient(145deg, rgb(255 255 255 / .97), rgb(247 249 253 / .96));
-  --glass-sheet-material: linear-gradient(150deg, rgb(255 255 255 / .98), rgb(246 248 252 / .98));
-  --glass-lens: linear-gradient(150deg, rgb(255 255 255 / .9), rgb(228 234 244 / .6));
-  --glass-border: 1px solid rgb(34 55 85 / .12); --glass-border-strong: 1px solid rgb(34 55 85 / .24);
-  --glass-highlight-inner: inset 0 1px 0 rgb(255 255 255 / .9);
-  --glass-shadow-sm: 0 3px 12px rgb(34 55 85 / .06); --glass-shadow-md: 0 14px 38px rgb(34 55 85 / .10); --glass-shadow-lg: 0 28px 70px rgb(34 55 85 / .16);
-  --liquid-glass-border: rgb(34 55 85 / .12); --liquid-glass-border-highlight: rgb(34 55 85 / .24);
-  --switch-track: #cbd3e0; --switch-knob: #fff;
-  --nav-background: rgb(244 246 250 / .95); --divider: rgb(34 55 85 / .12);
+  --glass-bg: rgb(24 26 31 / .035); --glass-bg-hover: rgb(24 26 31 / .065); --glass-bg-active: rgb(24 26 31 / .09);
+  --glass-material: #fff;
+  --glass-floating-material: rgb(255 255 255 / .98);
+  --glass-sheet-material: #fff;
+  --glass-lens: #f1f2f3;
+  --glass-border: 1px solid rgb(24 26 31 / .1); --glass-border-strong: 1px solid rgb(24 26 31 / .22);
+  --glass-highlight-inner: 0 0 0 transparent;
+  --glass-shadow-sm: 0 3px 12px rgb(24 26 31 / .05); --glass-shadow-md: 0 8px 26px rgb(24 26 31 / .08); --glass-shadow-lg: 0 18px 48px rgb(24 26 31 / .14);
+  --poster-shadow: 0 3px 10px rgb(24 26 31 / .07); --rating-color: #52545b; --skeleton-highlight: rgb(24 26 31 / .045);
+  --liquid-glass-border: rgb(24 26 31 / .1); --liquid-glass-border-highlight: rgb(24 26 31 / .22);
+  --switch-track: #d1d1d7; --switch-knob: #fff;
+  --nav-background: rgb(252 252 252 / .98); --divider: rgb(24 26 31 / .1);
+  --rail-background: #fcfcfc; --dock-background: rgb(255 255 255 / .94); --dock-shadow: none; --dialog-backdrop: rgb(10 11 14 / .42);
 }
 /* Video overlays keep their own dark palette while the surrounding controls follow the theme. */
-:root[data-theme='light'] .stage-state,
-:root[data-theme='light'] .video-stage,
-:root[data-theme='light'] .mobile-playback-controls {
+:root[data-theme='light'] .stage-state {
   --text-primary: #f5f5f7; --text-secondary: #c5c5ca; --text-tertiary: #a0a0a8;
 }
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-theme='light'] { --glass-material: #fff; --glass-floating-material: #fff; --glass-sheet-material: #fff; --glass-lens: #edf0f6; }
+  :root[data-theme='light'] { --glass-material: #fff; --glass-floating-material: #fff; --glass-sheet-material: #fff; --glass-lens: #f1f2f3; }
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  :root[data-theme='light'] { --glass-material: #fff; --glass-floating-material: #fff; --glass-sheet-material: #fff; --glass-lens: #edf0f6; }
+  :root[data-theme='light'] { --glass-material: #fff; --glass-floating-material: #fff; --glass-sheet-material: #fff; --glass-lens: #f1f2f3; }
 }

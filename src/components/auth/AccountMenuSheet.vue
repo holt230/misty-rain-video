@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { siteSettings } from '../../services/siteSettings';
 import { onMounted, onUnmounted } from 'vue';
 import { ChevronRight, Download, LogOut, ShieldCheck, X } from '@lucide/vue';
 import type { AppUser } from '../../services/authService';
@@ -45,7 +46,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 
           <a class="action-row" :href="installUrl" @click="emit('close')">
             <span class="action-icon"><Download aria-hidden="true" /></span>
-            <span><strong>安装 iPhone 桌面版</strong><small>从桌面全屏打开烟雨影视</small></span>
+            <span><strong>安装 iPhone 桌面版</strong><small>从桌面全屏打开{{ siteSettings.name }}</small></span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </a>
 

@@ -58,7 +58,7 @@ export class LibraryMaintenance {
       checkedAt: state.checkedAt,
       message: state.message,
       items: Object.entries(state.items || {}).filter(([fid]) => fids.has(fid)).map(([quarkFid, item]) => ({
-        quarkFid, title: item.title, checkedAt: item.checkedAt, nextCheckAt: item.nextCheckAt,
+        quarkFid, title: data.libraryViewRepository?.titleFor(quarkFid) || item.title, checkedAt: item.checkedAt, nextCheckAt: item.nextCheckAt,
         status: item.status, message: item.message, addedCount: item.addedCount || 0,
         code: item.code || '', unavailableCount: item.unavailableCount || 0,
         lastActionAt: item.lastActionAt || '', lastAction: item.lastAction || ''
@@ -83,7 +83,8 @@ export class LibraryMaintenance {
           // duplicate directory and is unsuitable for unattended writes.
           const cards = library.map(item => {
             const saved = metadata.find(card => card.quarkFid === item.quarkFid);
-            return saved ? { ...saved, ...item, quarkShareUrl: saved.quarkShareUrl || '', quarkPasscode: saved.quarkPasscode || '' } : null;
+            return saved ? { ...saved, ...item, title: data.libraryViewRepository?.titleFor(item.quarkFid) || item.title,
+              quarkShareUrl: saved.quarkShareUrl || '', quarkPasscode: saved.quarkPasscode || '' } : null;
           }).filter(Boolean);
           const fids = new Set(cards.map(card => card.quarkFid));
           for (const fid of Object.keys(state.items)) if (!fids.has(fid)) delete state.items[fid];

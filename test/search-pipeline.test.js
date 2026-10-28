@@ -53,12 +53,12 @@ test('生产四条原始结果经服务端、客户端、实际 Vue 列表后保
   app.mount('#app');
   try {
     await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
+    assert.equal(document.querySelectorAll('.resource-item').length, 1);
     props.quarkResources = client.items;
     await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 3);
-    assert.match(document.querySelector('.resource-rows').textContent, /更新第89集/);
-    assert.equal(document.querySelector('.result-summary strong').textContent, '3');
+    assert.equal(document.querySelectorAll('.resource-item').length, 3);
+    assert.match(document.querySelector('.resource-list').textContent, /更新第89集/);
+    assert.equal(document.querySelector('.resource-toolbar > span').textContent, '3 个资源');
   } finally { app.unmount(); }
 });
 
@@ -82,11 +82,12 @@ test('动漫结果在推荐、最新、4K 和完整列表均不混入同名短�
   app.mount('#app');
   try {
     for (const [label, count] of [['推荐', 2], ['最新', 2], ['4K', 2], ['完整', 1]]) {
-      [...document.querySelectorAll('[role="radio"]')].find(button => button.textContent.trim() === label).click();
+      const select = document.querySelector('[aria-label="资源筛选"]');
+      select.value = [...select.options].find(option => option.textContent === label).value; select.dispatchEvent(new window.Event('change'));
       await nextTick();
-      assert.equal(document.querySelectorAll('.liquid-resource-row').length, count);
-      assert.doesNotMatch(document.querySelector('.resource-rows').textContent, /短剧|沙雕|解说|混剪|剑仙归来/);
-      assert.equal(document.querySelector('.result-summary strong').textContent, '2');
+      assert.equal(document.querySelectorAll('.resource-item').length, count);
+      assert.doesNotMatch(document.querySelector('.resource-list').textContent, /短剧|沙雕|解说|混剪|剑仙归来/);
+      assert.equal(document.querySelector('.resource-toolbar > span').textContent, '2 个资源');
     }
   } finally { app.unmount(); }
 });

@@ -14,9 +14,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/misty-rain-video
-
 jobs:
   publish:
     name: 构建 linux/amd64 主镜像
@@ -25,6 +22,9 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+
+      - name: 设置镜像名称
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: 配置 Docker Buildx
         uses: docker/setup-buildx-action@v4

@@ -11,7 +11,16 @@ const transferCompiled = await build({ entryPoints: ['src/composables/useQuarkTr
 const { useQuarkTransfer } = await import(`data:text/javascript;base64,${Buffer.from(transferCompiled.outputFiles[0].text).toString('base64')}`);
 const data = (extra = {}, note = '测试剧 4K') => ({ total: 1, merged_by_type: { quark: [{ url: 'https://pan.quark.cn/s/abc', note }] }, ...extra });
 
-test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑仙逆世并保留年番与剧场版', async t => {
+const mockFetch = (t, handler) => t.mock.method(globalThis, 'fetch', async (url, init) => {
+  if (String(url).includes('/resource-search/validate')) {
+    const items = JSON.parse(init.body).items;
+    return Response.json({ code: 0, data: { entries: items.map(row => ({ ...row, password: row.password || '', status: 'available' })), pending: false } });
+  }
+  return handler(url, init);
+});
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('首批、缓存补齐和公共补充允许片名前缀模糊匹配，但排除嵌在无关短片名中的字符', async t => {
   const titles = [
     '剑仙归来：谁让这剑仙逆世重修的？ 第七季（89集）',
     '剑仙归来：谁让这剑仙逆世重修的？ 第六季（200集）',
@@ -26,11 +35,11 @@ test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑�
     '仙 逆 第三季 全162集'
   ];
   const rows = titles.map((note, index) => ({ note, url: `https://pan.quark.cn/s/item${index}` }));
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { total: rows.length, merged_by_type: { quark: rows } } }));
+  mockFetch(t, async () => Response.json({ code: 0, data: { total: rows.length, merged_by_type: { quark: rows } } }));
   const service = new SilentSearchEngine();
   for (const result of [await service.search('《仙逆》'), await service.readCached('仙逆'), await service.supplement('仙逆')]) {
-    assert.equal(result.total, 6);
-    assert.deepEqual(result.items.map(item => item.title), titles.slice(5));
+    assert.equal(result.total, 7);
+    assert.deepEqual(result.items.map(item => item.title), [titles[3], ...titles.slice(5)]);
     assert.deepEqual(result.quarkItems, result.items);
   }
 });
@@ -38,7 +47,7 @@ test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑�
 test('首次查询只读取本站，公共源补充由页面单独发起', async t => {
   const calls = [];
   let mode = 'failed';
-  t.mock.method(globalThis, 'fetch', async url => {
+  mockFetch(t, async url => {
     calls.push(String(url));
     return mode === 'failed' ? Response.json({ code: 'RESOURCE_SEARCH_TIMEOUT', message: '检索来源响应超时，请稍后重试' }, { status: 503 })
       : Response.json({ code: 0, data: { total: 0, merged_by_type: { quark: [] } } });
@@ -56,7 +65,7 @@ test('首次查询只读取本站，公共源补充由页面单独发起', async
 
 test('节流等待期间重复点击和刷新复用请求，所有调用收到一致错误结果', async t => {
   let calls = 0;
-  t.mock.method(globalThis, 'fetch', async () => { calls += 1; return Response.json({ code: 'UNAVAILABLE', message: '检索来源暂时不可用' }, { status: 503 }); });
+  mockFetch(t, async () => { calls += 1; return Response.json({ code: 'UNAVAILABLE', message: '检索来源暂时不可用' }, { status: 503 }); });
   const service = new SilentSearchEngine();
   await service.search('先前剧');
   const [first, second] = await Promise.all([service.search('测试剧'), service.search('测试剧', { force: true })]);
@@ -68,7 +77,7 @@ test('节流等待期间重复点击和刷新复用请求，所有调用收到�
 test('缓存/补充状态传给页面，补充查询只读取服务端缓存并解除旧的客户端结果缓存', async t => {
   const calls = [];
   let complete = false;
-  t.mock.method(globalThis, 'fetch', async url => {
+  mockFetch(t, async url => {
     calls.push(String(url));
     return Response.json({ code: 0, data: data(complete ? { partial: false, refreshing: false }
       : { stale: true, partial: true, refreshing: true, message: '正在补充' }) });
@@ -88,7 +97,7 @@ test('缓存/补充状态传给页面，补充查询只读取服务端缓存并�
 
 test('登录失效直接返回，不绕过本站认证发起公共检索', async t => {
   let calls = 0;
-  t.mock.method(globalThis, 'fetch', async () => { calls += 1; return Response.json({ code: 'APP_AUTH_REQUIRED', message: '请先登录' }, { status: 401 }); });
+  mockFetch(t, async () => { calls += 1; return Response.json({ code: 'APP_AUTH_REQUIRED', message: '请先登录' }, { status: 401 }); });
   const result = await new SilentSearchEngine().search('测试剧');
   assert.equal(result.success, false);
   assert.equal(result.message, '请先登录');
@@ -99,7 +108,7 @@ test('登录失效直接返回，不绕过本站认证发起公共检索', async
 test('首批结果立即可用，慢通道候选自动补齐；关闭面板后不再轮询', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 10_000 });
   const calls = [];
-  t.mock.method(globalThis, 'fetch', async url => {
+  mockFetch(t, async url => {
     calls.push(String(url));
     const cached = String(url).includes('cached=1');
     const keyword = new URL(String(url), 'https://local.invalid').searchParams.get('kw');
@@ -109,6 +118,7 @@ test('首批结果立即可用，慢通道候选自动补齐；关闭面板后�
   });
   const view = useQuarkTransfer();
   await view.openTransferModal({ title: '仙逆渐进测试', category: 'anime' });
+  await flush();
   assert.equal(view.isAnalyzing.value, false);
   assert.equal(view.quarkResources.value.length, 1);
   assert.equal(calls.filter(url => url.startsWith('/')).length, 1);
@@ -127,7 +137,7 @@ test('首批结果立即可用，慢通道候选自动补齐；关闭面板后�
 test('公共补充合并重复请求，不发送站内 Cookie、Referer 或认证头，失败后退避', async t => {
   let count = 0;
   let fail = false;
-  t.mock.method(globalThis, 'fetch', async (url, options) => {
+  mockFetch(t, async (url, options) => {
     count += 1;
     assert.equal(new URL(url).host, 'so.252035.xyz');
     assert.equal(options.credentials, 'omit');
@@ -152,13 +162,14 @@ test('生产只返回部分候选时立即显示，同时合并浏览器补充�
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 2_000_000 });
   let resolvePublic;
   const pending = new Promise(resolve => { resolvePublic = resolve; });
-  t.mock.method(globalThis, 'fetch', async url => {
+  mockFetch(t, async url => {
     if (String(url).startsWith('https:')) return pending;
     const cached = String(url).includes('cached=1');
     return Response.json({ code: 0, data: data({ partial: true, refreshing: !cached }, '恢复浏览器补充测试 4K') });
   });
   const view = useQuarkTransfer();
   await view.openTransferModal({ title: '恢复浏览器补充测试', category: 'anime' });
+  await flush();
   assert.equal(view.isAnalyzing.value, false);
   assert.equal(view.quarkResources.value.length, 1);
   resolvePublic(Response.json({ code: 0, data: { merged_by_type: { quark: [
@@ -181,7 +192,7 @@ test('恢复旧版本服务器失败时的浏览器兜底，但登录失效不�
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 3_000_000 });
   let authFailed = false;
   const calls = [];
-  t.mock.method(globalThis, 'fetch', async url => {
+  mockFetch(t, async url => {
     calls.push(String(url));
     if (String(url).startsWith('https:')) return Response.json({ code: 0, data: data({}, '服务器失败兜底测试 4K') });
     return Response.json({ code: authFailed ? 'APP_AUTH_REQUIRED' : 'RESOURCE_SEARCH_UNAVAILABLE', message: authFailed ? '请先登录' : '服务端来源不可用' },
@@ -204,7 +215,7 @@ test('恢复旧版本服务器失败时的浏览器兜底，但登录失效不�
 test('页面等待真正后台完成，超过旧的 8 秒轮询窗口仍接收补齐的正篇候选', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 4_000_000 });
   let polls = 0;
-  t.mock.method(globalThis, 'fetch', async url => {
+  mockFetch(t, async url => {
     const cached = String(url).includes('cached=1');
     if (cached) polls += 1;
     const complete = polls >= 12;
@@ -215,9 +226,64 @@ test('页面等待真正后台完成，超过旧的 8 秒轮询窗口仍接收�
   const view = useQuarkTransfer();
   await view.openTransferModal({ title: '仙逆长窗口测试', category: 'anime' });
   for (let i = 0; i < 12; i += 1) { t.mock.timers.tick(1_000); await new Promise(resolve => setImmediate(resolve)); }
+  await flush();
   assert.equal(polls, 12);
   assert.equal(view.quarkResources.value.length, 2);
   assert.equal(view.searchPending.value, false);
   t.mock.timers.tick(10_000); await new Promise(resolve => setImmediate(resolve));
   assert.equal(polls, 12);
+});
+
+test('服务器及浏览器补充都先校验，失效候选被移除且晚到的缓存不能恢复', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 5_000_000 });
+  const makeRows = (...ids) => ({ total: ids.length, partial: true, refreshing: false, merged_by_type: { quark: ids.map(id => ({ url: `https://pan.quark.cn/s/${id}`, note: '校验测试 4K' })) } });
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).includes('/validate')) {
+      const items = JSON.parse(init.body).items;
+      return Response.json({ code: 0, data: { entries: items.map(item => ({ ...item, status: item.url.endsWith('cancelled') ? 'unavailable' : 'available' })), pending: false } });
+    }
+    return Response.json({ code: 0, data: String(url).startsWith('https:') ? makeRows('cancelled', 'publicvalid') : makeRows('cancelled', 'servervalid') });
+  });
+  const view = useQuarkTransfer();
+  try {
+    await view.openTransferModal({ title: '校验测试', category: 'anime' });
+    await flush(); t.mock.timers.tick(1_000); await flush();
+    assert.deepEqual(view.quarkResources.value.map(item => item.url).sort(), ['https://pan.quark.cn/s/publicvalid', 'https://pan.quark.cn/s/servervalid']);
+    assert.match(view.searchNotice.value, /排除 1 条不可用/);
+    view.rejectResource('https://pan.quark.cn/s/servervalid');
+    t.mock.timers.tick(1_000); await flush();
+    assert.deepEqual(view.quarkResources.value.map(item => item.url), ['https://pan.quark.cn/s/publicvalid']);
+  } finally { view.closeTransferModal(); }
+});
+
+test('新检索忽略前一次晚到的链接校验，网络不确定性保留候选并标记待确认', async t => {
+  let release;
+  const waiting = new Promise(resolve => { release = resolve; });
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).includes('/validate')) {
+      const items = JSON.parse(init.body).items;
+      if (items[0]?.url.endsWith('old')) return waiting;
+      return Response.json({ code: 0, data: { entries: items.map(item => ({ ...item, status: 'unknown' })), pending: false } });
+    }
+    const old = String(url).includes(encodeURIComponent('旧校验测试'));
+    return Response.json({ code: 0, data: { total: 1, merged_by_type: { quark: [{ url: `https://pan.quark.cn/s/${old ? 'old' : 'new'}`, note: old ? '旧校验测试 4K' : '新校验测试 4K' }] } } });
+  });
+  const view = useQuarkTransfer();
+  try {
+    await view.openTransferModal({ title: '旧校验测试', category: 'anime' });
+    await view.openTransferModal({ title: '新校验测试', category: 'anime' }); await flush();
+    release(Response.json({ code: 0, data: { entries: [{ url: 'https://pan.quark.cn/s/old', password: '', status: 'available' }], pending: false } }));
+    await flush();
+    assert.equal(view.quarkResources.value.length, 1);
+    assert.equal(view.quarkResources.value[0].url, 'https://pan.quark.cn/s/new');
+    assert.equal(view.quarkResources.value[0].linkStatus, 'unknown');
+  } finally { view.closeTransferModal(); }
+});
+
+test('content-invalid and temporarily unreadable sources are removed from current search without discarding valid candidates',async t=>{
+ t.mock.method(globalThis,'fetch',async(url,init)=>{
+  if(String(url).includes('/validate'))return Response.json({code:0,data:{pending:false,entries:JSON.parse(init.body).items.map(item=>({...item,status:item.url.endsWith('good')?'available':item.url.endsWith('empty')?'unavailable':'deferred'}))}});
+  return Response.json({code:0,data:{total:3,refreshing:false,allowPublicFallback:false,merged_by_type:{quark:['empty','unreadable','good'].map(id=>({url:'https://pan.quark.cn/s/'+id,note:'内容测试 '+id}))}}});
+ });
+ const view=useQuarkTransfer();try{await view.openTransferModal({title:'内容测试',category:'tv'});await flush();assert.deepEqual(view.quarkResources.value.map(item=>item.url),['https://pan.quark.cn/s/good']);assert.match(view.searchNotice.value,/排除 2 条不可用/);}finally{view.closeTransferModal();}
 });

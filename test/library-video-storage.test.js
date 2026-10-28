@@ -198,8 +198,8 @@ test('HTTP 错误中的取消分享保留失效分类；提取码、限流、认
     [410, { code: 999, message: '分享已过期' }, 'QUARK_SHARE_UNAVAILABLE'],
     [422, { code: 999, message_desc: '该分享已取消' }, 'QUARK_SHARE_UNAVAILABLE'],
     [200, { code: 999, message_desc: '好友已取消了分享' }, 'QUARK_SHARE_UNAVAILABLE'],
-    [400, { code: 999, message: '提取码不正确' }, 'QUARK_HTTP_ERROR'],
-    [200, { code: 999, message: '需要提取码' }, 'QUARK_SHARE_ACCESS_FAILED'],
+    [400, { code: 999, message: '提取码不正确' }, 'QUARK_SHARE_PASSCODE_REQUIRED'],
+    [200, { code: 999, message: '需要提取码' }, 'QUARK_SHARE_PASSCODE_REQUIRED'],
     [429, { code: 999, message: '请求频繁，请稍后重试' }, 'QUARK_HTTP_ERROR'],
     [500, { code: 999, message: '好友已取消了分享' }, 'QUARK_HTTP_ERROR']
   ];

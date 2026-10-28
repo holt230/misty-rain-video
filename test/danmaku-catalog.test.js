@@ -50,7 +50,8 @@ test('已有主目录结果不触发多余的腾讯请求', async () => {
     return response({ code: 0, data: { longData: { rows: [{ cat_id: '2', en_id: 'ABCdef', titleTxt: '原有电视剧', year: '2026', playlinks: { qq: 'episode' } }] } } });
   });
   assert.equal((await catalog.search('原有电视剧'))[0].id, '2:ABCdef');
-  assert.equal(calls.length, 1);
+  assert.equal(calls.filter(url => url.includes('360kan.com')).length, 1);
+  assert.ok(!calls.some(url => url.includes('pbaccess.video.qq.com')), 'Bili discovery does not require redundant Tencent search');
 });
 
 test('优酷和爱奇艺正片沿用真实平台，不能被腾讯备用目录替换', async t => {

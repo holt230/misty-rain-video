@@ -39,10 +39,22 @@
   --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
   --transition-base: all 0.3s var(--spring-ease);
 
-  /* 间距与圆角 */
-  --radius-sm: 10px;
-  --radius-md: 16px;
-  --radius-lg: 24px;
-  --radius-xl: 32px;
+  /* iOS 规范化间距系统 (4pt/8pt 栅格) */
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 20px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+
+  /* iOS 规范化圆角系统 (连续曲率 Squircle 视觉映射) */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-sheet: 28px;
   --radius-pill: 9999px;
 }

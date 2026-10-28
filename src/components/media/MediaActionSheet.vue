@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { getLibraryUpdateFeedback } from '../../services/libraryUpdateFeedback';
 import { useDialog } from '../../composables/useDialog';
-import { ChevronRight, Download, ListFilter, RefreshCw, Trash2, X } from '@lucide/vue';
+import { ChevronRight, Download, ListFilter, Pencil, RefreshCw, Trash2, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem } from '../../types/media';
 
@@ -14,6 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'edit-category'): void;
+  (e: 'edit-title'): void;
   (e: 're-search'): void;
   (e: 'update-library'): void;
   (e: 'delete'): void;
@@ -36,13 +37,12 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
       aria-labelledby="media-action-title"
       @click.self="emit('cancel')"
     >
-      <section class="action-sheet glass-rim">
+      <section class="action-sheet">
         <div class="drag-handle" aria-hidden="true"></div>
 
         <header class="media-summary">
 <MediaPoster :src="media.poster" :alt="media.title" class="summary-poster" />
           <div class="summary-copy">
-            <span>影片操作</span>
             <h2 id="media-action-title">{{ media.title }}</h2>
           </div>
           <button type="button" class="close-button" aria-label="关闭影片操作" @click="emit('cancel')">
@@ -52,17 +52,20 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 
         <div v-if="updateFeedback" class="update-feedback" role="status">
           <strong>{{ updateFeedback.label }}</strong>
-          <p>{{ updateFeedback.detail }}</p>
         </div>
 
         <div class="action-list">
+          <button v-if="media.quarkFid" type="button" class="action-item" @click="emit('edit-title')">
+            <span class="action-icon" aria-hidden="true"><Pencil /></span>
+            <span class="action-copy"><strong>修改名称</strong></span>
+            <ChevronRight class="chevron" aria-hidden="true" />
+          </button>
           <button v-if="(media.newEpisodeCount || 0) > 0" type="button" class="action-item update" @click="emit('update-library')">
             <span class="action-icon" aria-hidden="true">
               <Download />
             </span>
             <span class="action-copy">
               <strong>更新 {{ media.newEpisodeCount }} 集</strong>
-              <small>{{ media.latestEpisodeNumber ? `片源已更新至第 ${media.latestEpisodeNumber} 集` : '片源发现新的正片内容' }}</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -73,7 +76,6 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
             </span>
             <span class="action-copy">
               <strong>修改分类</strong>
-              <small>调整影片所在的分类</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -84,7 +86,6 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
             </span>
             <span class="action-copy">
               <strong>更换资源</strong>
-              <small>重新检索并选择片源</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -94,8 +95,7 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
               <Trash2 />
             </span>
             <span class="action-copy">
-              <strong>移出片库</strong>
-              <small>删除前会再次向你确认</small>
+              <strong>移除收藏</strong>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -109,29 +109,41 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 
 <style scoped>
 .action-backdrop { position: fixed; inset: 0; z-index: 1700; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.action-sheet { width: min(440px, 100%); padding: 24px; border-radius: 30px; }
+.action-sheet { width: min(440px, 100%); padding: 24px; border-radius:20px; }
 .drag-handle { display: none; }
-.media-summary { display: flex; align-items: center; gap: 13px; margin-bottom: 22px; }
-.summary-poster { width: 48px; height: 66px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 12px; box-shadow: var(--glass-shadow-sm); }
+.media-summary { display: flex; align-items: center; gap: 13px; margin-bottom: 20px; }
+.summary-poster { width:48px; height:72px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 12px; box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, .15), var(--glass-shadow-sm); }
 .summary-copy { min-width: 0; flex: 1; }
-.summary-copy span { color: var(--text-tertiary); font-size: .74rem; }
-.summary-copy h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.12rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }
+.summary-copy h2 { margin-top: 3px; color: var(--text-primary); font-size:1.05rem; font-weight:650; overflow-wrap: anywhere; line-height: 1.4; letter-spacing: -.02em; }
 .close-button { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .close-button svg { width: 19px; height: 19px; }
-.update-feedback { margin: 0 0 18px; padding: 14px; border-radius: 12px; background: var(--glass-bg); }
+.update-feedback { margin: 0 0 16px; padding: 12px 14px; border-radius:12px; background: var(--glass-bg); }
 .update-feedback strong { color: var(--text-primary); font-size: .84rem; font-weight: 600; }
-.update-feedback p { margin-top: 5px; color: var(--text-secondary); font-size: .78rem; line-height: 1.65; overflow-wrap: anywhere; }
-.action-list { border: 0; border-radius: 14px; overflow: hidden; }
-.action-item { display: flex; width: 100%; min-height: 76px; align-items: center; gap: 13px; padding: 12px 15px; border: 0; border-bottom: 1px solid rgb(90 116 159 / .10); color: var(--text-primary); background: transparent; text-align: left; }
+.action-list { border: 0; border-radius:12px; overflow: hidden; }
+.action-item { display: flex; width: 100%; min-height:52px; align-items: center; gap: 13px; padding:8px; border: 0; border-bottom:1px solid var(--divider); color: var(--text-primary); background: transparent; text-align: left; transition: background .15s; }
 .action-item:last-child { border-bottom: 0; }
-.action-icon { display: grid; width: 30px; height: 40px; place-items: center; flex-shrink: 0; color: var(--text-secondary); }
-.action-icon svg { width: 21px; height: 21px; }
-.action-copy { display: grid; gap: 3px; min-width: 0; flex: 1; }
-.action-copy strong { font-size: .92rem; font-weight: 650; }
-.action-copy small { color: var(--text-tertiary); font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
+.action-item:active { background: var(--glass-bg-active); }
+.action-icon { display: grid; width: 32px; height: 32px; place-items: center; flex-shrink: 0; color: var(--text-secondary); }
+.action-icon svg { width: 20px; height: 20px; }
+.action-copy { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.action-copy strong { font-size:.88rem; font-weight:550; }
 .chevron { width: 17px; height: 17px; flex-shrink: 0; color: var(--text-tertiary); }
-.danger .action-icon { color: var(--danger); background: var(--danger-surface); }
+.danger .action-icon { color: var(--danger); }
 .danger strong { color: var(--danger); }
-.cancel-button { width: 100%; min-height: 50px; margin-top: 16px; border: 1px solid; border-radius: 26px; color: var(--text-secondary); font-size: .92rem; font-weight: 600; }
-@media (max-width: 640px) { .action-backdrop { align-items: flex-end; padding: 0; } .action-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 22px; border-radius: 10px; } .action-item { min-height: 74px; } }
+.cancel-button { background:var(--surface-2); width: 100%; min-height: 52px; margin-top: 14px; border: 1px solid var(--divider); border-radius:12px; color: var(--text-primary); font-size: .94rem; font-weight: 600; transition: background .15s, transform .15s; }
+.cancel-button:active { background: var(--glass-bg-hover); transform: scale(.99); }
+@media (max-width: 640px) {
+  .action-backdrop { align-items:flex-end; padding:max(8px,var(--safe-area-top)) max(8px,var(--safe-area-right)) max(8px,var(--safe-area-bottom)) max(8px,var(--safe-area-left)); }
+  .action-sheet { padding-top: 12px; border-radius:20px; }
+  .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 18px; border-radius:999px; background:var(--divider); }
+  .action-item { min-height:52px; }
+}
+.action-backdrop { background:var(--dialog-backdrop,rgb(0 0 0 / .6)); }
+.action-sheet { max-height:calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 32px); overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider); background:var(--surface-elevated,var(--surface-1)); box-shadow:0 24px 80px #0005; animation:sheet-enter .18s ease; }
+button { cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
+button:focus-visible { outline:2px solid var(--text-primary); outline-offset:-2px; }
+.close-button { border:0; color:var(--text-secondary); background:transparent; }
+@keyframes sheet-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+@media(max-width:640px) { .action-sheet { padding:16px 20px 20px; } }
+@media(prefers-reduced-motion:reduce) { .action-sheet { animation:none; } button { transition:none; } }
 </style>

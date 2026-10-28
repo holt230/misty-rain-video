@@ -4,6 +4,7 @@ import type { CategoryType } from '../../types/media';
 defineProps<{
   modelValue: CategoryType;
   counts: Record<CategoryType, number>;
+  searching?:boolean;
 }>();
 
 const emit = defineEmits<{
@@ -25,8 +26,8 @@ const categories: { id: CategoryType; label: string }[] = [
       :key="cat.id"
       type="button"
       class="segment-item"
-      :class="{ active: modelValue === cat.id }"
-      :aria-current="modelValue === cat.id ? 'page' : undefined"
+      :class="{ active: !searching && modelValue === cat.id }"
+      :aria-current="!searching && modelValue === cat.id ? 'page' : undefined"
       @click="emit('update:modelValue', cat.id)"
     >
       <span class="segment-label">{{ cat.label }}</span>
@@ -36,13 +37,5 @@ const categories: { id: CategoryType; label: string }[] = [
 </template>
 
 <style scoped>
-.category-segments { position: relative; display: inline-grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0; border: 0; background: transparent; }
-.segment-item { position: relative; display: flex; min-width: 0; min-height: 48px; align-items: center; justify-content: center; gap: 6px; padding: 0 18px; border: 0; border-radius: 0; color: var(--text-tertiary); background: transparent; font-size: .88rem; font-weight: 550; white-space: nowrap; transition: color .2s, background .2s; }
-.segment-item:hover { color: var(--text-primary); }
-.segment-item.active { color: var(--text-primary); background: transparent; font-weight: 650; }
-.segment-item.active::after { content: ''; position: absolute; bottom: -1px; left: 18px; right: 18px; height: 2px; border-radius: 2px; background: var(--text-primary); }
-.segment-count { color: inherit; font-size: .65rem; font-variant-numeric: tabular-nums; opacity: .8; }
-.segment-item.active .segment-count { color: var(--liquid-accent); }
-@media (max-width: 640px) { .category-segments { width: 100%; } .segment-item { padding: 0 4px; gap: 4px; font-size: .82rem; } }
-@media (max-width: 360px) { .segment-count { display: none; } }
+.category-segments{display:flex;gap:6px;min-width:0;overflow-x:auto;scrollbar-width:none}.segment-item{display:flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-height:44px;padding:0 18px;border:0;border-radius:6px;background:none;color:var(--text-secondary);font-size:.85rem;font-weight:550;white-space:nowrap}.segment-item.active{color:var(--text-primary);background:var(--glass-bg-active);font-weight:650}.segment-count{color:var(--text-tertiary);font-size:.68rem;font-variant-numeric:tabular-nums}@media(max-width:640px){.category-segments{gap:0}.segment-item{padding:0 13px;font-size:.78rem}.segment-count{font-size:.6rem}}@media(max-width:360px){.segment-item{padding:0 10px}}
 </style>

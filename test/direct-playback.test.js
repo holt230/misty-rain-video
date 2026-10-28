@@ -93,15 +93,10 @@ test('较旧的直连地址重新解析后再签发', async () => {
   assert.equal(await gateway.getDirectStreamUrl('session', source.id), 'https://media.example.test/fresh.mp4');
 });
 
-test('未声明原生 HLS 的设备保留中转，并单独提供原文件选项', async () => {
-  const gateway = makeGateway({ format: 'm3u8' });
-  const result = await gateway.prepareEpisode('session', 'episode');
-  assert.equal(result.sources[0].isHls, true);
-  assert.equal(result.sources[0].delivery, 'proxy');
-  const original = result.sources.find(source => source.resolution === 'original');
-  assert.equal(original.delivery, 'direct');
-  assert.equal(original.mimeType, 'video/x-matroska');
-  assert.equal(await gateway.getDirectStreamUrl('session', result.sources[0].id), null);
+test('非原生 HLS 设备只提供原文件直连，不回退分片中转',async()=>{
+ const gateway=makeGateway({format:'m3u8'});const result=await gateway.prepareEpisode('session','episode');
+ assert.equal(result.sources.length,1);assert.equal(result.sources[0].resolution,'original');assert.equal(result.sources[0].delivery,'direct');assert.equal(result.sources[0].mimeType,'video/x-matroska');
+ assert.equal(await gateway.getDirectStreamUrl('session',result.sources[0].id),'https://media.example.test/original.mkv');
 });
 
 test('原生 HLS 能力经 API 传递，清单入口只返回 302，服务器不下载分片', async () => {
@@ -113,7 +108,7 @@ test('原生 HLS 能力经 API 传递，清单入口只返回 302，服务器不
   assert.equal(sources.length, 1);
   assert.equal(sources[0].isHls, true);
   assert.equal(sources[0].delivery, 'direct');
-  assert.equal(sources[0].proxyUrl, `${sources[0].url}?delivery=proxy`);
+  assert.equal(sources[0].proxyUrl,undefined);
   gateway.fetchMedia = () => { throw new Error('direct HLS must not fetch media'); };
   for (const method of ['GET', 'HEAD']) {
     const response = await api({ gateway, method, url: sources[0].url });
@@ -123,25 +118,24 @@ test('原生 HLS 能力经 API 传递，清单入口只返回 302，服务器不
   }
 });
 
-test('旧客户端和非布尔能力值不能意外启用 HLS 直连', async () => {
+test('旧客户端和非布尔能力值只得到渐进式直连', async () => {
   for (const body of [undefined, { nativeHls: 'true' }, { nativeHls: false }]) {
     const gateway = makeGateway({ format: 'm3u8' });
     const response = await api({ gateway, method: 'POST', url: '/api/player/sessions/session/episodes/episode/prepare', body });
     assert.equal(response.statusCode, 200, response.body);
-    assert.equal(JSON.parse(response.body).data.sources[0].delivery, 'proxy');
+    assert.equal(JSON.parse(response.body).data.sources[0].delivery, 'direct');
+    assert.equal(JSON.parse(response.body).data.sources[0].isHls, false);
   }
 });
 
-test('用户明确切换兼容播放后才改写 HLS 清单并中转，仍校验会话所属用户', async () => {
-  const gateway = makeGateway({ format: 'm3u8' });
-  const result = await gateway.prepareEpisode('session', 'episode', admin, undefined, { nativeHls: true });
-  gateway.fetchMedia = async () => new Response('#EXTM3U\n#EXTINF:4,\nsegment.ts\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
-  const response = await api({ gateway, url: result.sources[0].proxyUrl });
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.headers.has('location'), false);
-  assert.match(response.body, /\/api\/player\/sessions\/session\/assets\//);
-  const denied = await api({ gateway, url: result.sources[0].proxyUrl, user: { username: 'other', folder: 'other', role: 'user' } });
-  assert.equal(denied.statusCode, 403);
+test('旧中转参数和分片地址都被阻止，不会获取任何上游视频字节',async()=>{
+ const gateway=makeGateway({format:'m3u8'});const result=await gateway.prepareEpisode('session','episode',admin,undefined,{nativeHls:true});let fetches=0;
+ gateway.fetchMedia=async()=>{fetches++;throw new Error('must not proxy')};
+ for(const method of ['GET','HEAD']){
+  const blocked=await api({gateway,method,url:result.sources[0].url+'?delivery=proxy'});assert.equal(blocked.statusCode,409);assert.equal(JSON.parse(blocked.body).code,'VIDEO_RELAY_DISABLED');
+  const asset=await api({gateway,method,url:'/api/player/sessions/session/assets/old'});assert.equal(asset.statusCode,410);assert.equal(JSON.parse(asset.body).code,'VIDEO_RELAY_DISABLED');
+ }
+ assert.equal(fetches,0);const denied=await api({gateway,url:result.sources[0].url,user:{username:'other',folder:'other',role:'user'}});assert.equal(denied.statusCode,403);
 });
 
 test('HLS 地址刷新后保留客户端的原生直连能力', async () => {
@@ -155,37 +149,15 @@ test('HLS 地址刷新后保留客户端的原生直连能力', async () => {
   assert.equal(source.nativeHls, true);
 });
 
-test('直连源刷新失败回退网页源时不静默中转，重复请求也不能绕过', async () => {
-  const gateway = makeGateway();
-  const result = await gateway.prepareEpisode('session', 'episode');
-  const { source } = gateway.getStreamSource('session', result.sources[0].id);
-  source.resolvedAt = Date.now() - 11 * 60 * 1000;
-  gateway.tvPlaybackClient.getStreaming = async () => { throw new Error('TV unavailable'); };
-  const originalFetch = globalThis.fetch;
-  let mediaFetches = 0;
-  globalThis.fetch = async () => Response.json({ code: 0, data: { video_list: [{ resolution: '4k', video_info: { url: 'https://media.example.test/web.m3u8', format: 'm3u8' } }] } });
-  gateway.fetchMedia = async () => {
-    mediaFetches += 1;
-    return new Response('#EXTM3U\nsegment.ts\n', { headers: { 'content-type': 'application/vnd.apple.mpegurl' } });
-  };
-  try {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await api({ gateway, url: result.sources[0].url });
-      assert.equal(response.statusCode, 409);
-      assert.equal(JSON.parse(response.body).code, 'DIRECT_SOURCE_UNAVAILABLE');
-    }
-    assert.equal(mediaFetches, 0);
-    const compatible = await api({ gateway, url: `${result.sources[0].url}?delivery=proxy` });
-    assert.equal(compatible.statusCode, 200);
-    assert.equal(mediaFetches, 1);
-  } finally { globalThis.fetch = originalFetch; }
+test('直连源刷新失败时返回错误，不读取Cookie播放源也不转发视频',async()=>{
+ const gateway=makeGateway();const result=await gateway.prepareEpisode('session','episode');const {source}=gateway.getStreamSource('session',result.sources[0].id);source.resolvedAt=Date.now()-11*60*1000;
+ gateway.tvPlaybackClient.getStreaming=async()=>{throw Object.assign(new Error('TV unavailable'),{code:'TV_PLAYBACK_NETWORK',statusCode:502})};let fetches=0;gateway.fetchMedia=async()=>{fetches++;throw new Error('no relay')};
+ for(let i=0;i<2;i++){const response=await api({gateway,url:result.sources[0].url});assert.equal(response.statusCode,502);assert.equal(JSON.parse(response.body).code,'TV_PLAYBACK_NETWORK');}
+ assert.equal(fetches,0);
 });
 
-test('没有原文件下载权限时仍保留 HLS 播放源', async () => {
-  const gateway = makeGateway({ format: 'm3u8', download: false });
-  const result = await gateway.prepareEpisode('session', 'episode');
-  assert.equal(result.sources.length, 1);
-  assert.equal(result.sources[0].delivery, 'proxy');
+test('仅有HLS且无原文件权限的非原生设备明确失败，不以中转补位',async()=>{
+ const gateway=makeGateway({format:'m3u8',download:false});await assert.rejects(gateway.prepareEpisode('session','episode'),{code:'DIRECT_SOURCE_UNAVAILABLE'});
 });
 
 test('TV MKV 保留真实媒体类型供原生播放，不冒充 MP4', async () => {
@@ -195,27 +167,13 @@ test('TV MKV 保留真实媒体类型供原生播放，不冒充 MP4', async () 
   assert.equal(result.sources[0].mimeType, 'video/x-matroska');
 });
 
-test('TV 失效时回退网页源且继续代理，绝不把 Cookie 地址当成直链', async () => {
-  const gateway = makeGateway();
-  gateway.tvPlaybackClient.getStreaming = async () => { throw new Error('TV expired'); };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ code: 0, data: { video_list: [{ resolution: 'super', video_info: { url: 'https://media.example.test/web.mp4', format: 'mp4' } }] } });
-  try {
-    const result = await gateway.prepareEpisode('session', 'episode');
-    assert.equal(result.sources[0].delivery, 'proxy');
-  } finally { globalThis.fetch = originalFetch; }
+test('TV认证失效时不回退Cookie源',async()=>{
+ const gateway=makeGateway();gateway.tvPlaybackClient.getStreaming=async()=>{throw Object.assign(new Error('TV expired'),{code:'QUARK_AUTH_REQUIRED',statusCode:401})};
+ await assert.rejects(gateway.prepareEpisode('session','episode'),{code:'QUARK_AUTH_REQUIRED'});
 });
 
-test('强制代理模式不会优先使用 TV 或返回直连来源', async () => {
-  const gateway = makeGateway();
-  gateway.directPlaybackEnabled = false;
-  gateway.tvPlaybackClient.getStreaming = async () => { throw new Error('must use web first'); };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ code: 0, data: { video_list: [{ resolution: 'super', video_info: { url: 'https://media.example.test/web.mp4', format: 'mp4' } }] } });
-  try {
-    const result = await gateway.prepareEpisode('session', 'episode');
-    assert.equal(result.sources[0].delivery, 'proxy');
-  } finally { globalThis.fetch = originalFetch; }
+test('旧代理配置不能重新启用中转',async()=>{
+ const gateway=makeGateway();gateway.directPlaybackEnabled=false;const result=await gateway.prepareEpisode('session','episode');assert.ok(result.sources.every(source=>source.delivery==='direct'));
 });
 
 test('只有管理员可以创建与确认 TV 认证会话', async () => {
@@ -239,4 +197,28 @@ test('TV 二维码会话绑定管理员，过期会话不能兑换令牌', async
   await assert.rejects(client.pollQrSession('qr', 'other'), error => error.code === 'TV_QR_FORBIDDEN');
   client.authSessions.get('qr').createdAt -= 6 * 60 * 1000;
   assert.deepEqual(await client.pollQrSession('qr', 'admin'), { state: 'expired' });
+});
+
+
+test('embedded subtitle reads require the session owner and valid time, without exposing stream URLs', async () => {
+  const gateway = makeGateway();
+  try {
+    const playback = await gateway.prepareEpisode('session', 'episode');
+    assert.match(playback.embeddedSubtitleUrl, /embedded-subtitles/);
+    const forbidden = await api({ gateway, url: playback.embeddedSubtitleUrl + '?time=0', user: { username: 'other', folder: 'other', role: 'user' } });
+    assert.equal(forbidden.statusCode, 403);
+    const invalid = await api({ gateway, url: playback.embeddedSubtitleUrl + '?time=-1' }); assert.equal(invalid.statusCode, 422);
+    assert.doesNotMatch(invalid.body, /private-cookie|private-token|media.example/);
+  } finally { clearInterval(gateway.cleanupTimer); }
+});
+
+test('concurrent prepare requests for the same user/session/file share one upstream preparation',async()=>{
+ const gateway=makeGateway();let count=0,release;const gate=new Promise(resolve=>release=resolve);
+ const original=gateway.tvPlaybackClient.getStreaming;
+ gateway.tvPlaybackClient.getStreaming=async(...args)=>{count++;await gate;return original(...args)};
+ try {
+  const first=gateway.prepareEpisode('session','episode'),second=gateway.prepareEpisode('session','episode');
+  await assert.rejects(gateway.prepareEpisode('session','episode',{username:'other',role:'user',folder:'other'}),{statusCode:403});
+  release();const [a,b]=await Promise.all([first,second]);assert.equal(count,1);assert.equal(a,b);assert.equal(gateway.sessions.get('session').pendingPreparations.size,0);
+ }finally{clearInterval(gateway.cleanupTimer)}
 });

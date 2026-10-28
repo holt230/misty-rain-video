@@ -1,8 +1,11 @@
-import { onBeforeUnmount, watch, type Ref } from 'vue';
+import { onBeforeUnmount, readonly, ref, watch, type Ref } from 'vue';
 
 const openDialogs: HTMLElement[] = [];
+const openDialogCount = ref(0);
+export const dialogOpenCount = readonly(openDialogCount);
 let originalOverflow = '';
 let originalRootOverflow = '';
+let originalBodyPaddingRight = '';
 const focusable = 'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]';
 
 /** 统一弹层的滚动锁定、键盘焦点循环和关闭后焦点恢复。 */
@@ -13,10 +16,12 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
     if (!active) return;
     const index = openDialogs.indexOf(active);
     if (index >= 0) openDialogs.splice(index, 1);
+    openDialogCount.value = openDialogs.length;
     active = null;
     if (!openDialogs.length) {
       document.body.style.overflow = originalOverflow;
       document.documentElement.style.overflow = originalRootOverflow;
+      document.body.style.paddingRight = originalBodyPaddingRight;
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     }
   };
@@ -48,11 +53,19 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
     if (!openDialogs.length) {
       originalOverflow = document.body.style.overflow;
       originalRootOverflow = document.documentElement.style.overflow;
+      originalBodyPaddingRight = document.body.style.paddingRight;
+      const widthBeforeLock = document.body.getBoundingClientRect().width;
+      const paddingBeforeLock = Number.parseFloat(window.getComputedStyle(document.body).paddingRight) || 0;
       document.body.style.overflow = 'hidden';
       document.documentElement.style.overflow = 'hidden';
+      // Classic scrollbars disappear when the dialog locks the document.
+      // Compensate only the measured growth, preserving existing page padding.
+      const addedWidth = document.body.getBoundingClientRect().width - widthBeforeLock;
+      if (addedWidth > 0) document.body.style.paddingRight = `${paddingBeforeLock + addedWidth}px`;
     }
     active = node;
     openDialogs.push(node);
+    openDialogCount.value = openDialogs.length;
     node.tabIndex = -1;
     // 不自动聚焦输入框，避免手机一打开弹层就弹出键盘。
     node.focus({ preventScroll: true });

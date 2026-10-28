@@ -205,38 +205,25 @@ test('an exact work reports upstream failure separately from missing episodes an
   assert.equal(fs.existsSync(service.mappingPath('alice', input.mediaKey)), false);
 });
 
-test('a remembered work falls back across platforms without searching the original title or losing episode overrides', async t => {
-  let mode = 'ready'; const attempts = [];
-  const service = new DanmakuService(directory(t), {
-    catalog: {
-      search: async () => { throw Error('The confirmed work must not be searched again'); },
-      episode: async (id, platform, number) => {
-        attempts.push({ id, platform, number });
-        if (mode === 'offline') throw Error('offline');
-        if (mode === 'missing' || (number === 3 && platform !== 'qiyi')) throw missingEpisode();
-        return { title: work.title, year: work.year, episode: { url: platform, title: `第${number}集` } };
-      }
-    },
-    providers: { resolveUrl: async url => ({ ...source, platform: url === 'qiyi' ? 'qiyi' : 'qq' }) }
+test('confirmed work and platform remain pinned through absence, outage and title changes', async t => {
+  let mode='ready';const attempts=[];
+  const service=new DanmakuService(directory(t),{
+    catalog:{search:async()=>{throw Error('Confirmed work must not be searched again');},episode:async(id,platform,number)=>{
+      attempts.push({id,platform,number});if(mode==='offline')throw Error('offline');
+      if(mode==='missing' || number===3 && platform==='qq')throw missingEpisode();
+      return {title:work.title,year:work.year,episode:{url:platform,title:`第${number}集`}};
+    }},providers:{resolveUrl:async url=>({...source,platform:url==='qiyi'?'qiyi':'qq'})}
   });
-  await service.select('alice', { ...input, workId: work.id, platform: 'qq' });
-  await service.select('alice', { ...input, url: 'https://v.qq.com/x/j4100jwv4qo.html' });
-  attempts.length = 0;
-  const next = { ...input, title: '片库里的别名', episodeNumber: 3, episodeTitle: '第3集' };
-  const result = await service.match('alice', next);
-  assert.equal(result.selected.workId, work.id); assert.equal(result.selected.platform, 'qiyi');
-  assert.deepEqual(attempts.map(item => item.platform), ['qq', 'qiyi']);
-  assert.ok(attempts.every(item => item.id === work.id && item.number === 3));
-  const file = service.mappingPath('alice', input.mediaKey);
-  const saved = fs.readFileSync(file, 'utf8');
-  assert.equal(JSON.parse(saved).platform, 'qiyi');
-  assert.equal((await service.match('alice', input)).selected.workId, ''); // Manual episode override survives.
-  for (const [value, code] of [['offline', 'DANMAKU_SOURCE_UNAVAILABLE'], ['missing', 'DANMAKU_EPISODE_NOT_FOUND']]) {
-    mode = value; attempts.length = 0;
-    await assert.rejects(service.match('alice', next), { code });
-    assert.equal(attempts[0].platform, 'qiyi');
-    assert.equal(fs.readFileSync(file, 'utf8'), saved);
-  }
+  await service.select('alice',{...input,workId:work.id,platform:'qq'});
+  await service.select('alice',{...input,url:'https://v.qq.com/x/j4100jwv4qo.html'});
+  const next={...input,title:'片库里的别名',episodeNumber:3,episodeTitle:'第3集'};
+  const file=service.mappingPath('alice',input.mediaKey),before=fs.readFileSync(file,'utf8');attempts.length=0;
+  const missing=await service.match('alice',next);assert.equal(missing.status,'missing');assert.equal(missing.binding.workId,work.id);assert.equal(missing.binding.platform,'qq');assert.equal(missing.selected,null);
+  assert.deepEqual(attempts.map(v=>v.platform),['qq']);assert.equal(fs.readFileSync(file,'utf8'),before);
+  assert.equal((await service.match('alice',input)).selected.workId,'');
+  mode='offline';const offline=await service.match('alice',next);assert.equal(offline.status,'unavailable');assert.equal(offline.binding.workId,work.id);assert.equal(fs.readFileSync(file,'utf8'),before);
+  mode='ready';await service.select('alice',{...next,workId:work.id,platform:'qiyi'});
+  assert.equal((await service.match('alice',{...next,episodeNumber:4})).selected.platform,'qiyi');
 });
 
 test('manual segment retry bypasses automatic cooldown and coalesces simultaneous retries', async t => {
@@ -270,4 +257,32 @@ test('a failed refresh retains cached comments and an immediate manual retry rep
   fail = false;
   const fresh = await service.segment(source, 0, true);
   assert.equal(fresh.stale, false); assert.equal(fresh.comments[0].text, '3');
+});
+
+test('automatic matching uses explicit film year while keeping season and category exact',()=>{
+ assert.equal(automaticWork({...input,year:'2024'},[work,{...work,id:'2:OtherId',year:'2025'}]).id,work.id);
+ assert.equal(automaticWork({...input,year:'2023'},[work]),null);
+ assert.equal(automaticWork({...input,year:'2024',category:'movie'},[work]),null);
+});
+
+test('episode options are read-only, preserve gaps and expose only actual providers',async t=>{
+ const catalog=new DanmakuCatalog(async()=>response({data:{title:work.title,pubdate:'2024',allepidetail:{qq:[{playlink_num:'1',url:'https://v.qq.com/x/j4100jwv4qo.html'},{playlink_num:'3',url:'https://v.qq.com/x/j4100jwv4qo.html'}],qiyi:[{playlink_num:'3',url:'https://www.iqiyi.com/v_abc123.html'}]}}}));
+ const service=new DanmakuService(directory(t),{catalog});const result=await service.options({...input,workId:work.id});
+ assert.deepEqual(result.episodes.map(e=>e.number),[1,3]);assert.deepEqual(result.episodes[1].platforms,['qq','qiyi']);assert.equal(fs.existsSync(service.mappingPath('alice',input.mediaKey)),false);
+ await assert.rejects(service.options({...input,workId:'../../invalid'}));
+});
+
+test('correcting one episode preserves the work choice and does not renumber later episodes',async t=>{
+ const seen=[];const service=new DanmakuService(directory(t),{catalog:{episode:async(id,platform,number)=>{seen.push(number);if(number===7)throw missingEpisode();return{title:work.title,year:'2024',episode:{url:'https://v.qq.com/x/j4100jwv4qo.html',title:`第${number}集`}}}},providers:{resolveUrl:async()=>source}});
+ await service.select('alice',{...input,workId:work.id,platform:'qq'});
+ const corrected=await service.select('alice',{...input,workId:work.id,platform:'qq',targetEpisode:3,targetEpisodeTitle:'第3集'});assert.equal(corrected.episodeNumber,3);
+ assert.equal((await service.match('alice',input)).selected.episodeNumber,3);
+ const next=await service.match('alice',{...input,episodeNumber:4,episodeTitle:'第4集'});assert.equal(next.selected.episodeNumber,4);assert.equal(next.selected.workId,work.id);
+ const saved=fs.readFileSync(service.mappingPath('alice',input.mediaKey),'utf8');await assert.rejects(service.select('alice',{...input,workId:work.id,platform:'qq',targetEpisode:7,targetEpisodeTitle:'第7集'}));assert.equal(fs.readFileSync(service.mappingPath('alice',input.mediaKey),'utf8'),saved);
+ for(const targetEpisode of [-1,1.5,10001])await assert.rejects(service.select('alice',{...input,workId:work.id,targetEpisode,targetEpisodeTitle:'invalid'}));
+});
+
+test('variety choices keep dated parts and reject another period rather than guessing an ordinal',async()=>{
+ const url='https://v.qq.com/x/j4100jwv4qo.html';const catalog=new DanmakuCatalog(async address=>response(address.includes('/v1/detail')?{data:{id:'123',title:'测试综艺',pubdate:'2026',playlinks:{qq:url}}}:{data:{list:[{period:'20261001',name:'上',url},{period:'20261001',name:'下',url},{period:'20261002',name:'外站',url:'https://evil.example/video'}]}}));
+ const choices=await catalog.options('3:ABCdef','20261001 上');assert.deepEqual(choices.episodes.map(e=>e.title),['20261001 上','20261001 下']);assert.deepEqual(choices.episodes[0].platforms,['qq']);assert.equal((await catalog.episode('3:ABCdef','qq',0,'20261001 下')).episode.title,'20261001 下');await assert.rejects(catalog.episode('3:ABCdef','qq',1,'20261003 上'),{code:'DANMAKU_EPISODE_NOT_FOUND'});
 });

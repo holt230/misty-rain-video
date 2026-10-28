@@ -28,6 +28,7 @@ export class TvPlaybackClient {
   constructor(credentialStore) {
     this.credentialStore = credentialStore;
     this.authSessions = new Map();
+    this.refreshing = null;
   }
 
   async getStatus() {
@@ -161,12 +162,17 @@ export class TvPlaybackClient {
     }
   }
 
-  async #ensureAccessToken() {
+  async #ensureAccessToken(force = false, rejectedToken = '') {
     const auth = this.credentialStore.getTvAuth();
     if (!auth.refreshToken) throw this.#authError();
-    if (auth.accessToken && auth.expiresAt > Date.now() + 60_000) return auth.accessToken;
-    const token = await this.#exchangeToken({ refresh_token: auth.refreshToken }, auth.deviceId);
-    return token.accessToken;
+    const valid = auth.accessToken && auth.expiresAt > Date.now()+60_000;
+    // A late failure for an older token must not rotate a newer token again.
+    if (valid && (!force || rejectedToken && auth.accessToken !== rejectedToken)) return auth.accessToken;
+    if (this.refreshing) return this.refreshing;
+    const task = this.#exchangeToken({ refresh_token:auth.refreshToken },auth.deviceId)
+      .then(token=>token.accessToken).finally(()=>{ if (this.refreshing === task) this.refreshing = null; });
+    this.refreshing = task;
+    return task;
   }
 
   async #exchangeToken(grant, deviceId) {
@@ -215,7 +221,7 @@ export class TvPlaybackClient {
     return { accessToken: data.access_token, expiresAt };
   }
 
-  async #request(pathname, { method = 'GET', query = {}, deviceId, accessToken = '', allowAuthError = false } = {}) {
+  async #request(pathname, { method = 'GET', query = {}, deviceId, accessToken = '', allowAuthError = false, authRetried = false } = {}) {
     const timestamp = String(Date.now());
     const reqId = crypto.createHash('md5').update(deviceId + timestamp).digest('hex');
     const token = crypto.createHash('sha256').update(`${method}&${pathname}&${timestamp}&${SIGN_KEY}`).digest('hex');
@@ -257,7 +263,12 @@ export class TvPlaybackClient {
       throw error;
     }
     if ([10001, 11001].includes(errno) || /access[_ ]?token|token\s*无效/i.test(body?.error_info || '')) {
-      this.credentialStore.clearTvAuth();
+      if (accessToken && !authRetried) {
+        const refreshed = await this.#ensureAccessToken(true,accessToken);
+        return this.#request(pathname,{ method,query,deviceId,accessToken:refreshed,allowAuthError,authRetried:true });
+      }
+      // Keep the refresh credential: a rejected access token is not evidence
+      // that the long-lived refresh credential has been revoked.
       throw this.#authError();
     }
     throw new QuarkApiError(body?.error_info || `高清播放服务请求失败（HTTP ${response.status}）`, {

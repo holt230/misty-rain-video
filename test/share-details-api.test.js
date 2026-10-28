@@ -84,3 +84,40 @@ test('搜索补充接口只读现有缓存，不触发上游请求；同样需�
   assert.equal(denied.statusCode, 401);
   assert.deepEqual(calls, ['仙逆']);
 });
+
+test('批量链接校验使用登录及来源检查，普通账号也可查询但不能绕过认证', async () => {
+  const context = makeContext();
+  let probes = 0;
+  context.shareAvailability = { inspect: async (items, options) => { probes++; assert.equal(items[0].url, 'https://pan.quark.cn/s/test'); assert.equal(options.force, true); return { entries: [], pending: false }; } };
+  const body = { items: [{ url: 'https://pan.quark.cn/s/test' }], force: true };
+  const success = makeResponse();
+  await handleApiRequest(makeRequest('/api/resource-search/validate', body), success, context);
+  assert.equal(success.statusCode, 200); assert.equal(probes, 1);
+  context.authService.assertSameOrigin = () => { throw Object.assign(new Error('origin'), { statusCode: 403 }); };
+  const denied = makeResponse();
+  await handleApiRequest(makeRequest('/api/resource-search/validate', body), denied, context);
+  assert.equal(denied.statusCode, 403); assert.equal(probes, 1);
+});
+
+test('详情失败只有明确取消会加入共享失效缓存，临时故障不删除候选', async () => {
+  const context = makeContext();
+  const removed = [];
+  context.shareAvailability = { markUnavailable: url => removed.push(url) };
+  const input = { shareUrl: 'https://pan.quark.cn/s/test' };
+  for (const code of ['QUARK_NETWORK_ERROR', 'QUARK_SHARE_PASSCODE_REQUIRED', 'QUARK_SHARE_UNAVAILABLE']) {
+    context.quarkGateway.getShareDetails = async () => { throw Object.assign(new Error('failed'), { code, statusCode: 422 }); };
+    await handleApiRequest(makeRequest('/api/quark/share-details', input), makeResponse(), context);
+  }
+  assert.deepEqual(removed, [input.shareUrl]);
+});
+
+test('保存时确认分享取消也会记录失效，下一次检索不能恢复链接', async () => {
+  const context = makeContext();
+  const removed = [];
+  context.shareAvailability = { markUnavailable: url => removed.push(url) };
+  context.quarkGateway.importShare = async () => { throw Object.assign(new Error('好友已取消了分享'), { code: 'QUARK_SHARE_UNAVAILABLE', statusCode: 422 }); };
+  const response = makeResponse();
+  await handleApiRequest(makeRequest('/api/library/import', { quarkShareUrl: 'https://pan.quark.cn/s/cancelled' }), response, context);
+  assert.equal(response.statusCode, 422);
+  assert.deepEqual(removed, ['https://pan.quark.cn/s/cancelled']);
+});

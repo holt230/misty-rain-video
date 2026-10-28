@@ -5,8 +5,8 @@ const storageKey = 'misty_rain_theme';
 const mediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
   ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 const readPreference = (): ThemePreference => {
-  try { const saved = localStorage.getItem(storageKey); return saved === 'dark' || saved === 'light' ? saved : 'system'; }
-  catch { return 'system'; }
+  try { const saved = localStorage.getItem(storageKey); return saved === 'dark' || saved === 'light' || saved === 'system' ? saved : 'dark'; }
+  catch { return 'dark'; }
 };
 export const themePreference = ref<ThemePreference>(readPreference());
 const resolveTheme = (): AppTheme => themePreference.value === 'system'
@@ -16,7 +16,7 @@ export const applyTheme = (theme: AppTheme) => {
   currentTheme.value = theme;
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f4f6fa' : '#0b0b0d');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#fcfcfc' : '#08090b');
 };
 let initialized = false;
 export const initializeTheme = () => {

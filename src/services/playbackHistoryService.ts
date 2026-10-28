@@ -1,5 +1,5 @@
 import type { PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../types/media';
-import { apiUrl } from './appUrl';
+import { apiUrl, withAppBase } from './appUrl';
 import { authFetch } from './authService';
 
 interface ApiEnvelope<T> {
@@ -7,6 +7,8 @@ interface ApiEnvelope<T> {
   message?: string;
   data?: T;
 }
+
+const hydrate = (entry: PlaybackHistoryEntry): PlaybackHistoryEntry => ({ ...entry, media: { ...entry.media, poster: withAppBase(entry.media.poster) } });
 
 const read = async <T>(response: Response): Promise<T> => {
   const envelope = await response.json().catch(() => ({})) as ApiEnvelope<T>;
@@ -19,7 +21,7 @@ const read = async <T>(response: Response): Promise<T> => {
 export class PlaybackHistoryService {
   static async list(): Promise<PlaybackHistoryEntry[]> {
     const response = await authFetch(apiUrl('/api/playback-history'), { cache: 'no-store' });
-    return read<PlaybackHistoryEntry[]>(response);
+    return (await read<PlaybackHistoryEntry[]>(response)).map(hydrate);
   }
 
   static async save(value: PlaybackHistoryUpdate, keepalive = false): Promise<PlaybackHistoryEntry> {
@@ -29,11 +31,11 @@ export class PlaybackHistoryService {
       body: JSON.stringify(value),
       keepalive
     });
-    return read<PlaybackHistoryEntry>(response);
+    return hydrate(await read<PlaybackHistoryEntry>(response));
   }
 
   static async remove(id: string): Promise<PlaybackHistoryEntry[]> {
     const response = await authFetch(apiUrl(`/api/playback-history/${encodeURIComponent(id)}`), { method: 'DELETE' });
-    return read<PlaybackHistoryEntry[]>(response);
+    return (await read<PlaybackHistoryEntry[]>(response)).map(hydrate);
   }
 }

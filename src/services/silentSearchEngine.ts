@@ -1,7 +1,8 @@
-import type { ResourceItem, SearchResult } from '../types/search';
+import type { ResourceItem, SearchResult, ShareValidationResult } from '../types/search';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
+import { resourceSearchKeyword, resourceTitleRelevance } from '../../server/searchTitle.js';
 
 const SEARCH_THROTTLE_MS = 300;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -9,16 +10,6 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_SEARCH_CACHE_ENTRIES = 40;
 const PUBLIC_SEARCH_URL = 'https://so.252035.xyz/api/search';
 const PUBLIC_TIMEOUT_MS = 10_000;
-
-// Match a title rather than characters embedded in another title or subtitle
-// (e.g. 搜“仙逆”不能命中“剑仙逆世”). Keep common season and edition suffixes.
-const searchTitlePattern = (keyword: string): RegExp | null => {
-  const key = keyword.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s\p{P}\p{S}\p{Cf}]+/gu, '');
-  if (!key) return null;
-  const name = [...key].join('[\\s\\p{P}\\p{S}\\p{Cf}]*');
-  const edition = '年番|剧场版|特别篇|番外|外传|合集|全集|完结|更新|更(?:新|至|第|[0-9])|全[0-9一二三四五六七八九十百]+集|第[0-9一二三四五六七八九十百]+[季集部]|s[0-9]+|国语|中字|高清|超清|蓝光|臻彩|杜比';
-  return new RegExp(`(?:^|[^\\p{L}])${name}(?=$|[^\\p{L}]|${edition})`, 'iu');
-};
 
 /**
  * =========================================================================
@@ -100,7 +91,7 @@ export class SilentSearchEngine {
       let result: SearchResult;
       try {
         const url = new URL(PUBLIC_SEARCH_URL);
-        url.search = new URLSearchParams({ kw: clean, res: 'merge', src: 'all', cloud_types: 'quark' }).toString();
+        url.search = new URLSearchParams({ kw: resourceSearchKeyword(clean), res: 'merge', src: 'all', cloud_types: 'quark' }).toString();
         const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
           headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error('备用来源暂不可用');
@@ -120,14 +111,48 @@ export class SilentSearchEngine {
     return task;
   }
 
+  async validateResources(items: ResourceItem[], force = false, signal?: AbortSignal): Promise<ShareValidationResult> {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await authFetch(apiUrl('/api/resource-search/validate'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ items: items.map(item => ({ url: item.url, password: item.password || '' })), force })
+      });
+      const payload = await response.json();
+      if (response.status === 401 || response.status === 403) throw Object.assign(new Error('登录状态已失效'), { requiresAuth: true });
+      if (!response.ok || payload.code !== 0 || !Array.isArray(payload.data?.entries)) throw new Error('链接校验暂不可用');
+      return payload.data;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'requiresAuth' in error) throw error;
+      // A network failure is uncertainty, never evidence that every share was cancelled.
+      return { entries: items.map(item => ({ url: item.url, password: item.password || '', status: 'unknown' })), pending: false };
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
+  }
+
+  async prefetch(keyword: string, signal: AbortSignal, force=false): Promise<SearchResult> {
+    const params = new URLSearchParams({ kw: keyword, background: '1' });
+    if(force)params.set('refresh','1');
+    const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { signal, cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || payload.code !== 0 || !payload.data) throw new Error('备选片源暂不可用');
+    return this.normalizeResponse(payload.data, 'direct', keyword);
+  }
+
   private failedSearch(error: unknown): SearchResult {
     return { ...this.getEmptyResult(error instanceof Error ? error.message : '资源检索失败，请稍后重试'),
       allowPublicFallback: !(error && typeof error === 'object' && 'requiresAuth' in error && error.requiresAuth) };
   }
 
-  async readCached(keyword: string): Promise<SearchResult | null> {
+  async readCached(keyword: string, signal?: AbortSignal): Promise<SearchResult | null> {
     const params = new URLSearchParams({ kw: keyword, cached: '1' });
     const controller = new AbortController();
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
     const timer = setTimeout(() => controller.abort(), 4_000);
     try {
       const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { cache: 'no-store', signal: controller.signal });
@@ -137,7 +162,7 @@ export class SilentSearchEngine {
       // Do not let an earlier partial client cache hide the completed server result.
       this.cache.delete(keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase('zh-CN'));
       return result;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',cancel); }
   }
 
   private async executeBackendFetch(keyword: string, force: boolean): Promise<SearchResult> {
@@ -173,16 +198,18 @@ export class SilentSearchEngine {
   private normalizeResponse(data: any, sourceMode: 'direct' | 'cors_proxy', keyword: string): SearchResult {
     const items: ResourceItem[] = [];
     const seen = new Set<string>();
-    const titlePattern = searchTitlePattern(keyword);
     const list = Array.isArray(data?.merged_by_type?.quark) ? data.merged_by_type.quark : [];
     list.forEach((raw: any) => {
       const item = this.parseSingleItem(raw);
-      if (!item || !titlePattern?.test(item.title.normalize('NFKC').replace(/\p{Cf}/gu, '')) || seen.has(item.url)) return;
+      if (!item || seen.has(item.url)) return;
+      const relevance = resourceTitleRelevance(keyword, item.title);
+      if (!relevance) return;
+      item.relevance = relevance;
       seen.add(item.url);
       items.push(item);
     });
 
-    items.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+    items.sort((a, b) => (b.relevance || 0) - (a.relevance || 0) || (Date.parse(b.datetime) || 0) - (Date.parse(a.datetime) || 0));
 
     return {
       success: true,

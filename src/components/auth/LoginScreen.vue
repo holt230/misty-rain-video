@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import LoadingSkeleton from '../common/LoadingSkeleton.vue';
+import { siteSettings } from '../../services/siteSettings';
 import { nextTick, ref, watch } from 'vue';
 import { Download, Eye, EyeOff } from '@lucide/vue';
 import { apiUrl } from '../../services/appUrl';
 import BrandMark from '../common/BrandMark.vue';
-import ThemeSwitch from '../common/ThemeSwitch.vue';
+import { isAppleTouchDevice } from '../../services/device';
 
 const props = defineProps<{
   checking: boolean;
@@ -20,6 +22,7 @@ const password = ref('');
 const showPassword = ref(false);
 const usernameInput = ref<HTMLInputElement | null>(null);
 const installUrl = apiUrl('/install/ios.mobileconfig');
+const isAppleMobile = isAppleTouchDevice(navigator);
 
 watch(() => props.checking, async value => {
   if (value || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
@@ -37,7 +40,6 @@ const submit = () => {
 
 <template>
   <main class="login-shell" :class="{ 'is-checking': checking }">
-    <ThemeSwitch class="login-theme-switch" />
     <section class="login-card" :aria-busy="checking || submitting">
       <header class="login-hero">
         <div class="brand-lockup">
@@ -45,21 +47,17 @@ const submit = () => {
             <BrandMark />
           </div>
           <div class="brand-copy">
-            <strong>烟雨影视</strong>
-            <small>PRIVATE CINEMA</small>
+            <strong>{{ siteSettings.name }}</strong>
           </div>
         </div>
 
         <div class="login-heading">
-          <span>{{ checking ? '正在连接' : '私人片库' }}</span>
-          <h1>{{ checking ? '正在准备片库' : '欢迎回来' }}</h1>
-          <p>{{ checking ? '正在恢复登录状态…' : '登录后继续观看你的收藏与播放记录。' }}</p>
+          <h1>{{ checking ? '正在加载' : '欢迎回来' }}</h1>
+          <p v-if="checking">正在恢复登录状态…</p>
         </div>
       </header>
 
-      <div v-if="checking" class="login-loader" role="status" aria-label="正在检查登录状态">
-        <span></span><span></span><span></span>
-      </div>
+      <LoadingSkeleton v-if="checking" variant="form" :count="3" label="正在检查登录状态" />
 
       <form v-else class="login-form" @submit.prevent="submit">
         <div class="credential-group">
@@ -111,59 +109,46 @@ const submit = () => {
 
         <button type="submit" class="login-button" :disabled="submitting || !username.trim() || !password">
           <span v-if="submitting" class="button-spinner" aria-hidden="true"></span>
-          {{ submitting ? '正在登录…' : '进入片库' }}
+          {{ submitting ? '正在登录…' : '登录' }}
         </button>
       </form>
 
       <footer v-if="!checking" class="login-footer">
-        <a class="ios-install-link" :href="installUrl">
+        <a v-if="isAppleMobile" class="ios-install-link" :href="installUrl">
           <Download aria-hidden="true" />
-          安装 iPhone 桌面版
+          安装到主屏幕
         </a>
-        <p>仅限已有账户登录</p>
       </footer>
     </section>
   </main>
 </template>
 
 <style scoped>
-.login-theme-switch { position: absolute; top: calc(20px + var(--safe-area-top)); right: calc(20px + var(--safe-area-right)); z-index: 2; }
-.login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); }
-.login-card { position: relative; width: min(420px, 100%); padding: 40px 24px 26px; }
-.brand-lockup { display: flex; align-items: center; gap: 12px; }
-.brand-mark { width: 54px; height: 54px; overflow: hidden; border: 1px solid var(--divider); border-radius: 19px; box-shadow: 0 7px 18px rgb(44 81 157 / .15); }
-.brand-mark :deep(.brand-mark-image) { border-radius: inherit; }
-.brand-copy { display: grid; gap: 3px; }
-.brand-copy strong { font-size: 1.15rem; font-weight: 740; letter-spacing: -.04em; }
-.brand-copy small { color: var(--text-tertiary); font-size: .56rem; font-weight: 650; letter-spacing: .18em; }
-.login-heading { margin: 60px 0 32px; }
-.login-heading > span { color: var(--liquid-accent); font-size: .76rem; font-weight: 600; }
-.login-heading h1 { margin: 8px 0 14px; color: var(--text-primary); font-size: 2.65rem; font-weight: 650; letter-spacing: -.04em; line-height: 1.15; }
-.login-heading p { color: var(--text-secondary); font-size: .87rem; line-height: 1.7; }
-.credential-group { padding: 0 16px; border: 1px solid var(--divider); border-radius: 14px; background: var(--surface-1); }
-.input-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 74px; align-content: center; gap: 3px; padding: 10px 0; border-bottom: 1px solid rgb(100 122 161 / .12); }
-.input-shell:last-child { border-bottom: 0; }
-.field-name { grid-column: 1; font-size: .73rem; color: var(--text-tertiary); }
-.input-shell input { width: 100%; min-width: 0; min-height: 30px; grid-column: 1; grid-row: 2; padding: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; font-size: 17px; }
-.input-shell input::placeholder { color: var(--text-quaternary); }
-.input-shell:focus-within .field-name { color: var(--liquid-accent); }
-.password-toggle { display: grid; width: 44px; height: 44px; grid-column: 2; grid-row: 1 / span 2; align-self: center; place-items: center; margin-right: -6px; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
-.password-toggle svg { width: 20px; height: 20px; }
-.login-error { margin: 12px 0 0; padding: 11px 13px; border-radius: 13px; color: var(--danger); background: var(--danger-surface); font-size: .83rem; }
-.login-button { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; gap: 9px; margin-top: 20px; border: 0; border-radius: 12px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .92rem; font-weight: 650; transition: filter .2s; }
-.login-button:hover:not(:disabled) { filter: brightness(1.07); }
-.login-footer { margin-top: 27px; text-align: center; }
-.ios-install-link { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; color: var(--text-secondary); font-size: .78rem; text-decoration: none; }
-.ios-install-link svg { width: 16px; height: 16px; }
-.login-footer p { color: var(--text-tertiary); font-size: .69rem; }
-.login-loader { display: flex; justify-content: center; gap: 7px; padding: 20px; }
-.login-loader span { width: 7px; height: 7px; border-radius: 50%; background: var(--liquid-accent); animation: pulse 1s ease-in-out infinite; }
-.login-loader span:nth-child(2) { animation-delay: .15s; }
-.login-loader span:nth-child(3) { animation-delay: .3s; }
-.button-spinner { width: 17px; height: 17px; border: 1px solid var(--divider); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 50% { opacity: .25; transform: translateY(-3px); } }
-:global(html.ios-standalone .login-footer) { display: none; }
-@media (max-width: 480px) { .login-shell { padding-right: 20px; padding-left: 20px; } .login-card { padding: 32px 24px 24px; border-radius: 34px; } .login-heading { margin-top: 32px; } .login-heading h1 { font-size: 2.3rem; } }
-@media (max-height: 650px) { .login-shell { align-items: flex-start; } .login-card { padding-top: 24px; } .login-heading { margin: 20px 0; } .login-heading h1 { font-size: 2rem; } .login-footer { margin-top: 16px; } }
+.login-shell { --text-primary:#f5f5f7; --text-secondary:#c7c8ce; --text-tertiary:#a3a5ad; --text-quaternary:#8d9099; --liquid-accent:#fff; --accent-ink:#08090b; --divider:rgb(255 255 255 / .2); position:relative; z-index:1; display:flex; align-items:center; justify-content:center; min-height:var(--app-viewport-height); padding:calc(120px + var(--safe-area-top)) 24px 72px; color:#f5f5f7; background:radial-gradient(ellipse at 70% 0,#202127 0,transparent 55%),#08090b; color-scheme:dark; }
+.login-shell::before { content:''; position:absolute; inset:0; pointer-events:none; opacity:.25; background:repeating-linear-gradient(0deg,transparent 0 3px,rgb(255 255 255 / .012) 4px 5px); }
+.login-card { position:static; width:min(400px,100%); }
+.brand-lockup { position:absolute; top:calc(32px + var(--safe-area-top)); left:var(--content-gutter); display:flex; align-items:center; gap:12px; max-width:calc(100% - 48px); }
+.brand-mark { width:36px; height:36px; flex-shrink:0; overflow:hidden; border-radius:7px; }
+.brand-copy { min-width:0; }.brand-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:1.25rem; font-weight:750; letter-spacing:-.03em; }
+.login-heading { margin-bottom:32px; }.login-heading h1 { color:#fff; font-size:2rem; font-weight:700; letter-spacing:-.035em; line-height:1.25; }.login-heading p { margin-top:12px; color:var(--text-secondary); font-size:.9rem; }
+.credential-group { display:grid; gap:16px; }
+.input-shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-content:center; gap:4px; min-height:66px; padding:10px 16px; border:1px solid rgb(255 255 255 / .24); border-radius:4px; background:rgb(24 25 29 / .8); }
+.input-shell:focus-within { border-color:#fff; box-shadow:0 0 0 1px #fff; }
+.field-name { grid-column:1; color:#b4b6bf; font-size:.74rem; }
+.input-shell input { grid-column:1; grid-row:2; width:100%; min-width:0; min-height:26px; padding:0; border:0; outline:0; color:#fff; background:transparent; font-size:16px; }
+.input-shell input::placeholder { color:#90939e; }
+.password-toggle { display:grid; grid-column:2; grid-row:1 / span 2; align-self:center; place-items:center; width:44px; height:44px; margin-right:-8px; padding:0; border:0; border-radius:4px; color:#c7c8ce; background:transparent; }
+.password-toggle svg { width:20px; height:20px; }
+.login-error { margin-top:16px; color:#ffaaa4; font-size:.84rem; line-height:1.6; }
+.login-button { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; min-height:50px; margin-top:24px; padding:12px 20px; border:0; border-radius:4px; color:#08090b; background:#fff; font-size:1rem; font-weight:700; transition:background .16s ease; }
+.login-button:hover:not(:disabled) { background:#dedee2; }.login-button:disabled { opacity:.45; }
+.login-footer { margin-top:24px; text-align:center; }.login-footer:empty { display:none; }
+.ios-install-link { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; color:#c7c8ce; font-size:.82rem; text-decoration:none; }.ios-install-link svg { width:17px; height:17px; }
+.login-loader { display:flex; justify-content:flex-start; gap:8px; padding:10px 0 42px; }.login-loader span { width:6px; height:6px; border-radius:50%; background:#fff; animation:pulse 1.2s ease-in-out infinite; }.login-loader span:nth-child(2) { animation-delay:.15s; }.login-loader span:nth-child(3) { animation-delay:.3s; }
+.button-spinner { width:17px; height:17px; border:2px solid rgb(0 0 0 / .2); border-top-color:#08090b; border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } } @keyframes pulse { 50% { opacity:.25; } }
+:global(html.ios-standalone .login-footer) { display:none; }
+@media(max-width:640px) { .login-shell { align-items:flex-start; padding:calc(152px + var(--safe-area-top)) 24px 48px; }.brand-lockup { top:calc(24px + var(--safe-area-top)); left:24px; }.login-heading { margin-bottom:28px; } }
+@media(max-height:650px) { .login-shell { align-items:flex-start; padding-top:calc(106px + var(--safe-area-top)); }.login-heading { margin-bottom:20px; } }
+@media(prefers-reduced-motion:reduce) { .login-loader span,.button-spinner { animation:none; }.login-button { transition:none; } }
 </style>

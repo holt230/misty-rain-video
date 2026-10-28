@@ -119,14 +119,28 @@ export class LibraryViewRepository {
 
   categoryFor(title) {
     const value = readJson(this.filePath, { version: 1, categories: {} });
-    return value?.categories?.[normalizeLibraryTitle(title)] || '';
+    const key = normalizeLibraryTitle(title);
+    const category = value?.categories && Object.hasOwn(value.categories, key) ? value.categories[key] : '';
+    return ['tv', 'movie', 'variety', 'anime'].includes(category) ? category : '';
   }
 
   setCategory(title, category) {
     const value = readJson(this.filePath, { version: 1, categories: {} });
     const categories = value?.categories && typeof value.categories === 'object' ? value.categories : {};
     categories[normalizeLibraryTitle(title)] = category;
-    writeJson(this.filePath, { version: 1, categories }, 0o644);
+    writeJson(this.filePath, { ...value, version: 1, categories }, 0o644);
+  }
+
+  titleFor(quarkFid) {
+    const value = readJson(this.filePath, {});
+    const key = String(quarkFid || '');
+    const title = value?.titles && Object.hasOwn(value.titles, key) ? value.titles[key] : '';
+    return typeof title === 'string' ? title : '';
+  }
+
+  setTitle(quarkFid, title) {
+    const value = readJson(this.filePath, { version: 1, categories: {} });
+    writeJson(this.filePath, { ...value, titles: { ...value.titles, [quarkFid]: title } }, 0o600);
   }
 }
 
@@ -264,6 +278,12 @@ export class PlaybackCacheRepository {
     return readJson(this.filePath, {})[key] || null;
   }
 
+  forShare(pwdId, subtitles = false) {
+    const prefix = `${subtitles ? 'subtitle:' : ''}${pwdId}:`;
+    return Object.entries(readJson(this.filePath, {})).filter(([key, entry]) => key.startsWith(prefix) && entry?.savedFid && entry?.fileName)
+      .slice(0, 5000).map(([key, entry]) => ({ ...entry, episodeFid: key.slice(prefix.length) }));
+  }
+
   set(key, value) {
     const cache = readJson(this.filePath, {});
     cache[key] = { ...value, updatedAt: new Date().toISOString() };
@@ -294,7 +314,8 @@ export class PlaybackHistoryRepository {
 
   save(entry) {
     const entries = this.all();
-    const sourceKey = String(entry?.media?.quarkFid || entry?.media?.id || entry?.media?.title || '').trim();
+    const sourceKey = entry?.media?.catalogId ? `discovery:${entry.media.catalogId}`
+      : String(entry?.media?.quarkFid || entry?.media?.id || entry?.media?.title || '').trim();
     const id = crypto.createHash('sha256').update(sourceKey).digest('hex').slice(0, 24);
     const updated = {
       ...entry,
@@ -335,6 +356,13 @@ export class PlaybackHistoryRepository {
     const id = String(mediaId || '').trim();
     if (!id) return this.all();
     const entries = this.all().filter(entry => String(entry?.media?.id || '') !== id);
+    writeJson(this.filePath, { version: 1, entries }, 0o600);
+    return entries;
+  }
+
+  removeUnlinkedCatalog(catalogId) {
+    const entries = this.all().filter(entry => entry.media?.catalogId !== catalogId || entry.media?.quarkFid
+      || String(entry.media?.id || '').startsWith('quark:'));
     writeJson(this.filePath, { version: 1, entries }, 0o600);
     return entries;
   }

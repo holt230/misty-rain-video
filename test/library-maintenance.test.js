@@ -16,7 +16,9 @@ test('标准文件名保留季、上下集和扩展名，旧嵌套目录与新�
     video('S01E01.mkv'), video('S02E01.MP4'), video('E02上.mkv', { source_path: '测试剧/第二季' }),
     video('E03.mkv', { source_path: '测试剧/花絮' }), video('广告.mp4'), video('说明.txt')
   ]);
-  assert.equal(episodes.length, 3);
+  assert.equal(episodes.length, 5);
+  assert.ok(episodes.some(item => item.fileName === 'E03.mkv'));
+  assert.ok(episodes.some(item => item.fileName === '广告.mp4'));
   assert.equal(libraryVideoName(episodes[0]), '第02季 第02集（上）.mkv');
   assert.equal(libraryVideoName(episodes[1]), '第02季 第01集.MP4');
   const renamed = normalizePlaybackEpisodes(episodes.map(item => video(libraryVideoName(item))));
@@ -110,6 +112,18 @@ test('来源连续三次失效才检索关联，保持原文件目录；网络�
     for (let i = 0; i < 4; i += 1) { f.tick(6 * 60 * 60_000); await f.service.runOnce(); }
   }
   assert.equal(f.calls.length, 0);
+});
+
+test('改名后的后台片源检索和维护状态都使用用户修正的名称', async t => {
+  const f = fixture(t);
+  f.data.get('one').libraryViewRepository = { titleFor: fid => fid === 'show' ? '正确片名' : '' };
+  const searched = [];
+  f.context.resourceSearch.search = async title => { searched.push(title); return { merged_by_type: { quark: [] } }; };
+  f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });
+  await f.service.runOnce(); f.tick(); await f.service.runOnce(); f.tick(); await f.service.runOnce();
+  assert.deepEqual(searched, ['正确片名']);
+  assert.equal(f.service.status(f.users[0]).items[0].title, '正确片名');
+  assert.equal(f.data.get('one').mediaRepository.all()[0].quarkFid, 'show');
 });
 
 test('失败退避、来源人工变更重置失败计数；重叠运行和停止不会再调度写操作', async t => {

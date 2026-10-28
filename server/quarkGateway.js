@@ -1,7 +1,10 @@
 import dns from 'node:dns';
+import { shareFailureCode } from './shareAvailability.js';
 import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
+import { EmbeddedSubtitleReader } from './embeddedSubtitles.js';
+import { ShareThumbnails } from './shareThumbnails.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -188,7 +191,7 @@ const isCredentialAuthFailure = error => {
     || [401, 31001, 32003].includes(upstreamCode);
 };
 
-const isShareUnavailableMessage = message => /(?:取消|删除|撤销).*分享|分享.*(?:失效|过期|删除|不存在|取消|撤销)|不存在.*分享/.test(String(message || ''));
+const isShareUnavailableMessage = message => shareFailureCode(message) === 'QUARK_SHARE_UNAVAILABLE';
 
 const libraryUpdateFailureStatus = (card, error) => {
   const code = String(error?.code || '');
@@ -267,7 +270,7 @@ const extractEpisodeNumber = fileName => {
   if (/^(?:19|20)\d{2}[\s._-]/.test(name)) return null;
 
   const bracketed = name.match(/[\[【(（]\s*(\d{1,4})\s*[\]】)）]/);
-  if (bracketed) return Number(bracketed[1]);
+  if (bracketed && !(Number(bracketed[1]) >= 1900 && Number(bracketed[1]) <= 2100)) return Number(bracketed[1]);
 
   const ignored = new Set([2160, 1440, 1080, 720, 576, 480, 360, 266, 265, 264]);
   const leading = name.match(/^\s*(\d{1,4})(?=\D|$)/);
@@ -407,17 +410,19 @@ const normalizeFileTimestamp = (...values) => {
   return '';
 };
 
+const episodeThumbnails = new WeakMap();
 const serializeEpisode = item => {
   const episodeNumber = extractEpisodeNumber(item.file_name) ?? 0;
   const part = String(item.file_name || '').match(/\d{1,4}\s*(?:[集话期]\s*)?[（(]?([上中下])(?=\D|$)/)?.[1] || '';
   const season = seasonNumber(item.file_name)
     || String(item.source_path || '').split('/').reverse().map(seasonNumber).find(Boolean) || 0;
-  return {
+  const episode = {
     fid: item.fid,
     shareFidToken: item.share_fid_token,
     parentFid: item.pdir_fid || '0',
     fileName: item.file_name || (episodeNumber ? `第 ${episodeNumber} 集` : '正片'),
     episodeNumber,
+    ancillary: ancillaryVideoPattern.test(String(item.file_name || '')) || isAncillaryVideoPath(`${item.source_path || ''}/${item.file_name || ''}`),
     seasonNumber: season,
     sourcePath: item.source_path || '',
     episodeTitle: episodeNumber ? `${season ? `第 ${season} 季 · ` : ''}第 ${episodeNumber} 集${part ? `（${part}）` : ''}` : '正片',
@@ -439,6 +444,9 @@ const serializeEpisode = item => {
     maxResolution: item.video_max_resolution || '',
     previewUrl: item.preview_url || ''
   };
+  const thumbnail = [item.big_thumbnail,item.thumbnail].find(value => typeof value === 'string' && value.startsWith('https://'));
+  if (thumbnail) episodeThumbnails.set(episode,thumbnail);
+  return episode;
 };
 
 const preferEpisode = (left, right) => {
@@ -450,14 +458,32 @@ const preferEpisode = (left, right) => {
   return collator.compare(right.fileName, left.fileName) > 0 ? right : left;
 };
 
+const compareEpisodes = (left, right) => {
+  if ((left.seasonNumber || 1) !== (right.seasonNumber || 1)) return (right.seasonNumber || 1) - (left.seasonNumber || 1);
+  if (left.episodeNumber !== right.episodeNumber) return right.episodeNumber - left.episodeNumber;
+  return collator.compare(right.fileName, left.fileName);
+};
+
+// A playback directory is a file browser: numbering, names, size and duration
+// are presentation metadata, not reasons to hide a different video file.
 export const normalizePlaybackEpisodes = items => {
+  const unique = new Map();
+  for (const item of items.filter(isVideoFile)) {
+    if (!unique.has(item.fid)) unique.set(item.fid, serializeEpisode(item));
+  }
+  return [...unique.values()].sort(compareEpisodes);
+};
+
+// Cloud transfers/auto-follow retain their existing main-episode policy.
+// Keep that write-side decision out of resource previews and playback lists.
+const selectLibraryEpisodes = (items, category) => {
   const playable = items
     .filter(isVideoFile)
     .filter(item => !ancillaryVideoPattern.test(String(item.file_name || ''))
       && !isAncillaryVideoPath(`${item.source_path || ''}/${item.file_name || ''}`))
     .map(serializeEpisode);
   const numbered = playable.filter(episode => episode.episodeNumber > 0);
-  const candidates = numbered.length >= 2 ? numbered : playable;
+  const candidates = (numbered.length >= 2 || category && category !== 'movie') && numbered.length ? numbered : playable;
   const unique = new Map();
   for (const episode of candidates) {
     const key = episode.episodeNumber > 0
@@ -465,11 +491,7 @@ export const normalizePlaybackEpisodes = items => {
       : `file:${String(episode.fileName).normalize('NFKC').toLowerCase()}`;
     unique.set(key, unique.has(key) ? preferEpisode(unique.get(key), episode) : episode);
   }
-  return [...unique.values()].sort((left, right) => {
-    if ((left.seasonNumber || 1) !== (right.seasonNumber || 1)) return (right.seasonNumber || 1) - (left.seasonNumber || 1);
-    if (left.episodeNumber !== right.episodeNumber) return right.episodeNumber - left.episodeNumber;
-    return collator.compare(right.fileName, left.fileName);
-  });
+  return [...unique.values()].sort(compareEpisodes);
 };
 
 const publicUpdateStatus = status => ({
@@ -492,8 +514,8 @@ export class QuarkGateway {
     this.playbackCache = playbackCache;
     this.libraryConfigStore = libraryConfigStore;
     this.tvPlaybackClient = tvPlaybackClient;
-    this.directPlaybackEnabled = process.env.PLAYER_MEDIA_DELIVERY !== 'proxy';
     this.sessions = new Map();
+    this.shareThumbnails = new ShareThumbnails((url,signal) => this.fetchMedia(url, undefined, 'thumbnail', '', { signal }));
     this.accountCache = null;
     this.libraryRootCache = null;
     this.namedRootCache = new Map();
@@ -544,7 +566,7 @@ export class QuarkGateway {
       libraryConfigured: cookiePlaybackConfigured,
       cookiePlaybackConfigured,
       advancedPlaybackConfigured,
-      isAuthenticated: cookiePlaybackConfigured || advancedPlaybackConfigured,
+      isAuthenticated: advancedPlaybackConfigured,
       nickname: playbackStatus.nickname || libraryStatus.nickname || ''
     };
   }
@@ -666,6 +688,34 @@ export class QuarkGateway {
     } finally {
       releaseMutation();
     }
+  }
+
+  async getLibraryThumbnail(quarkFid, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
+    await this.#assertLibraryAccess(quarkFid, principal);
+    const cookie = this.#requireCookie();
+    // Cover discovery needs only one playable file, not a full episode scan.
+    const queue = [quarkFid];
+    const visited = new Set();
+    const deadline = Date.now() + 5_000;
+    while (queue.length && visited.size < 20 && Date.now() < deadline) {
+      const fid = queue.shift();
+      if (visited.has(fid)) continue;
+      visited.add(fid);
+      const files = await this.#listDriveFolder(fid, cookie, { maxPages: 1, timeoutMs: Math.max(1, deadline - Date.now()) });
+      const videos = files.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name || ''))
+        .sort((left, right) => collator.compare(left.file_name || '', right.file_name || ''));
+      for (const video of videos) {
+        for (const imageUrl of [video.big_thumbnail, video.thumbnail]) {
+          if (typeof imageUrl !== 'string' || !imageUrl.startsWith('https://')) continue;
+          return { imageUrl, title: video.file_name || '' };
+        }
+      }
+      for (const item of files) {
+        if ((item.file_type === 0 || item.dir) && !isAncillaryVideoPath(item.file_name || '')) queue.push(item.fid);
+      }
+    }
+    return null;
   }
 
   async importShare({
@@ -892,35 +942,76 @@ export class QuarkGateway {
     }
   }
 
-  async createPlaybackSession({ quarkFid, shareUrl, title, passcode = '' }, user = SYSTEM_USER) {
+  async createPlaybackSession({ quarkFid, shareUrl, title, passcode = '', episodeFid = '' }, user = SYSTEM_USER, playbackCache = this.playbackCache) {
     const principal = normalizeUser(user);
+    if (typeof episodeFid !== 'string' || episodeFid.length > 240) throw new QuarkApiError('文件标识无效', { statusCode: 400 });
     if (quarkFid) {
       await this.#assertLibraryAccess(quarkFid, principal);
       return this.#createDrivePlaybackSession({ quarkFid, title }, principal);
     }
-    return this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal);
+    try { return await this.#createSharePlaybackSession({ shareUrl, title, passcode, episodeFid }, principal); }
+    catch (error) {
+      if (error?.code !== 'QUARK_SHARE_UNAVAILABLE') throw error;
+      const { pwdId } = parseShareUrl(shareUrl);
+      const cached = playbackCache?.forShare?.(pwdId) || [];
+      if (!cached.length) throw error;
+      if (episodeFid && !cached.some(item => item.episodeFid === episodeFid)) throw error;
+      const episodes = cached.map(item => serializeEpisode({ fid: item.episodeFid, file_name: item.fileName, size: item.size, pdir_fid: item.folderFid }));
+      const id = createOpaqueId();
+      this.sessions.set(id, { id, ownerUsername: principal.username, kind: 'cached-share', pwdId, title: title || '已缓存视频', episodes,
+        sources: new Map(), assets: new Map(), assetIndex: new Map(), createdAt: Date.now(), touchedAt: Date.now() });
+      return { sessionId: id, title: title || '已缓存视频', cachedOnly: true,
+        episodes: episodes.map(episode => this.#publicEpisode(this.sessions.get(id),episode)) };
+    }
   }
 
-  async getShareDetails({ shareUrl, passcode = '' }) {
+  async probeShare({ shareUrl, passcode = '' }) {
+    const signal = AbortSignal.timeout(6_000), cookie = this.#requireCookie();
+    const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie, timeoutMs: 3_000, signal });
+    const queue = ['0'], visited = new Set();
+    while (queue.length && visited.size < 8) {
+      signal.throwIfAborted();
+      const parentFid = queue.shift(); if (visited.has(parentFid)) continue;
+      visited.add(parentFid);
+      const files = await this.#listShareFolder({ ...share, parentFid, cookie, signal, timeoutMs: 3_000, maxPages: 4, probeOnly: true });
+      if (files.some(isVideoFile)) return { videoCount: 1 };
+      for (const file of files) if ((file.file_type === 0 || file.dir) && !visited.has(file.fid)) queue.push(file.fid);
+    }
+    if (queue.length) throw new QuarkApiError('资源目录尚未验证完整', { code: 'QUARK_SHARE_PROBE_INCOMPLETE', statusCode: 502 });
+    throw new QuarkApiError('资源中没有可播放的视频', { code: 'QUARK_VIDEO_NOT_FOUND', statusCode: 404 });
+  }
+
+  async getShareDetails({ shareUrl, passcode = '' }, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
     const entries = await this.#readShareTree(share, cookie);
     const videoCounts = new Map();
+    const sizes = new Map();
+    let totalSize = 0;
+    for (const item of entries.filter(item => item.file_type !== 0 && !item.dir)) {
+      const size = Math.max(0, Number(item.size) || 0); totalSize += size;
+      for (const fid of item.ancestorFids) sizes.set(fid, (sizes.get(fid) || 0) + size);
+    }
     for (const item of entries.filter(isVideoFile)) {
       for (const fid of item.ancestorFids) videoCounts.set(fid, (videoCounts.get(fid) || 0) + 1);
     }
     return {
       title: share.title,
+      totalSize, sizeFormatted: formatBytes(totalSize),
       videoCount: entries.filter(isVideoFile).length,
-      episodeCount: entries.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name)
-        && extractEpisodeNumber(item.file_name) > 0).length,
+      episodeCount: entries.filter(item => isVideoFile(item) && extractEpisodeNumber(item.file_name) > 0).length,
       entries: entries.map(item => {
         const video = isVideoFile(item);
         const episode = video ? serializeEpisode(item) : null;
+        const directory = item.file_type === 0 || Boolean(item.dir);
+        const size = directory ? sizes.get(item.fid) || 0 : Math.max(0, Number(item.size) || 0);
+        const thumbnail = video ? this.shareThumbnails.register([item.big_thumbnail,item.thumbnail].find(value => typeof value === 'string' && value.startsWith('https://')) || '', principal.username) : '';
         return {
           fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
           name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),
-          isVideo: video, isSubtitle: isSubtitleFile(item), size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
+          isVideo: video, isSubtitle: isSubtitleFile(item), size, sizeFormatted: formatBytes(size), thumbnail,
+          updatedAt: normalizeFileTimestamp(item.updated_at, item.update_time, item.modified_at, item.created_at),
           episodeNumber: episode?.episodeNumber || 0, episodeTitle: episode?.episodeTitle || '',
           videoCount: videoCounts.get(item.fid) || 0
         };
@@ -959,15 +1050,13 @@ export class QuarkGateway {
   }
 
   #selectedLibraryEpisodes(tree, selected, category) {
-    const episodes = normalizePlaybackEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })));
-    const numbered = episodes.filter(episode => episode.episodeNumber > 0);
-    return category !== 'movie' && numbered.length ? numbered : episodes;
+    return selectLibraryEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })), category);
   }
 
-  async #createSharePlaybackSession({ shareUrl, title, passcode = '' }, user) {
+  async #createSharePlaybackSession({ shareUrl, title, passcode = '', episodeFid = '' }, user) {
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
-    const episodes = await this.#walkShareDirectory({ pwdId: share.pwdId, stoken: share.stoken, cookie });
+    const episodes = await this.#walkShareDirectory({ pwdId: share.pwdId, stoken: share.stoken, cookie, requestedEpisodeFid: episodeFid });
     if (!episodes.length) {
       throw new QuarkApiError('这个分享目录中没有找到可播放的视频文件', {
         code: 'QUARK_VIDEO_NOT_FOUND',
@@ -996,7 +1085,7 @@ export class QuarkGateway {
     return {
       sessionId,
       title: session.title,
-      episodes: episodes.map(({ shareFidToken, parentFid, previewUrl, ...episode }) => episode)
+      episodes: episodes.map(episode => this.#publicEpisode(session,episode))
     };
   }
 
@@ -1034,11 +1123,44 @@ export class QuarkGateway {
     return {
       sessionId,
       title: session.title,
-      episodes: episodes.map(({ shareFidToken, parentFid, previewUrl, ...episode }) => episode)
+      episodes: episodes.map(episode => this.#publicEpisode(session,episode))
     };
   }
 
+  #publicEpisode(session, episode) {
+    const { shareFidToken, parentFid, previewUrl, ...data } = episode;
+    if (episodeThumbnails.has(episode)) data.thumbnail = `/api/player/sessions/${encodeURIComponent(session.id)}/episodes/${encodeURIComponent(episode.fid)}/thumbnail`;
+    return data;
+  }
+
+  async getEpisodeThumbnail(sessionId, episodeFid, user = SYSTEM_USER) {
+    const principal = normalizeUser(user);
+    const session = this.#getSession(sessionId, principal);
+    const episode = session.episodes.find(item => item.fid === episodeFid);
+    const url = episode && episodeThumbnails.get(episode);
+    if (!url) throw new QuarkApiError('暂无视频缩略图', { statusCode:404, code:'THUMBNAIL_NOT_FOUND' });
+    const handles = session.thumbnailHandles ||= new Map();
+    let handle = handles.get(episodeFid);
+    if (!handle || handle.expires <= Date.now() || !this.shareThumbnails.entries.has(handle.id)) {
+      const path = this.shareThumbnails.register(url,principal.username);
+      handle = { id:path.split('/').pop(), expires:Date.now()+9*60_000 };
+      handles.set(episodeFid,handle);
+    }
+    return this.shareThumbnails.read(handle.id,principal.username);
+  }
+
   async prepareEpisode(sessionId, episodeFid, user = SYSTEM_USER, playbackCache = this.playbackCache, capabilities = {}) {
+    const session = this.#getSession(sessionId, normalizeUser(user));
+    const key = `${episodeFid}:${capabilities?.nativeHls === true}`;
+    const pending = session.pendingPreparations ||= new Map();
+    if (pending.has(key)) return pending.get(key);
+    const task = this.#prepareEpisode(sessionId, episodeFid, user, playbackCache, capabilities)
+      .finally(() => { if (pending.get(key) === task) pending.delete(key); });
+    pending.set(key, task);
+    return task;
+  }
+
+  async #prepareEpisode(sessionId, episodeFid, user, playbackCache, capabilities) {
     const principal = normalizeUser(user);
     const session = this.#getSession(sessionId, principal);
     const episode = session.episodes.find(item => item.fid === episodeFid);
@@ -1047,7 +1169,7 @@ export class QuarkGateway {
     }
 
     const cookie = this.#requireCookie();
-    const cacheKey = session.kind === 'share' ? `${session.pwdId}:${episode.fid}` : '';
+    const cacheKey = session.kind !== 'drive' ? `${session.pwdId}:${episode.fid}` : '';
     let savedFid = session.kind === 'drive' ? episode.fid : (playbackCache?.get(cacheKey)?.savedFid || '');
     let playData = null;
 
@@ -1057,13 +1179,15 @@ export class QuarkGateway {
       } catch (error) {
         if (error.code === 'QUARK_FILE_NOT_FOUND') {
           if (cacheKey) playbackCache?.remove(cacheKey);
-          if (session.kind === 'drive') throw error;
+          if (session.kind !== 'share') throw error;
           savedFid = '';
         } else {
           throw error;
         }
       }
     }
+
+    if (!savedFid && session.kind === 'cached-share') throw new QuarkApiError('这个视频尚未缓存，请换源后继续播放', { code: 'QUARK_SHARE_UNAVAILABLE', statusCode: 410 });
 
     let transferred = false;
     if (!savedFid && session.kind === 'share') {
@@ -1086,9 +1210,9 @@ export class QuarkGateway {
 
     const normalized = await this.#normalizePlayData(playData, savedFid, cookie, capabilities?.nativeHls === true);
     if (!normalized.sources.length) {
-      throw new QuarkApiError('播放服务没有返回当前文件可用的播放地址', {
-        code: 'QUARK_PLAY_SOURCE_EMPTY',
-        statusCode: 502
+      throw new QuarkApiError('当前设备没有可用的直连画质，请更换片源或使用支持原生 HLS 的浏览器', {
+        code: 'DIRECT_SOURCE_UNAVAILABLE',
+        statusCode: 409
       });
     }
 
@@ -1120,8 +1244,7 @@ export class QuarkGateway {
         mimeType: source.mimeType,
         isHls: source.isHls,
         delivery: source.delivery,
-        url: streamUrl,
-        ...(source.isHls && source.delivery === 'direct' ? { proxyUrl: `${streamUrl}?delivery=proxy` } : {})
+        url: streamUrl
       };
     });
 
@@ -1135,11 +1258,15 @@ export class QuarkGateway {
       .map(subtitle => this.#registerSubtitle(session, episode.fid, subtitle));
 
     return {
-      episode: (({ shareFidToken, parentFid, previewUrl, ...publicEpisode }) => publicEpisode)(episode),
+      episode: this.#publicEpisode(session,episode),
       sources,
       audioTracks: normalized.audioTracks,
       subtitles,
       subtitleNotice,
+      embeddedSubtitleUrl: (() => {
+        const source = [...sources].reverse().find(item => !item.isHls && item.mimeType === 'video/mp4');
+        return source ? `/api/player/sessions/${encodeURIComponent(sessionId)}/embedded-subtitles/${encodeURIComponent(source.id)}` : '';
+      })(),
       transferred,
       expiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString()
     };
@@ -1170,6 +1297,9 @@ export class QuarkGateway {
   }
 
   async #episodeSidecars(session, episode, cookie, user, playbackCache) {
+    if (session.kind === 'cached-share') return (playbackCache?.forShare?.(session.pwdId, true) || [])
+      .filter(item => isTextSubtitleFile({ file_name: item.fileName }) && subtitleMatchesVideo(episode.fileName, item.fileName, session.episodes.length === 1))
+      .slice(0, 32).map(item => ({ fid: item.savedFid, fileName: item.fileName, label: item.fileName, origin: 'sidecar', language: subtitleLanguage(item.fileName) }));
     if (!episode.fileName || !episode.parentFid) return [];
     session.subtitleFolders ||= new Map();
     const listFolder = async parentFid => {
@@ -1215,9 +1345,30 @@ export class QuarkGateway {
   validateHistorySession(sessionId, mediaFid, user = SYSTEM_USER) {
     const session = this.#getSession(sessionId, normalizeUser(user));
     if ((session.kind === 'drive' && session.driveFid !== mediaFid)
-      || (session.kind === 'share' && mediaFid)) {
+      || (session.kind !== 'drive' && mediaFid)) {
       throw new QuarkApiError('播放记录与当前影片会话不一致', { code: 'HISTORY_MEDIA_MISMATCH', statusCode: 403 });
     }
+  }
+
+  async getEmbeddedSubtitles(sessionId, sourceId, time, user = SYSTEM_USER, { signal } = {}) {
+    const { session, source } = this.getStreamSource(sessionId, sourceId, user);
+    if (source.isHls || source.mimeType !== 'video/mp4') throw new QuarkApiError('当前画质不支持读取内嵌字幕', { statusCode: 422 });
+    session.embeddedReaders ||= new Map();
+    if (!session.embeddedReaders.has(sourceId)) {
+      session.embeddedReaders.set(sourceId, new EmbeddedSubtitleReader(async (range, readSignal) => {
+        let current = this.getStreamSource(sessionId, sourceId, user).source;
+        let response = await this.fetchMedia(current.upstreamUrl, range, current.requestProfile, current.requestCookie, { signal: readSignal });
+        if ([401, 403, 410, 412].includes(response.status)) {
+          await response.body?.cancel();
+          current = await this.refreshStreamSource(sessionId, sourceId, user);
+          response = await this.fetchMedia(current.upstreamUrl, range, current.requestProfile, current.requestCookie, { signal: readSignal });
+        }
+        return response;
+      }));
+      if (session.embeddedReaders.size > 2) session.embeddedReaders.delete(session.embeddedReaders.keys().next().value);
+    }
+    const timeout = AbortSignal.timeout(25_000);
+    return session.embeddedReaders.get(sourceId).read(time, signal ? AbortSignal.any([signal, timeout]) : timeout);
   }
 
   async getSubtitleContent(sessionId, subtitleId, user = SYSTEM_USER, { signal } = {}) {
@@ -1272,13 +1423,10 @@ export class QuarkGateway {
 
   async getDirectStreamUrl(sessionId, sourceId, user = SYSTEM_USER) {
     let { source } = this.getStreamSource(sessionId, sourceId, user);
-    const unavailable = () => new QuarkApiError('直连暂不可用，请重新连接或选择兼容画质', {
+    const unavailable = () => new QuarkApiError('直连暂不可用，请重新连接或更换片源', {
       code: 'DIRECT_SOURCE_UNAVAILABLE', statusCode: 409
     });
-    if (source.delivery !== 'direct') {
-      if (source.directOnly) throw unavailable();
-      return null;
-    }
+    if (source.delivery !== 'direct') throw unavailable();
     if (Date.now() - source.resolvedAt >= 10 * 60 * 1000) {
       source = await this.refreshStreamSource(sessionId, sourceId, user);
     }
@@ -1287,44 +1435,22 @@ export class QuarkGateway {
     return this.#assertRemoteUrl(source.upstreamUrl);
   }
 
-  registerAsset(session, upstreamUrl, requestProfile = 'web', requestCookie = '') {
-    const existingId = session.assetIndex.get(upstreamUrl);
-    if (existingId && session.assets.has(existingId)) {
-      Object.assign(session.assets.get(existingId), { requestProfile, requestCookie, touchedAt: Date.now() });
-      return existingId;
-    }
-    const assetId = createOpaqueId();
-    session.assets.set(assetId, { upstreamUrl, requestProfile, requestCookie, touchedAt: Date.now() });
-    session.assetIndex.set(upstreamUrl, assetId);
-    return assetId;
-  }
-
-  getAsset(sessionId, assetId, user = SYSTEM_USER) {
-    const session = this.#getSession(sessionId, normalizeUser(user));
-    const asset = session.assets.get(assetId);
-    if (!asset) {
-      throw new QuarkApiError('播放分片地址已过期，请重新加载', {
-        code: 'PLAY_ASSET_EXPIRED',
-        statusCode: 410
-      });
-    }
-    asset.touchedAt = Date.now();
-    return { session, asset };
-  }
-
   async fetchMedia(upstreamUrl, rangeHeader, requestProfile = 'web', requestCookie = '', options = {}) {
     let currentUrl = this.#assertRemoteUrl(upstreamUrl);
     for (let redirect = 0; redirect < 4; redirect += 1) {
       const parsed = new URL(currentUrl);
+      // The drive API's private thumbnail endpoint needs the web session;
+      // signed CDN images reject it. Re-evaluate the origin after every redirect.
+      const profile = requestProfile === 'thumbnail' && parsed.origin === new URL(API_HOST).origin ? 'web' : requestProfile;
       const headers = {
-        'Accept': '*/*',
-        'User-Agent': requestProfile === 'tv'
+        'Accept': requestProfile === 'thumbnail' ? 'image/*' : '*/*',
+        ...(profile === 'thumbnail' ? {} : { 'User-Agent': profile === 'tv'
           ? 'Mozilla/5.0 (Linux; U; Android 13; zh-cn; M2004J7AC Build/UKQ1.231108.001) AppleWebKit/533.1 (KHTML, like Gecko) Mobile Safari/533.1'
-          : QUARK_DESKTOP_USER_AGENT,
-        ...(requestProfile === 'web' ? { Referer: 'https://pan.quark.cn/' } : {})
+          : QUARK_DESKTOP_USER_AGENT }),
+        ...(profile === 'web' ? { Referer: 'https://pan.quark.cn/' } : {})
       };
       if (rangeHeader) headers.Range = rangeHeader;
-      if (requestProfile === 'web' && /(^|\.)quark\.cn$/i.test(parsed.hostname)) {
+      if (profile === 'web' && /(^|\.)quark\.cn$/i.test(parsed.hostname)) {
         headers.Cookie = requestCookie || this.#requireCookie();
       }
 
@@ -1402,20 +1528,21 @@ export class QuarkGateway {
     return cookie;
   }
 
-  async #resolveShareCredentials({ shareUrl, passcode = '', cookie }) {
+  async #resolveShareCredentials({ shareUrl, passcode = '', cookie, timeoutMs = API_REQUEST_TIMEOUT_MS, signal }) {
     const { pwdId } = parseShareUrl(shareUrl);
     const tokenData = await this.#requestJson(`${SHARE_HOST}/share/sharepage/token?pr=ucpro&fr=pc`, {
       method: 'POST',
       cookie,
       userAgent: QUARK_DESKTOP_USER_AGENT,
-      body: { pwd_id: pwdId, passcode: String(passcode || '') }
+      body: { pwd_id: pwdId, passcode: String(passcode || '') },
+      timeoutMs, signal
     });
     if (tokenData?.code !== 0 || !tokenData?.data?.stoken) {
       const message = tokenData?.message || tokenData?.message_desc || '';
       throw new QuarkApiError(message || '暂时无法访问网盘分享，请稍后重试或核对提取码', {
         // Unknown provider failures (including throttling) must not trigger a
         // source change. Only explicit unavailability enters that policy.
-        code: isShareUnavailableMessage(message) ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_ACCESS_FAILED',
+        code: shareFailureCode(message),
         statusCode: 422
       });
     }
@@ -1426,16 +1553,17 @@ export class QuarkGateway {
     };
   }
 
-  async #listShareFolder({ pwdId, stoken, parentFid, cookie }) {
-    const all = [];
-    for (let page = 1; page <= 100; page += 1) {
+  async #listShareFolder({ pwdId, stoken, parentFid, cookie, signal, timeoutMs, maxPages = 100, probeOnly = false }) {
+    const all = [], seen = new Set();
+    for (let page = 1; page <= maxPages; page += 1) {
       const url = new URL(`${SHARE_HOST}/share/sharepage/detail`);
       url.searchParams.set('pwd_id', pwdId);
       url.searchParams.set('stoken', stoken);
       url.searchParams.set('pdir_fid', parentFid);
-      url.searchParams.set('page', String(page));
-      url.searchParams.set('size', '100');
-      const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
+      url.searchParams.set('_page', String(page));
+      url.searchParams.set('_size', '100');
+      url.searchParams.set('_fetch_total', '1');
+      const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT, signal, timeoutMs });
       if (result?.code !== 0) {
         const message = result?.message || result?.message_desc || '';
         throw new QuarkApiError(message || '读取网盘分享目录失败', {
@@ -1443,11 +1571,22 @@ export class QuarkGateway {
           statusCode: 502
         });
       }
-      const list = arrayFrom(result?.data?.list);
-      all.push(...list);
-      if (list.length < 100) break;
+      if (!Array.isArray(result?.data?.list)) break;
+      const list = result.data.list, metadata = result?.metadata || {};
+      const total = Number.isSafeInteger(metadata._total) && metadata._total >= 0 ? metadata._total : null;
+      const pageSize = Number.isSafeInteger(metadata._size) && metadata._size > 0 ? metadata._size : 100;
+      const before = all.length;
+      for (const item of list) if (!seen.has(item.fid)) { seen.add(item.fid); all.push(item); }
+      // Providers may cap page size. Completion follows their declared total,
+      // never the assumption that fewer than 100 means the last page.
+      if (metadata._page !== undefined && Number(metadata._page) !== page) break;
+      // A positive probe establishes that content exists; full directory reads
+      // still continue to completion before publishing an episode list.
+      if (probeOnly && list.some(isVideoFile)) return all;
+      if (total !== null ? all.length >= total : list.length < pageSize) return all;
+      if (all.length === before) break;
     }
-    return all;
+    throw new QuarkApiError('资源文件列表未读取完整，请刷新重试', { code: 'QUARK_SHARE_LIST_INCOMPLETE', statusCode: 502 });
   }
 
   async #walkDriveDirectory(rootFid, cookie) {
@@ -1545,7 +1684,7 @@ export class QuarkGateway {
     return status;
   }
 
-  async #walkShareDirectory({ pwdId, stoken, cookie, title = '', category, rawEpisodes = false }) {
+  async #walkShareDirectory({ pwdId, stoken, cookie, title = '', category, rawEpisodes = false, requestedEpisodeFid = '' }) {
     const queue = [{ fid: '0', path: title }];
     const visited = new Set();
     const files = [];
@@ -1555,35 +1694,20 @@ export class QuarkGateway {
       if (visited.has(parentFid)) continue;
       visited.add(parentFid);
 
-      for (let page = 1; page <= 100; page += 1) {
-        const url = new URL(`${SHARE_HOST}/share/sharepage/detail`);
-        url.searchParams.set('pwd_id', pwdId);
-        url.searchParams.set('stoken', stoken);
-        url.searchParams.set('pdir_fid', parentFid);
-        url.searchParams.set('page', String(page));
-        url.searchParams.set('size', '100');
-        const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT });
-        if (result?.code !== 0) {
-          const message = result?.message || result?.message_desc || '';
-          throw new QuarkApiError(message || '读取网盘分享目录失败', {
-            code: isShareUnavailableMessage(message) ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_SHARE_LIST_FAILED',
-            statusCode: 502
-          });
-        }
-        const list = arrayFrom(result?.data?.list);
-        for (const item of list) {
-          if (item.file_type === 0 || item.dir) queue.push({ fid: item.fid, path: [sourcePath, item.file_name].filter(Boolean).join('/') });
-          else if (isVideoFile(item)) files.push({ ...item, source_path: sourcePath, pdir_fid: parentFid });
-        }
-        if (list.length < 100) break;
+      const list = await this.#listShareFolder({ pwdId, stoken, parentFid, cookie });
+      for (const item of list) {
+        if (item.file_type === 0 || item.dir) queue.push({ fid: item.fid, path: [sourcePath, item.file_name].filter(Boolean).join('/') });
+        else if (isVideoFile(item)) files.push({ ...item, source_path: sourcePath, pdir_fid: parentFid });
       }
     }
     if (queue.length || files.length >= 5000) throw new QuarkApiError('分享目录过大，请选择单部影片的分享', { code: 'LIBRARY_SCAN_LIMIT', statusCode: 422 });
     if (rawEpisodes) return files.filter(item => !ancillaryVideoPattern.test(item.file_name || '')
       && !isAncillaryVideoPath(`${item.source_path}/${item.file_name}`)).map(serializeEpisode);
-    const episodes = normalizePlaybackEpisodes(files);
-    const numbered = episodes.filter(episode => episode.episodeNumber > 0);
-    return category && category !== 'movie' && numbered.length ? numbered : episodes;
+    const episodes = category ? selectLibraryEpisodes(files, category) : normalizePlaybackEpisodes(files);
+    if (requestedEpisodeFid && !episodes.some(item => item.fid === requestedEpisodeFid)) {
+      throw new QuarkApiError('所选视频已不存在，请刷新文件列表', { code: 'EPISODE_NOT_FOUND', statusCode: 404 });
+    }
+    return episodes;
   }
 
   async #ensurePlaybackFolder(cookie, user) {
@@ -1945,9 +2069,9 @@ export class QuarkGateway {
     }
   }
 
-  async #listDriveFolder(parentFid, cookie) {
+  async #listDriveFolder(parentFid, cookie, { maxPages = 50, timeoutMs } = {}) {
     const all = [];
-    for (let page = 1; page <= 50; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const url = new URL(`${API_HOST}/file/sort`);
       url.searchParams.set('pr', 'ucpro');
       url.searchParams.set('fr', 'pc');
@@ -1957,7 +2081,7 @@ export class QuarkGateway {
       url.searchParams.set('_fetch_total', '1');
       url.searchParams.set('_fetch_sub_dirs', '0');
       url.searchParams.set('_sort', 'file_type:asc,updated_at:desc');
-      const result = await this.#requestJson(url, { cookie });
+      const result = await this.#requestJson(url, { cookie, timeoutMs });
       if (result?.code !== 0) {
         throw new QuarkApiError(result?.message || '读取个人网盘目录失败', {
           code: 'QUARK_DRIVE_LIST_FAILED',
@@ -2138,75 +2262,16 @@ export class QuarkGateway {
   }
 
   async #loadPlayData(savedFid) {
-    const cookie = this.#requireCookie();
-    let webData = { __playbackProfile: 'web' };
-
-    // TV 的渐进式视频可免 Cookie 直连。片库管理仍保留原有网页认证。
-    if (this.directPlaybackEnabled && this.credentialStore.getTvAuth?.()?.refreshToken && this.tvPlaybackClient) {
-      try {
-        const data = await this.tvPlaybackClient.getStreaming(savedFid);
-        if (hasRawPlaybackSource(data)) return { ...data, __playbackProfile: 'tv' };
-      } catch {
-        // TV 认证或接口不可用时保留已有 Cookie 播放能力。
-      }
+    if (!this.credentialStore.getTvAuth?.()?.refreshToken || !this.tvPlaybackClient) {
+      throw new QuarkApiError('直连播放认证已失效，请管理员重新认证', { code:'QUARK_AUTH_REQUIRED', statusCode:401 });
     }
-
-    // fmp4_av 要求上游返回同一时间轴的音视频复用流。旧 fmp4
-    // 模式在部分 60 FPS/HDR 文件上会产生音频 PTS 偏移，表现为声音
-    // 与画面内字幕逐渐不同步。保留旧参数仅作老文件兼容兜底。
-    const supportProfiles = [
-      'fmp4_av,m3u8,dolby_vision',
-      'fmp4,m3u8'
-    ];
-    for (const supports of supportProfiles) {
-      const requestBody = {
-        fid: savedFid,
-        resolutions: 'normal,low,high,super,2k,4k',
-        supports
-      };
-      for (const endpoint of [
-        `${MEDIA_HOST}/file/v2/play?pr=ucpro&fr=pc`,
-        `${API_HOST}/file/v2/play?pr=ucpro&fr=pc`
-      ]) {
-        try {
-          const result = await this.#requestJson(endpoint, {
-            method: 'POST',
-            cookie,
-            body: requestBody,
-            acceptErrorCodes: true,
-            captureResponseCookies: true,
-            userAgent: QUARK_DESKTOP_USER_AGENT
-          });
-          if (Number(result?.code) === 0 && result?.data) {
-            webData = {
-              ...result.data,
-              __playbackProfile: 'web',
-              __mediaCookie: mergeCookieHeaders(cookie, result.__responseCookies)
-            };
-            if (hasRawPlaybackSource(webData)) return webData;
-          }
-        } catch (error) {
-          if (error?.code === 'QUARK_AUTH_REQUIRED') throw error;
-          // Try the alternate host/profile, then the optional advanced profile.
-        }
-      }
-    }
-
-    const tvAuth = this.credentialStore.getTvAuth?.();
-    if (tvAuth?.refreshToken && this.tvPlaybackClient) {
-      try {
-        const data = await this.tvPlaybackClient.getStreaming(savedFid);
-        const advancedData = { ...data, __playbackProfile: 'tv' };
-        if (hasRawPlaybackSource(advancedData)) return advancedData;
-      } catch {
-        // Advanced playback is optional; the Cookie/download path remains usable.
-      }
-    }
-
-    return webData;
+    // Playback never falls back to Cookie-based relay. Authentication and
+    // provider failures must remain visible so they cannot consume server video traffic.
+    return { ...await this.tvPlaybackClient.getStreaming(savedFid), __playbackProfile:'tv' };
   }
 
   async #normalizePlayData(data, savedFid, cookie, nativeHls = false) {
+    if (data?.__playbackProfile !== 'tv') throw new QuarkApiError('当前来源不支持直连', { code:'DIRECT_SOURCE_UNAVAILABLE', statusCode:409 });
     const rawSources = playbackVideoItems(data);
     const seen = new Set();
     const sources = [];
@@ -2232,6 +2297,7 @@ export class QuarkGateway {
       ].flat().filter(Boolean).join(',');
       const isHls = /\.m3u8(?:$|\?)/i.test(upstreamUrl)
         || /m3u8|mpegurl|hls/i.test(formatHints);
+      if (isHls && !nativeHls) continue; // CDN playlists do not grant browser CORS.
       sources.push({
         upstreamUrl,
         requestProfile: data?.__playbackProfile || 'web',
@@ -2247,13 +2313,13 @@ export class QuarkGateway {
         mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || (/mkv|matroska/i.test(formatHints) ? 'video/x-matroska' : 'video/mp4')),
         isHls,
         nativeHls,
-        delivery: this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && (!isHls || nativeHls) ? 'direct' : 'proxy'
+        delivery: 'direct'
       });
     }
 
     // 依赖 hls.js 的设备仍需要 CORS；原生 HLS 设备直接播放转码流，
     // 无需额外获取格式兼容性较差的原文件。
-    if (!nativeHls && this.directPlaybackEnabled && data?.__playbackProfile === 'tv' && sources.length && sources.every(source => source.isHls)) {
+    if (!sources.length) {
       try {
         const download = await this.tvPlaybackClient?.getDownload?.(savedFid);
         if (download?.download_url) {
@@ -2267,40 +2333,6 @@ export class QuarkGateway {
         }
       } catch {
         // 原文件下载权限与转码播放权限可能不同。
-      }
-    }
-
-    if (!sources.length && data?.__playbackProfile !== 'tv') {
-      const download = await this.#requestJson(`${API_HOST}/file/download?pr=ucpro&fr=pc`, {
-        method: 'POST',
-        cookie,
-        body: { fids: [savedFid], speedup_session: '' },
-        acceptErrorCodes: true,
-        captureResponseCookies: true,
-        userAgent: QUARK_DESKTOP_USER_AGENT
-      });
-      const downloadData = download?.data;
-      const downloadItem = Array.isArray(downloadData)
-        ? (downloadData[0] || {})
-        : (downloadData?.list?.[0] || downloadData || {});
-      const upstreamUrl = firstNonEmpty(downloadItem.download_url, downloadItem.url);
-      if (upstreamUrl) {
-        sources.push({
-          upstreamUrl,
-          requestProfile: 'web',
-          requestCookie: mergeCookieHeaders(cookie, download.__responseCookies),
-          resolution: 'original',
-          label: '原画',
-          rank: 4320,
-          width: 0,
-          height: 0,
-          fps: 0,
-          codec: '',
-          bitrate: 0,
-          mimeType: 'video/mp4',
-          isHls: false,
-          delivery: 'proxy'
-        });
       }
     }
 
@@ -2343,7 +2375,8 @@ export class QuarkGateway {
           'Cookie': cookie
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-        signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS)
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs || API_REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(options.timeoutMs || API_REQUEST_TIMEOUT_MS)
       });
     } catch (error) {
       throw new QuarkApiError(`连接播放服务失败：${error.message}`, {
@@ -2389,11 +2422,11 @@ export class QuarkGateway {
     }
     if (!options.acceptErrorCodes && !response.ok) {
       const message = result?.message || result?.message_desc || '';
-      const unavailableShare = [400, 404, 410, 422].includes(response.status)
+      const shareError = [400, 404, 410, 422].includes(response.status)
         && /\/share\/sharepage\/(?:token|detail)$/.test(new URL(url).pathname)
-        && isShareUnavailableMessage(message);
+        ? shareFailureCode(message) : 'QUARK_SHARE_ACCESS_FAILED';
       throw new QuarkApiError(message || `播放服务请求失败（HTTP ${response.status}）`, {
-        code: unavailableShare ? 'QUARK_SHARE_UNAVAILABLE' : 'QUARK_HTTP_ERROR',
+        code: shareError === 'QUARK_SHARE_ACCESS_FAILED' ? 'QUARK_HTTP_ERROR' : shareError,
         statusCode: response.status >= 400 && response.status < 500 ? 422 : 502,
         details: { upstreamStatus: response.status, upstreamCode: code }
       });
@@ -2420,6 +2453,7 @@ export class QuarkGateway {
   }
 
   #cleanupSessions() {
+    this.shareThumbnails.cleanup();
     const threshold = Date.now() - SESSION_TTL_MS;
     for (const [sessionId, session] of this.sessions.entries()) {
       if (session.touchedAt < threshold) this.sessions.delete(sessionId);

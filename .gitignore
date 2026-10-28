@@ -12,5 +12,7 @@ coverage/
 .cursor/
 data/
 .playwright-mcp/
+.playwright-cli/
+output/playwright/
 /misty-*.png
 scripts/*.local.sh

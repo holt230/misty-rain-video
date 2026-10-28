@@ -10,8 +10,9 @@ import { themePreference, setTheme } from '../../services/theme';
   </div>
 </template>
 <style scoped>
-.theme-switch { display: flex; gap: 4px; padding: 4px; border: var(--glass-border); border-radius: 12px; background: var(--glass-bg); }
-button { display: flex; flex: 1; min-width: 0; min-height: 40px; align-items: center; justify-content: center; gap: 5px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: .76rem; white-space: nowrap; }
-button[aria-pressed='true'] { color: var(--text-primary); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); }
-svg { width: 16px; height: 16px; }
+.theme-switch { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+button { display:flex; align-items:center; justify-content:center; gap:7px; min-width:0; min-height:46px; padding:10px 8px; border:1px solid var(--divider); border-radius:4px; color:var(--text-secondary); background:none; font-size:.83rem; font-weight:550; white-space:nowrap; transition:background .16s,color .16s,border-color .16s; }
+button[aria-pressed='true'] { color:var(--accent-ink); background:var(--liquid-accent); border-color:var(--liquid-accent); }
+svg { width:17px; height:17px; }
+@media(prefers-reduced-motion:reduce) { button { transition:none; } }
 </style>

@@ -49,7 +49,7 @@ const setDrive = (key: DriveType | 'all') => {
         <div class="target-media-summary">
           <img
             :src="defaultSearchCover"
-            alt="烟雨影视默认封面"
+            alt="默认封面"
             class="target-cover-thumb"
           />
           <div class="target-details">

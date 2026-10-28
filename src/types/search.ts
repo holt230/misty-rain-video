@@ -1,6 +1,8 @@
 export type DriveType = 'quark' | 'aliyun' | 'baidu' | 'xunlei' | '115' | 'uc' | 'tianyi' | 'mobile' | 'other';
 
 export interface ResourceItem {
+  relevance?: number;
+  linkStatus?: 'available' | 'restricted' | 'unknown';
   id: string;
   title: string;
   url: string;
@@ -43,4 +45,9 @@ export interface DriveCountMap {
   uc: number;
   tianyi: number;
   [key: string]: number;
+}
+
+export interface ShareValidationResult {
+  entries: Array<{ url: string; password: string; status: 'available' | 'unavailable' | 'deferred' | 'restricted' | 'unknown' | 'pending' }>;
+  pending: boolean;
 }
