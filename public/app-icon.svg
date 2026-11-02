@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>烟雨影视应用图标</title>
+  <rect width="512" height="512" fill="#151920"/>
+  <g transform="translate(64 64) scale(6)">
+  <defs>
+    <linearGradient id="rain-light" x1="14" y1="8" x2="49" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFBC7C"/>
+      <stop offset=".55" stop-color="#FF9259"/>
+      <stop offset="1" stop-color="#F16B42"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#rain-light)" fill-rule="evenodd" d="M34.3 6.4C39.9 14.2 56 29.2 56 40.2C56 53.3 45.2 61 32 61C18.8 61 8 53.3 8 40.2C8 29.2 24.1 14.2 29.7 6.4C30.8 4.8 33.2 4.8 34.3 6.4ZM26 28.4C26 26.9 27.7 26 29 26.8L43.3 35.4C44.6 36.2 44.6 38 43.3 38.8L29 47.4C27.7 48.2 26 47.3 26 45.8V28.4Z"/>
+  </g>
+</svg>

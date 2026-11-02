@@ -8,6 +8,7 @@
   --glass-blur: none; --glass-blur-heavy: none; --glass-shadow-sm: none;
   --nav-background: rgb(16 17 20 / .97); --mobile-gutter: 18px;
   --mobile-content-bottom: calc(90px + var(--safe-area-bottom));
+  --mobile-header-top-space: 18px;
 }
 :root[data-theme='light'] {
   --liquid-canvas: #f8f9fb; --app-atmosphere: #f8f9fb; --surface-1: #fff; --surface-2: #eef0f4; --surface-3: #e2e5ec; --surface-elevated: #fff;
@@ -17,7 +18,7 @@
 }
 .cinema-header { position: sticky; top: 0; z-index: 300; display: flex; gap: 20px; align-items: center; min-height: 76px; padding: calc(12px + var(--safe-area-top)) 32px 12px; background: var(--nav-background); border-bottom: 1px solid var(--divider); }
 .cinema-brand { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; color: var(--text-primary); text-align: left; font-size: 18px; font-weight: 750; white-space: nowrap; }
-.cinema-brand > :first-child { width: 30px; height: 30px; }
+.cinema-brand > :first-child { width: 32px; height: 32px; flex-shrink: 0; }
 .cinema-brand small { display: block; color: var(--text-tertiary); font-size: 10px; letter-spacing: .2em; margin-top: 4px; }
 .header-search { display: flex; align-items: center; gap: 10px; width: min(480px, 60%); margin-left: auto; padding: 0 17px; min-height: 44px; border: 1px solid var(--divider); border-radius: 24px; background: var(--surface-1); color: var(--text-tertiary); font-size: 13px; text-align: left; }
 .header-search svg, .icon-control svg { width: 20px; height: 20px; flex-shrink: 0; }
@@ -158,9 +159,10 @@
   .discovery-page, .search-page, #app .library-page.page-container, #app .account-page { width: calc(100% - 216px); margin-left: 216px; max-width: none; padding-left: clamp(24px, 3vw, 60px); padding-right: clamp(24px, 3vw, 60px); }
 }
 @media (max-width: 767px) {
-  .cinema-header { padding: calc(8px + var(--safe-area-top)) 14px 8px; gap: 10px; min-height: 64px; }
+  .cinema-header { padding: calc(var(--mobile-header-top-space) + var(--safe-area-top)) max(14px, var(--safe-area-right)) 12px max(14px, var(--safe-area-left)); gap: 10px; min-height: 74px; }
+  .screen-header { padding-top: calc(var(--mobile-header-top-space) + var(--safe-area-top)); padding-bottom: 12px; min-height: 74px; }
   .cinema-brand { font-size: 16px; gap: 6px; }
-  .cinema-brand > :first-child { width: 26px; height: 26px; }
+  .cinema-brand > :first-child { width: 30px; height: 30px; }
   .header-search { flex: 1; width: auto; padding: 0 12px; min-width: 0; gap: 7px; }
   .header-search span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .header-search svg { width: 16px; height: 16px; }

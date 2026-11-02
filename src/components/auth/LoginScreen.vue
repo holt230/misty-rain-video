@@ -131,7 +131,7 @@ const submit = () => {
 .login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); }
 .login-card { position: relative; width: min(420px, 100%); padding: 40px 24px 26px; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
-.brand-mark { width: 54px; height: 54px; overflow: hidden; border: 1px solid var(--divider); border-radius: 19px; box-shadow: 0 7px 18px rgb(44 81 157 / .15); }
+.brand-mark { width: 54px; height: 54px; flex-shrink: 0; }
 .brand-mark :deep(.brand-mark-image) { border-radius: inherit; }
 .brand-copy { display: grid; gap: 3px; }
 .brand-copy strong { font-size: 1.15rem; font-weight: 740; letter-spacing: -.04em; }

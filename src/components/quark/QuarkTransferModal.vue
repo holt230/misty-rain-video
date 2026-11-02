@@ -485,6 +485,6 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 @media (min-width: 900px) {
   .dialog-header, .result-search, .result-summary, .result-filters, .dialog-body { width: min(100%, 1000px); margin-left: auto; margin-right: auto; }
 }
-@media (max-width: 640px) { .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border-radius: 0; } .dialog-header { padding-top: calc(14px + var(--safe-area-top)); } }
+@media (max-width: 640px) { .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border-radius: 0; } .dialog-header { padding-top: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)); } }
 
 </style>

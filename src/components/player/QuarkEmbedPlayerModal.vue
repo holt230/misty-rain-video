@@ -1809,7 +1809,7 @@ defineExpose({ retry, dismissLayer });
 .episode-panel.sheet-open .episode-list { overflow-y: auto; }
 @media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(100dvh - 200px); } }
 @media (max-width: 820px) {
-  .player-header { min-height: calc(62px + var(--safe-area-top)); padding: calc(6px + var(--safe-area-top)) 12px 6px; }
+  .player-header { min-height: calc(74px + var(--safe-area-top)); padding: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)) 12px 12px; }
   .player-layout { display: block; }
   .video-column { display: contents; }
   .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: 16 / 9; min-height: 210px; max-height: 55dvh; }

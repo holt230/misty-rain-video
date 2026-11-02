@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { withAppBase } from '../../services/appUrl';
 
-const brandMarkUrl = withAppBase('brand-mark.png');
+const brandMarkUrl = withAppBase('brand-mark.svg');
 </script>
 
 <template>
@@ -20,7 +20,7 @@ const brandMarkUrl = withAppBase('brand-mark.png');
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   user-select: none;
   -webkit-user-drag: none;
 }
