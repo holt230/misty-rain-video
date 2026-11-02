@@ -1,14 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <title>烟雨影视应用图标</title>
-  <rect width="512" height="512" fill="#151920"/>
-  <g transform="translate(64 64) scale(6)">
+  <title>烟雨影视 · 山间微光</title>
+  <rect width="512" height="512" fill="#102F37"/>
+  <g transform="translate(51.2 51.2) scale(6.4)">
   <defs>
-    <linearGradient id="rain-light" x1="14" y1="8" x2="49" y2="59" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFBC7C"/>
-      <stop offset=".55" stop-color="#FF9259"/>
-      <stop offset="1" stop-color="#F16B42"/>
+    <clipPath id="landscape-window"><circle cx="32" cy="32" r="28"/></clipPath>
+    <linearGradient id="mist-sky" x1="32" y1="4" x2="32" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FAF1E2"/><stop offset="1" stop-color="#DCE9DF"/>
+    </linearGradient>
+    <linearGradient id="cinema-light" x1="40" y1="12" x2="47" y2="27" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7C987"/><stop offset="1" stop-color="#E98D50"/>
     </linearGradient>
   </defs>
-  <path fill="url(#rain-light)" fill-rule="evenodd" d="M34.3 6.4C39.9 14.2 56 29.2 56 40.2C56 53.3 45.2 61 32 61C18.8 61 8 53.3 8 40.2C8 29.2 24.1 14.2 29.7 6.4C30.8 4.8 33.2 4.8 34.3 6.4ZM26 28.4C26 26.9 27.7 26 29 26.8L43.3 35.4C44.6 36.2 44.6 38 43.3 38.8L29 47.4C27.7 48.2 26 47.3 26 45.8V28.4Z"/>
+  <g clip-path="url(#landscape-window)">
+    <circle cx="32" cy="32" r="28" fill="url(#mist-sky)"/>
+    <circle cx="43" cy="19" r="7.5" fill="url(#cinema-light)"/>
+    <path d="M0 47L20.3 19.7Q22.1 17.5 24.1 20.2L37.2 36.9L44.2 28.1Q45.8 26.3 47.6 28.4L64 48V64H0Z" fill="#8EB5AC"/>
+    <path d="M0 51L13.8 34.8Q15.6 32.5 18 34.2L30.5 43.5Q34 46 38.2 43.4L46.7 38.2Q49 36.7 51.6 38.7L64 50V64H0Z" fill="#316773"/>
+    <path d="M0 43C12 40 21 41 32 45C42 48 51 48 64 43V47C51 52 42 52 31 48C19 44 11 44 0 47Z" fill="#F4F0E5"/>
+    <path d="M0 53C16 48 28 51 39 53C48 55 57 53 64 51V64H0Z" fill="#173E49"/>
+    <path d="M8 54C20 51 30 54 42 54C48 54 51 53 56 52L55 55C49 58 41 58 32 56C23 55 17 55 10 57Z" fill="#DDE9E1"/>
+  </g>
   </g>
 </svg>

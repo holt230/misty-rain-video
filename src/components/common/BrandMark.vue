@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { withAppBase } from '../../services/appUrl';
 
-const brandMarkUrl = withAppBase('brand-mark.svg');
+const brandMarkUrl = withAppBase('brand-mark.svg?v=20261102-landscape');
 </script>
 
 <template>
