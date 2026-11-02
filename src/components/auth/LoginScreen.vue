@@ -51,9 +51,9 @@ const submit = () => {
         </div>
 
         <div class="login-heading">
-          <span>{{ checking ? '正在连接' : '私人片库' }}</span>
-          <h1>{{ checking ? '正在准备片库' : '欢迎回来' }}</h1>
-          <p>{{ checking ? '正在恢复登录状态…' : '登录后继续观看你的收藏与播放记录。' }}</p>
+          <span>{{ checking ? '正在连接' : '你的私人影院' }}</span>
+          <h1>{{ checking ? '正在准备好故事' : '欢迎回来' }}</h1>
+          <p>{{ checking ? '正在恢复登录状态…' : '发现热门影视，接着上次的故事继续看。' }}</p>
         </div>
       </header>
 
@@ -111,7 +111,7 @@ const submit = () => {
 
         <button type="submit" class="login-button" :disabled="submitting || !username.trim() || !password">
           <span v-if="submitting" class="button-spinner" aria-hidden="true"></span>
-          {{ submitting ? '正在登录…' : '进入片库' }}
+          {{ submitting ? '正在登录…' : '开始探索' }}
         </button>
       </form>
 

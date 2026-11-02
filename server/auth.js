@@ -50,11 +50,18 @@ const parseUsers = value => {
   });
 };
 
-const parseCookies = header => Object.fromEntries(String(header || '').split(';').map(part => {
-  const index = part.indexOf('=');
-  if (index < 0) return ['', ''];
-  return [part.slice(0, index).trim(), part.slice(index + 1).trim()];
-}).filter(([name]) => name));
+const parseCookies = header => {
+  const cookies = Object.create(null);
+  for (const part of String(header || '').split(';')) {
+    const index = part.indexOf('=');
+    if (index < 0) continue;
+    const name = part.slice(0, index).trim();
+    // Browsers send a more specific Path before a root-path cookie with the same name.
+    // Do not let a stale root session override the newly signed subpath session.
+    if (name && !Object.hasOwn(cookies, name)) cookies[name] = part.slice(index + 1).trim();
+  }
+  return cookies;
+};
 
 const timingSafeEqual = (left, right) => {
   const a = Buffer.from(left);

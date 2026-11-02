@@ -23,11 +23,14 @@ const props = defineProps<{
   savingResourceId?: string;
   saveError?: LibrarySaveFeedback | null;
   failedResourceId?: string;
+  automaticStatus?: string;
+  playAfterSave?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'open-auth-settings'): void;
+  (e: 'cancel-automatic'): void;
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string): void;
@@ -35,6 +38,7 @@ const emit = defineEmits<{
 }>();
 
 const detailResource = ref<ResourceItem | null>(null);
+const detailsRef = ref<InstanceType<typeof QuarkResourceDetails> | null>(null);
 const targetCategory = ref<CategoryType>('tv');
 const categoryExpanded = ref(false);
 const categories: Array<{ value: CategoryType; label: string }> = [
@@ -182,11 +186,20 @@ const handleBodyScroll = (event: Event) => {
 const requestClose = () => {
   if (!props.isSaving) emit('close');
 };
+const dismissLayer = () => {
+  if (props.isSaving) return false;
+  if (detailsRef.value?.dismissFolder()) return true;
+  if (detailResource.value) { detailResource.value = null; return true; }
+  if (categoryExpanded.value) { categoryExpanded.value = false; return true; }
+  return false;
+};
+defineExpose({ dismissLayer });
+const requestBack = () => { if (!props.isSaving && !dismissLayer()) emit('close'); };
 const saveDetails = (selectedFids?: string[]) => {
   if (props.media && detailResource.value) emit('save-to-cards', props.media, targetCategory.value, detailResource.value, selectedFids);
 };
 const dialogRef = ref<HTMLElement | null>(null);
-useDialog(dialogRef, () => props.isOpen, requestClose);
+useDialog(dialogRef, () => props.isOpen, requestBack);
 </script>
 
 <template>
@@ -197,7 +210,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
     role="dialog"
     aria-modal="true"
     aria-labelledby="resource-dialog-title"
-    @keydown.esc.stop="requestClose"
+    @keydown.esc.stop="requestBack"
     @click.self="requestClose"
   >
     <div class="liquid-dialog glass-rim" v-if="media" :aria-busy="isSaving || isAnalyzing">
@@ -297,18 +310,19 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
 
       <!-- 列表内容 -->
       <div class="dialog-body" :class="{ 'showing-details': detailResource }" @scroll.passive="handleBodyScroll">
-        <QuarkResourceDetails v-if="detailResource"
+        <QuarkResourceDetails v-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
-          :save-error="failedResourceId === detailResource.id ? saveError : null"
+          :save-error="failedResourceId === detailResource.id ? saveError : null" :play-after-save="playAfterSave"
           @back="detailResource = null" @open-auth-settings="emit('open-auth-settings')"
           @save="saveDetails"
         />
         <template v-else-if="isAnalyzing">
           <div class="loading-bar">
             <div class="mini-spinner"></div>
-            <span>正在检索《{{ searchKeyword || media.title }}》网盘资源...</span>
+            <span role="status">{{ automaticStatus || `正在检索《${searchKeyword || media.title}》网盘资源…` }}</span>
           </div>
           <SkeletonCard v-for="i in 3" :key="i" />
+          <button v-if="automaticStatus" type="button" class="cinema-button secondary" :disabled="isSaving" @click="emit('cancel-automatic')">自己选择片源</button>
         </template>
 
         <template v-else>
@@ -348,7 +362,7 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
                   :disabled="isSaving"
                   @click="emit('save-to-cards', media, targetCategory, res)"
                 >
-                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? '全部替换' : '全部保存' }}
+                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? (playAfterSave ? '替换并播放' : '全部替换') : playAfterSave ? '添加并播放' : '添加到片库' }}
                 </button>
               </div>
             </div>
@@ -460,4 +474,17 @@ useDialog(dialogRef, () => props.isOpen, requestClose);
   .result-summary { padding-top: 4px; }
   .result-filters { padding-bottom: 4px; }
 }
+
+.liquid-dialog-backdrop { padding: 0; background: var(--liquid-canvas) !important; }
+.liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border: 0; border-radius: 0; background: var(--liquid-canvas); box-shadow: none; }
+.liquid-dialog.glass-rim::after { display: none; }
+.dialog-header { padding-top: calc(18px + var(--safe-area-top)); }
+.dialog-poster { border-radius: 8px; }
+.btn-transfer { border-radius: 8px; color: var(--accent-ink); background: var(--liquid-accent); }
+.liquid-resource-row { border-radius: 10px; box-shadow: none; }
+@media (min-width: 900px) {
+  .dialog-header, .result-search, .result-summary, .result-filters, .dialog-body { width: min(100%, 1000px); margin-left: auto; margin-right: auto; }
+}
+@media (max-width: 640px) { .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border-radius: 0; } .dialog-header { padding-top: calc(14px + var(--safe-area-top)); } }
+
 </style>

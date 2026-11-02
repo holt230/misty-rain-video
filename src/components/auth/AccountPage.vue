@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
-import { ChevronLeft, ChevronRight, Download, LogOut, ShieldCheck, Trash2 } from '@lucide/vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { ChevronLeft, ChevronRight, Clock3, Download, LogOut, Palette, ShieldCheck, Trash2 } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import type { AppUser } from '../../services/authService';
 import { apiUrl } from '../../services/appUrl';
@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (e: 'play-history', entry: PlaybackHistoryEntry): void;
   (e: 'delete-history', id: string): void;
   (e: 'retry-history'): void;
+  (e: 'section-change', section: string): void;
 }>();
 
 const toast = useToast();
@@ -35,6 +36,12 @@ const tvTokenExchangeOrigin = ref('');
 const isSaving = ref(false);
 const showCredentialForm = ref(false);
 const historyExpanded = ref(false);
+const section = ref<'overview' | 'history' | 'playback' | 'appearance' | 'device'>('overview');
+const titles = { overview: '我的', history: '观看历史', playback: '播放与片库', appearance: '外观设置', device: '桌面安装' };
+watch(section, value => emit('section-change', value));
+const restoreSection = (value: string) => { section.value = Object.prototype.hasOwnProperty.call(titles, value) ? value as keyof typeof titles : 'overview'; };
+const showHistory = () => { section.value = 'history'; historyExpanded.value = true; window.scrollTo({ top: 0 }); };
+const back = () => { if (section.value === 'overview') emit('back'); else section.value = 'overview'; };
 const authSection = ref<HTMLElement | null>(null);
 const continueHistory = computed(() => props.history
   .filter(entry => !entry.completed && entry.position >= 5 && entry.duration > 0)
@@ -94,6 +101,8 @@ const saveCredential = async () => {
 };
 
 const focusAuth = async () => {
+  section.value = 'playback';
+  await nextTick();
   if (loadingStatus.value) await refreshStatus();
   if (props.user.role === 'admin') showCredentialForm.value = true;
   await nextTick();
@@ -106,25 +115,25 @@ const initializeAccount = async () => {
 };
 
 onMounted(initializeAccount);
-defineExpose({ focusAuth, refreshStatus });
+defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 </script>
 
 <template>
   <main class="account-page">
     <header class="page-heading">
       <div class="heading-copy">
-        <button type="button" class="back-button" aria-label="返回片库" @click="emit('back')">
+        <button type="button" class="back-button" aria-label="返回上一页" @click="back">
           <ChevronLeft aria-hidden="true" />
         </button>
         <div>
         <span class="heading-kicker">个人中心</span>
-        <h1>我的</h1>
+        <h1>{{ titles[section] }}</h1>
         </div>
       </div>
       <UserAvatar class="profile-avatar" :username="user.username" />
     </header>
 
-    <section class="profile-card" aria-labelledby="profile-title">
+    <section v-if="section === 'overview'" class="profile-card" aria-labelledby="profile-title">
       <div class="profile-copy">
         <small>{{ user.role === 'admin' ? '管理员账户' : '片库账户' }}</small>
         <h2 id="profile-title">{{ user.username }}</h2>
@@ -133,7 +142,14 @@ defineExpose({ focusAuth, refreshStatus });
       <span class="folder-chip">{{ user.folder }}</span>
     </section>
 
-    <section v-if="continueHistory.length" class="continue-history-section" aria-labelledby="continue-history-title">
+    <nav v-if="section === 'overview'" class="account-menu" aria-label="个人中心功能">
+      <button type="button" @click="showHistory"><Clock3 /><span><strong>观看历史</strong><small>找回每一段观影时光</small></span></button>
+      <button type="button" @click="section = 'playback'"><ShieldCheck /><span><strong>播放与片库</strong><small>认证、直连与自动追更</small></span></button>
+      <button type="button" @click="section = 'appearance'"><Palette /><span><strong>外观设置</strong><small>切换你喜欢的主题</small></span></button>
+      <button type="button" @click="section = 'device'"><Download /><span><strong>安装到桌面</strong><small>随时回来，接着看</small></span></button>
+    </nav>
+
+    <section v-if="section === 'overview' && continueHistory.length" class="continue-history-section" aria-labelledby="continue-history-title">
       <div class="section-title-row compact">
         <div>
           <span>接着看</span>
@@ -159,7 +175,7 @@ defineExpose({ focusAuth, refreshStatus });
       </div>
     </section>
 
-    <section class="settings-section history-section" aria-labelledby="history-title">
+    <section v-if="section === 'history'" class="settings-section history-section" aria-labelledby="history-title">
       <div class="section-title-row compact">
         <div>
           <span>观看记录</span>
@@ -205,7 +221,7 @@ defineExpose({ focusAuth, refreshStatus });
       <p v-else-if="!historyError && !loadingHistory" class="history-empty">开始播放影片后，这里会同步保存观看进度。</p>
     </section>
 
-    <section ref="authSection" class="settings-section auth-section" aria-labelledby="auth-title">
+    <section v-show="section === 'playback'" ref="authSection" class="settings-section auth-section" aria-labelledby="auth-title">
       <div class="section-title-row">
         <div>
           <span>设置</span>
@@ -289,12 +305,12 @@ defineExpose({ focusAuth, refreshStatus });
       />
     </section>
 
-    <section class="settings-section theme-section" aria-labelledby="theme-title">
+    <section v-if="section === 'appearance'" class="settings-section theme-section" aria-labelledby="theme-title">
       <div class="section-title-row"><div><span>外观</span><h2 id="theme-title">主题颜色</h2></div></div>
       <ThemeSwitch />
     </section>
 
-    <section class="settings-section app-section" aria-labelledby="app-title">
+    <section v-if="section === 'device'" class="settings-section app-section" aria-labelledby="app-title">
       <div class="section-title-row compact">
         <div>
           <span>设备</span>
@@ -310,7 +326,7 @@ defineExpose({ focusAuth, refreshStatus });
       </a>
     </section>
 
-    <button type="button" class="logout-button" @click="emit('logout')">
+    <button v-if="section === 'overview'" type="button" class="logout-button" @click="emit('logout')">
       <LogOut aria-hidden="true" />
       退出登录
     </button>
@@ -417,4 +433,10 @@ defineExpose({ focusAuth, refreshStatus });
   .history-main { gap: 10px; }
   .history-main .chevron { display: none; }
 }
+
+.account-page { display: block; }
+.profile-card { border-radius: 16px; background: var(--surface-1); box-shadow: none; }
+.settings-section { margin-top: 24px; border-radius: 14px; background: var(--surface-1); }
+.logout-button { margin-top: 32px; }
+@media (min-width: 1024px) { .account-page { display: block; max-width: 1000px; } }
 </style>

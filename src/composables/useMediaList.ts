@@ -82,6 +82,7 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
       allMediaList.value = result.items;
       loadError.value = '';
       toast.show(result.message, '✓', 3200);
+      return result.items;
     } catch (error) {
       toast.show(getLibrarySaveFeedback(error).title, '!', 3500);
       throw error;

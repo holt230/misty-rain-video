@@ -10,6 +10,7 @@ const props = defineProps<{
   resource: ResourceItem;
   isSaving?: boolean;
   replacingSource?: boolean;
+  playAfterSave?: boolean;
   saveError?: LibrarySaveFeedback | null;
 }>();
 const emit = defineEmits<{
@@ -22,6 +23,12 @@ const details = ref<QuarkShareDetails | null>(null);
 const isLoading = ref(false);
 const loadError = ref('');
 const currentFolder = ref('0');
+const dismissFolder = () => {
+  if (props.isSaving || currentFolder.value === '0') return false;
+  currentFolder.value = entries.value.find(entry => entry.fid === currentFolder.value)?.parentFid || '0';
+  return true;
+};
+defineExpose({ dismissFolder });
 const selected = ref(new Set<string>());
 let sequence = 0;
 const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
@@ -120,7 +127,7 @@ watch(() => props.resource, load, { immediate: true });
       <p>已选 {{ selectedFids.length }} 项<span v-if="selected.size"> · 包含 {{ selectedVideoCount }} 个视频</span></p>
       <p class="subtitle-save-hint">保存视频时会同时保留匹配的字幕文件。</p>
       <div class="detail-save-actions">
-        <button type="button" class="save-all" :disabled="isSaving" @click="emit('save')">{{ replacingSource ? '用全部正片替换' : '保存全部正片' }}</button>
+        <button type="button" class="save-all" :disabled="isSaving || isLoading || !!loadError" @click="emit('save')">{{ replacingSource ? '用全部正片替换' : playAfterSave ? '添加全部并播放' : '保存全部正片' }}</button>
         <button type="button" class="save-selected" :disabled="isSaving || isLoading || !selectedVideoCount" @click="emit('save', selectedFids)">
           {{ isSaving ? '正在保存…' : replacingSource ? '用所选正片替换' : '保存所选正片' }}
         </button>

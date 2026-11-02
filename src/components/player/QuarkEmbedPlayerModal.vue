@@ -7,7 +7,7 @@ import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource
 import SubtitleControls from './SubtitleControls.vue';
 import { PlayerPreferencesService } from '../../services/playerPreferencesService';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
+import { ArrowLeft, Check, ChevronDown, CircleAlert, ListVideo, LoaderCircle, Play, RefreshCw, SlidersHorizontal, X } from '@lucide/vue';
 import type { MediaItem, PlaybackHistoryEntry, PlaybackHistoryUpdate } from '../../types/media';
 import {
   QuarkServiceError,
@@ -61,6 +61,10 @@ const playback = ref<PreparedPlayback | null>(null);
 const currentEpisodeIndex = ref(0);
 const episodeGroupIndex = ref(0);
 const settingsExpanded = ref(false);
+const settingsPanelRef = ref<HTMLElement | null>(null);
+const episodeSheetOpen = ref(false);
+const controlsLocked = ref(false);
+const episodesDescending = ref(false);
 const settingsToggleRef = ref<HTMLButtonElement | null>(null);
 const episodePanelRef = ref<HTMLElement | null>(null);
 const selectedSourceId = ref('');
@@ -158,12 +162,16 @@ const soundEffectOptions: SoundEffectOption[] = [
 const episodes = computed(() => session.value?.episodes || []);
 const currentEpisode = computed(() => episodes.value[currentEpisodeIndex.value] || null);
 const episodeGroupSize = 50;
+const orderedEpisodeEntries = computed(() => episodes.value.map((episode, index) => ({ episode, index }))
+  .sort((a, b) => (episodesDescending.value ? -1 : 1) * ((a.episode.episodeNumber - b.episode.episodeNumber) || a.episode.episodeTitle.localeCompare(b.episode.episodeTitle, 'zh-CN', { numeric: true }))));
+const groupForEpisode = (index: number) => Math.max(0, Math.floor(orderedEpisodeEntries.value.findIndex(entry => entry.index === index) / episodeGroupSize));
+watch(episodesDescending, () => { episodeGroupIndex.value = groupForEpisode(currentEpisodeIndex.value); });
 const episodeGroups = computed(() => {
   const groups: Array<{ start: number; end: number; label: string }> = [];
   for (let start = 0; start < episodes.value.length; start += episodeGroupSize) {
     const end = Math.min(episodes.value.length, start + episodeGroupSize);
-    const first = episodes.value[start];
-    const last = episodes.value[end - 1];
+    const first = orderedEpisodeEntries.value[start]?.episode;
+    const last = orderedEpisodeEntries.value[end - 1]?.episode;
     const firstNumber = first?.episodeNumber || start + 1;
     const lastNumber = last?.episodeNumber || end;
     groups.push({
@@ -205,10 +213,8 @@ const latestEpisodeUpdateLabel = computed(() => {
 const visibleEpisodeEntries = computed(() => {
   const group = episodeGroups.value[episodeGroupIndex.value] || episodeGroups.value[0];
   if (!group) return [];
-  return episodes.value.slice(group.start, group.end).map((episode, offset) => ({
-    episode,
-    index: group.start + offset,
-    isLatest: group.start + offset === latestEpisodeIndex.value
+  return orderedEpisodeEntries.value.slice(group.start, group.end).map(entry => ({
+    ...entry, isLatest: entry.index === latestEpisodeIndex.value
   }));
 });
 const sources = computed(() => playback.value?.sources || []);
@@ -979,7 +985,7 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
   introSkipped = false;
   episodeCompletionHandled = false;
   currentEpisodeIndex.value = index;
-  episodeGroupIndex.value = Math.floor(index / episodeGroupSize);
+  episodeGroupIndex.value = groupForEpisode(index);
   phase.value = 'preparing';
   playback.value = null;
   selectedSourceId.value = '';
@@ -1092,7 +1098,7 @@ const loadSession = async () => {
     const matchedHistoryIndex = history
       ? result.episodes.findIndex(episode => episode.fid === history.episodeFid)
       : -1;
-    const resumeIndex = Math.max(0, matchedHistoryIndex);
+    const resumeIndex = matchedHistoryIndex >= 0 ? matchedHistoryIndex : (orderedEpisodeEntries.value[0]?.index || 0);
     const resumeAt = history && matchedHistoryIndex >= 0 && !history.completed ? history.position : 0;
     await prepareEpisode(resumeIndex, resumeAt);
   } catch (error) {
@@ -1148,12 +1154,7 @@ const selectEpisodeGroup = (index: number) => {
   nextTick(() => episodePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 };
 
-const scrollToEpisodes = async () => {
-  episodeGroupIndex.value = Math.floor(currentEpisodeIndex.value / episodeGroupSize);
-  settingsExpanded.value = false;
-  await nextTick();
-  episodePanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-};
+
 
 const collapseSettings = async () => {
   settingsExpanded.value = false;
@@ -1162,6 +1163,7 @@ const collapseSettings = async () => {
 };
 
 const selectEpisode = async (index: number) => {
+  episodeSheetOpen.value = false;
   await prepareEpisode(index);
   if (phase.value !== 'ready') return;
   videoRef.value?.parentElement?.scrollIntoView({
@@ -1195,9 +1197,22 @@ const close = () => {
   emit('close');
 };
 
+const openEpisodeSheet = () => {
+  episodeGroupIndex.value = groupForEpisode(currentEpisodeIndex.value);
+  episodeSheetOpen.value = true;
+};
+const dismissLayer = () => {
+  if (settingsExpanded.value) { settingsExpanded.value = false; return true; }
+  if (episodeSheetOpen.value) { episodeSheetOpen.value = false; return true; }
+  if (immersive.value) { toggleWebFullscreen(); return true; }
+  return false;
+};
+const back = () => { if (!dismissLayer()) close(); };
+useDialog(settingsPanelRef, () => settingsExpanded.value && phase.value === 'ready', () => { settingsExpanded.value = false; });
+useDialog(episodePanelRef, () => episodeSheetOpen.value, () => { episodeSheetOpen.value = false; });
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, () => {
-  if (immersive.value) { toggleWebFullscreen(); return; }
+  if (dismissLayer()) return;
   if (document.fullscreenElement || (videoRef.value as NativeFullscreenVideo | null)?.webkitDisplayingFullscreen) return;
   close();
 });
@@ -1237,7 +1252,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange);
 });
 
-defineExpose({ retry });
+defineExpose({ retry, dismissLayer });
 </script>
 
 <template>
@@ -1252,8 +1267,9 @@ defineExpose({ retry });
     @click.self="close"
   >
     <section v-if="media" class="player-window">
-      <header class="player-header">
+      <header v-show="!controlsLocked" class="player-header">
         <div class="title-block">
+          <button class="icon-button player-back-button" type="button" aria-label="返回上一页" @click="back"><ArrowLeft /></button>
           <div class="title-copy">
             <h2>{{ media.title }}</h2>
             <p v-if="episodeStatus">{{ episodeStatus }}</p>
@@ -1264,12 +1280,11 @@ defineExpose({ retry });
           <button class="text-action" type="button" @click="emit('re-search', media)">
             换源
           </button>
-          <button class="icon-button" type="button" aria-label="关闭播放器" @click="close">
-            <X aria-hidden="true" />
-          </button>
+
         </div>
       </header>
 
+      <div v-if="settingsExpanded || episodeSheetOpen" class="player-sheet-shade" @click="settingsExpanded = false; episodeSheetOpen = false"></div>
       <div class="player-layout" :class="{ 'single-column': !episodes.length }">
         <main class="video-column">
           <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
@@ -1278,7 +1293,9 @@ defineExpose({ retry });
               ref="videoRef"
               class="video-element"
               :style="{ objectFit: pictureFit }"
-              :controls="!isMobilePlaybackDevice"
+              :controls="false"
+              tabindex="0"
+              aria-label="视频画面，可使用空格暂停，方向键调整进度"
               controlslist="nodownload noremoteplayback"
               playsinline
               :preload="isIOSPlaybackDevice ? 'auto' : 'metadata'"
@@ -1310,8 +1327,8 @@ defineExpose({ retry });
             </video>
 
             <MobilePlaybackControls
-              v-if="isMobilePlaybackDevice && videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" @fullscreen="toggleWebFullscreen"
+              v-if="videoRef && phase === 'ready' && !manualPlayRequired"
+              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" @fullscreen="toggleWebFullscreen" @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
             />
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
@@ -1394,7 +1411,7 @@ defineExpose({ retry });
               <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ selectedSoundEffect?.label || '原声' }}</small></span>
               <ChevronDown class="toolbar-chevron" aria-hidden="true" />
             </button>
-            <button type="button" @click="scrollToEpisodes">
+            <button type="button" @click="openEpisodeSheet">
               <ListVideo aria-hidden="true" />
               <span><strong>选集</strong><small>{{ episodeStatus }}</small></span>
             </button>
@@ -1403,6 +1420,10 @@ defineExpose({ retry });
           <div
             v-if="phase === 'ready' && sources.length"
             v-show="settingsExpanded"
+            ref="settingsPanelRef"
+            role="dialog"
+            aria-modal="true"
+            aria-label="播放设置"
             id="playback-settings"
             class="playback-settings"
           >
@@ -1540,7 +1561,7 @@ defineExpose({ retry });
           </div>
         </main>
 
-        <aside v-if="episodes.length" ref="episodePanelRef" class="episode-panel">
+        <aside v-if="episodes.length" ref="episodePanelRef" class="episode-panel" :class="{ 'sheet-open': episodeSheetOpen }" :role="episodeSheetOpen ? 'dialog' : undefined" :aria-modal="episodeSheetOpen || undefined" aria-label="选集">
           <div class="episode-heading">
             <div class="episode-heading-title">
               <div class="episode-heading-main">
@@ -1549,7 +1570,7 @@ defineExpose({ retry });
               </div>
               <small v-if="latestEpisodeUpdateLabel" class="episode-update-time">{{ latestEpisodeUpdateLabel }}</small>
             </div>
-            <small>最新在前</small>
+            <div class="episode-heading-actions"><button type="button" class="text-action" @click="episodesDescending = !episodesDescending">{{ episodesDescending ? '倒序' : '正序' }}</button><button v-if="episodeSheetOpen" type="button" class="icon-button" aria-label="关闭选集" @click="episodeSheetOpen = false"><X /></button></div>
           </div>
 
           <div v-if="episodeGroups.length > 1" class="episode-ranges" role="tablist" aria-label="剧集范围">
@@ -1773,4 +1794,36 @@ defineExpose({ retry });
 .rotated-player .video-stage { --safe-area-top: 0px; --safe-area-right: 0px; --safe-area-left: 0px; }
 
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
+
+/* A full playback page with independent sheets; changing sheets never remounts video. */
+.player-backdrop { padding: 0; background: var(--liquid-canvas); }
+.player-window { position: relative; width: 100%; height: var(--app-viewport-height); border: 0; border-radius: 0; box-shadow: none; }
+.player-header { min-height: calc(68px + var(--safe-area-top)); padding-top: calc(10px + var(--safe-area-top)); }
+.player-back-button { background: transparent; }
+.episode-heading-actions { display: flex; align-items: center; gap: 4px; }
+.episode-heading-actions .text-action { padding: 0 10px; font-size: 12px; }
+.episode-item.active .episode-number { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
+.player-sheet-shade { position: absolute; inset: 0; z-index: 15; background: rgb(0 0 0 / .5); }
+.playback-settings { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(560px, calc(100% - 48px)); max-height: 80%; overflow-y: auto; overscroll-behavior: contain; margin: 0; background: var(--surface-1); border: 1px solid var(--divider); }
+.episode-panel.sheet-open { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(420px, calc(100% - 48px)); height: min(75%, 700px); overflow: hidden; margin: 0; border-radius: 16px; border: 1px solid var(--divider); background: var(--surface-1); }
+.episode-panel.sheet-open .episode-list { overflow-y: auto; }
+@media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(100dvh - 200px); } }
+@media (max-width: 820px) {
+  .player-header { min-height: calc(62px + var(--safe-area-top)); padding: calc(6px + var(--safe-area-top)) 12px 6px; }
+  .player-layout { display: block; }
+  .video-column { display: contents; }
+  .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: 16 / 9; min-height: 210px; max-height: 55dvh; }
+  .video-column > :deep(.danmaku-controls) { margin: 0 16px; }
+  .player-toolbar { margin: 0 16px; }
+  .episode-panel { margin: 0 8px calc(24px + var(--safe-area-bottom)); }
+  .playback-settings { inset: auto 0 0; width: 100%; max-height: 76%; border-radius: 18px 18px 0 0; padding-bottom: calc(24px + var(--safe-area-bottom)); }
+  .episode-panel.sheet-open { inset: auto 0 0; width: 100%; height: 65%; border-radius: 18px 18px 0 0; padding-bottom: var(--safe-area-bottom); }
+  .episode-panel.sheet-open .episode-list { flex: 1; min-height: 0; overflow-y: auto; }
+}
+.landscape-inline .player-header { left: 0; right: auto; display: block; }
+.landscape-inline .title-block { display: flex; }
+.landscape-inline .title-copy, .landscape-inline .header-actions { display: none; }
+.landscape-inline .video-stage { position: relative; max-height: none; min-height: 0; height: 100%; }
+.landscape-inline .playback-settings { display: grid; inset: 0 0 0 auto; width: min(350px, 65%); max-height: 100%; border-radius: 0; padding: 16px; }
+.landscape-inline .episode-panel.sheet-open { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); height: 100%; border-radius: 0; }
 </style>

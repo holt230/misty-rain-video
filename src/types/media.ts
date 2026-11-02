@@ -2,6 +2,8 @@ export type CategoryType = 'tv' | 'movie' | 'variety' | 'anime';
 
 export interface MediaItem {
   id: string;
+  catalogId?: string;
+  year?: string;
   title: string;
   category: CategoryType;      // 所属类型：电视剧、电影、综艺、动漫
   tag: string;                 // 最多单个标签 (例如: 4K 夸克)

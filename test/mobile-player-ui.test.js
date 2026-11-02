@@ -137,4 +137,36 @@ test('portrait-locked landscape swaps dimensions, follows resize, exits without 
   const before = layout.immersiveStyle.value;
   resize(874, 402); assert.equal(layout.immersiveStyle.value, before);
 });
+test('speed selection persists, long press restores the selected speed and locking prevents video gestures', async () => {
+  localStorage.clear();
+  const originalTimeout = globalThis.setTimeout;
+  let hold;
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay === 450) { hold = callback; return 0; }
+    return originalTimeout(callback, delay, ...args);
+  };
+  const view = mount();
+  try {
+    const speed = document.querySelector('select[aria-label="播放倍速"]');
+    speed.value = '1.5'; speed.dispatchEvent(event('change')); await nextTick();
+    assert.equal(view.media.playbackRate, 1.5);
+    assert.equal(localStorage.getItem('misty_playback_speed:guest'), '1.5');
+    view.media.playbackRate = 1; // A real media load can reset the instantaneous rate.
+    view.media.dispatchEvent(event('loadedmetadata'));
+    assert.equal(view.media.playbackRate, 1.5);
+    assert.equal(view.media.defaultPlaybackRate, 1.5);
+    await view.media.play(); await nextTick();
+    view.media.dispatchEvent(event('pointerdown')); assert.equal(typeof hold, 'function');
+    hold(); await nextTick(); assert.equal(view.media.playbackRate, 2);
+    view.media.dispatchEvent(event('pointerup')); await nextTick(); assert.equal(view.media.playbackRate, 1.5);
+    view.props.expanded = true; await nextTick();
+    button('锁定播放控制').click(); await nextTick();
+    assert.equal(document.querySelector('.transport').style.display, 'none');
+    view.media.dispatchEvent(event('dblclick')); await nextTick(); assert.equal(view.media.paused, false);
+    button('解锁播放控制').click(); await nextTick();
+    view.media.dispatchEvent(event('dblclick')); await nextTick(); assert.equal(view.media.paused, true);
+    assert.notEqual(document.querySelector('.transport').style.display, 'none');
+  } finally { view.app.unmount(); globalThis.setTimeout = originalTimeout; localStorage.clear(); }
+});
+
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });

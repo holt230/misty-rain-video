@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch, type Ref } from 'vue';
+import { nextTick, onBeforeUnmount, watch, type Ref } from 'vue';
 
 const openDialogs: HTMLElement[] = [];
 let originalOverflow = '';
@@ -55,7 +55,10 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
     openDialogs.push(node);
     node.tabIndex = -1;
     // 不自动聚焦输入框，避免手机一打开弹层就弹出键盘。
-    node.focus({ preventScroll: true });
+    // A v-show panel's updated hook may still be queued in the same post-flush.
+    void nextTick(() => {
+      if (active === node && openDialogs.at(-1) === node) node.focus({ preventScroll: true });
+    });
   }, { flush: 'post', immediate: true });
   onBeforeUnmount(() => {
     release();

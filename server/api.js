@@ -10,6 +10,7 @@ import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
+import { CatalogService } from './catalog.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +47,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     credentialStore,
     posterService: new PosterService(dataDir),
     resourceSearch: new ResourceSearchService({ dataDir }),
+    catalog: new CatalogService(dataDir),
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
@@ -280,6 +282,22 @@ export const handleApiRequest = async (request, response, context) => {
     const userData = context.userContext(user);
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method || '')) {
       context.authService.assertSameOrigin(request);
+    }
+
+    if (pathname === '/api/catalog' && request.method === 'GET') {
+      sendSuccess(response, await context.catalog.get(url.searchParams.get('channel') || 'tv'));
+      return true;
+    }
+    const catalogPoster = pathname.match(/^\/api\/catalog\/posters\/(\d{1,20})$/);
+    if (catalogPoster && request.method === 'GET') {
+      const asset = await context.catalog.poster(catalogPoster[1]);
+      if (!asset) sendJson(response, 404, { code: 'POSTER_NOT_FOUND', message: '海报暂不可用' });
+      else {
+        response.setHeader('Content-Type', asset.contentType);
+        response.setHeader('Cache-Control', 'private, max-age=86400');
+        response.end(asset.buffer);
+      }
+      return true;
     }
 
     if (pathname.startsWith('/api/danmaku/')) {
