@@ -1,21 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <title>烟雨影视 · 山间微光</title>
-  <defs>
-    <clipPath id="landscape-window"><circle cx="32" cy="32" r="28"/></clipPath>
-    <linearGradient id="mist-sky" x1="32" y1="4" x2="32" y2="60" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FAF1E2"/><stop offset="1" stop-color="#DCE9DF"/>
-    </linearGradient>
-    <linearGradient id="cinema-light" x1="40" y1="12" x2="47" y2="27" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F7C987"/><stop offset="1" stop-color="#E98D50"/>
-    </linearGradient>
-  </defs>
-  <g clip-path="url(#landscape-window)">
-    <circle cx="32" cy="32" r="28" fill="url(#mist-sky)"/>
-    <circle cx="43" cy="19" r="7.5" fill="url(#cinema-light)"/>
-    <path d="M0 47L20.3 19.7Q22.1 17.5 24.1 20.2L37.2 36.9L44.2 28.1Q45.8 26.3 47.6 28.4L64 48V64H0Z" fill="#8EB5AC"/>
-    <path d="M0 51L13.8 34.8Q15.6 32.5 18 34.2L30.5 43.5Q34 46 38.2 43.4L46.7 38.2Q49 36.7 51.6 38.7L64 50V64H0Z" fill="#316773"/>
-    <path d="M0 43C12 40 21 41 32 45C42 48 51 48 64 43V47C51 52 42 52 31 48C19 44 11 44 0 47Z" fill="#F4F0E5"/>
-    <path d="M0 53C16 48 28 51 39 53C48 55 57 53 64 51V64H0Z" fill="#173E49"/>
-    <path d="M8 54C20 51 30 54 42 54C48 54 51 53 56 52L55 55C49 58 41 58 32 56C23 55 17 55 10 57Z" fill="#DDE9E1"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><title>烟雨影视 · 雾金毛玻璃</title><defs>
+  <filter id="etched" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation=".15"/></filter>
+  <filter id="frost-grain" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="3.2" numOctaves="2" seed="21" stitchTiles="stitch"/>
+    <feColorMatrix type="saturate" values="0"/>
+    <feComponentTransfer><feFuncA type="linear" slope=".18"/></feComponentTransfer>
+  </filter>
+  <radialGradient id="glass-film" cx=".22" cy=".12" r="1">
+    <stop stop-color="#FFFFFF" stop-opacity=".20"/>
+    <stop offset=".5" stop-color="#D8E5EA" stop-opacity=".055"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity=".025"/>
+  </radialGradient>
+  <linearGradient id="glass-edge" x1="0" y1="0" x2="1" y2="1">
+    <stop stop-color="#FFFFFF" stop-opacity=".55"/>
+    <stop offset=".38" stop-color="#FFFFFF" stop-opacity=".08"/>
+    <stop offset=".75" stop-color="#FFFFFF" stop-opacity=".04"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity=".22"/>
+  </linearGradient>
+</defs><defs>
+  <radialGradient id="sky" cx=".58" cy=".18" r=".85"><stop stop-color="#3E3C37"/><stop offset=".52" stop-color="#252827"/><stop offset="1" stop-color="#111718"/></radialGradient>
+  <linearGradient id="rim" x1=".12" y1="0" x2=".88" y2="1"><stop stop-color="#C0B08F" stop-opacity=".8"/><stop offset=".42" stop-color="#373C3B" stop-opacity=".25"/><stop offset="1" stop-color="#776D56" stop-opacity=".65"/></linearGradient>
+  <linearGradient id="far" x1=".1" y1="0" x2=".8" y2="1"><stop stop-color="#B5AD99"/><stop offset=".42" stop-color="#777C70"/><stop offset="1" stop-color="#3C514C"/></linearGradient>
+  <linearGradient id="near" x1=".15" y1="0" x2=".9" y2="1"><stop stop-color="#778279"/><stop offset=".5" stop-color="#334D46"/><stop offset="1" stop-color="#142B28"/></linearGradient>
+  <linearGradient id="mist" x1="8" y1="39" x2="53" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#EFE6CF"/><stop offset=".4" stop-color="#C1AF87"/><stop offset=".72" stop-color="#EFE6CF"/><stop offset="1" stop-color="#7E7A64"/></linearGradient>
+  <radialGradient id="moon" cx=".3" cy=".22" r=".8"><stop stop-color="#FBF2D9"/><stop offset=".55" stop-color="#DBC394"/><stop offset="1" stop-color="#A78958"/></radialGradient>
+  <linearGradient id="beam" x1="43" y1="19" x2="20" y2="49" gradientUnits="userSpaceOnUse"><stop stop-color="#DCCBA7" stop-opacity=".2"/><stop offset="1" stop-color="#DCCBA7" stop-opacity="0"/></linearGradient>
+  <clipPath id="window"><circle cx="32" cy="32" r="27.5"/></clipPath>
+  <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="1.7"/></filter>
+  <filter id="relief" x="-15%" y="-25%" width="130%" height="150%"><feDropShadow dx="0" dy=".8" stdDeviation=".7" flood-color="#000000" flood-opacity=".2"/></filter>
+</defs>
+<circle cx="32" cy="32.6" r="28.4" fill="#000000" opacity=".35"/>
+<g clip-path="url(#window)"><g filter="url(#etched)">
+  <circle cx="32" cy="32" r="28" fill="url(#sky)"/>
+  <circle cx="43" cy="19" r="8.4" fill="#DCCBA7" opacity=".22" filter="url(#glow)"/>
+  <path d="M40 14L49 21L29 57L8 48Z" fill="url(#beam)"/>
+  <circle cx="43" cy="19" r="6.9" fill="url(#moon)"/>
+  <path d="M0 47L20.3 19.7Q22.1 17.5 24.1 20.2L37.2 36.9L44.2 28.1Q45.8 26.3 47.6 28.4L64 48V64H0Z" fill="url(#far)" filter="url(#relief)"/>
+  <path d="M7 37L20.3 19.7Q22.1 17.5 24.1 20.2L37.2 36.9L44.2 28.1Q45.8 26.3 47.6 28.4L57 40" fill="none" stroke="#EFE6CF" stroke-opacity=".10" stroke-width=".6" stroke-linejoin="round"/>
+  <path d="M0 51L13.8 34.8Q15.6 32.5 18 34.2L30.5 43.5Q34 46 38.2 43.4L46.7 38.2Q49 36.7 51.6 38.7L64 50V64H0Z" fill="url(#near)" filter="url(#relief)"/>
+  <path d="M0 43C12 40 21 41 32 45C42 48 51 48 64 43V46C51 51 42 51 31 47.6C19 43.5 11 43.5 0 46.5Z" fill="url(#mist)" filter="url(#relief)"/>
+  <path d="M0 53C16 48 28 51 39 53C48 55 57 53 64 51V64H0Z" fill="#172F2A"/>
+  <path d="M8 54C20 51 30 54 42 54C48 54 51 53 56 52L55 54C49 57 41 57 32 55.5C23 54.5 17 54.5 10 56.5Z" fill="url(#mist)" opacity=".85"/>
+</g><circle cx="32" cy="32" r="27.5" fill="url(#glass-film)"/><circle cx="32" cy="32" r="27.5" filter="url(#frost-grain)" opacity=".6"/></g>
+<circle cx="32" cy="32" r="27.8" fill="none" stroke="url(#glass-edge)" stroke-width=".65"/>
+<path d="M10.5 14.7A27.8 27.8 0 0 1 35 4.4" fill="none" stroke="#EFE6CF" stroke-opacity=".23" stroke-width=".45" stroke-linecap="round"/></svg>
