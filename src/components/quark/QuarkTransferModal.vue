@@ -406,14 +406,14 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .dialog-top-actions { flex-shrink: 0; }
 .btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .btn-close-dialog svg { width: 20px; height: 20px; }
-.result-search { display: flex; align-items: center; gap: 6px; margin: 0 24px; min-height: 52px; padding: 3px 4px 3px 15px; border: 1px solid var(--divider); border-radius: 12px; background: var(--glass-bg); flex-shrink: 0; }
+.result-search { display: flex; align-items: center; gap: 8px; margin: 0 24px; min-height: 56px; padding: 6px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); flex-shrink: 0; }
 .result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }
 .result-search input { width: 100%; min-width: 0; flex: 1; min-height: 44px; padding: 6px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
 .result-search:focus-within { box-shadow: 0 0 0 3px var(--liquid-accent-subtle); }
 .result-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
 .clear-search-button { display: grid; width: 44px; height: 44px; place-items: center; flex-shrink: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .clear-search-button svg { width: 17px; height: 17px; }
-.submit-search-button { min-height: 44px; padding: 0 19px; border: 0; border-radius: 9px; flex-shrink: 0; color: var(--accent-ink); background: var(--liquid-accent); font-size: .84rem; font-weight: 650; }
+.submit-search-button { min-height: 44px; padding: 0 19px; border: 0; border-radius: var(--cinema-radius-control); flex-shrink: 0; color: var(--accent-ink); background: var(--liquid-accent); font-size: .84rem; font-weight: 650; }
 .result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; flex-shrink: 0; padding: 16px 26px 3px; color: var(--text-tertiary); font-size: .75rem; }
 .result-summary strong { color: var(--text-primary); font-size: .92rem; }
 .result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
@@ -422,8 +422,8 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .filter-chip.active { color: var(--liquid-accent); border-color: rgb(255 255 255 / .14); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); font-weight: 650; }
 .dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
 .dialog-body.showing-details { display: flex; overflow: hidden; }
-.resource-rows { display: grid; gap: 0; }
-.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 20px 0; border-bottom: 1px solid var(--divider); background: transparent; }
+.resource-rows { display: grid; gap: 16px; }
+.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 24px; border: 1px solid var(--divider); background: var(--surface-1); }
 .row-left { min-width: 0; flex: 1; }
 .row-info { min-width: 0; }
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
@@ -479,12 +479,29 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border: 0; border-radius: 0; background: var(--liquid-canvas); box-shadow: none; }
 .liquid-dialog.glass-rim::after { display: none; }
 .dialog-header { padding-top: calc(18px + var(--safe-area-top)); }
-.dialog-poster { border-radius: 8px; }
-.btn-transfer { border-radius: 8px; color: var(--accent-ink); background: var(--liquid-accent); }
-.liquid-resource-row { border-radius: 10px; box-shadow: none; }
+.dialog-poster { border-radius: 12px; }
+.btn-transfer { border-radius: var(--cinema-radius-control); color: var(--accent-ink); background: var(--liquid-accent); }
+.liquid-resource-row { border-radius: var(--cinema-radius-card); box-shadow: none; }
 @media (min-width: 900px) {
-  .dialog-header, .result-search, .result-summary, .result-filters, .dialog-body { width: min(100%, 1000px); margin-left: auto; margin-right: auto; }
+  .dialog-header, .result-summary, .result-filters, .dialog-body { width: 100%; }
+}
+@media (min-width: 1024px) {
+  .liquid-dialog-backdrop { padding: 32px; background: rgb(0 0 0 / .65) !important; }
+  .liquid-dialog { width: min(1100px, 100%); height: auto; min-height: min(460px, calc(100dvh - 64px)); max-height: min(860px, calc(100dvh - 64px)); border: 1px solid var(--divider); border-radius: var(--cinema-radius-hero); }
+  .dialog-header { padding: 28px 32px 20px; }
+  .result-search { margin-inline: 32px; }
+  .result-search-icon { margin-left: 10px; }
+  .result-summary, .result-filters, .dialog-body { padding-left: 32px; padding-right: 32px; }
+  .dialog-body { padding-bottom: 32px; }
 }
 @media (max-width: 640px) { .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border-radius: 0; } .dialog-header { padding-top: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)); } }
+@media (max-width: 767px) {
+  .dialog-header, .result-filters, .dialog-body { padding-left: var(--page-left); padding-right: var(--page-right); }
+  .dialog-top-actions { right: var(--page-right); }
+  .result-summary { padding-left: var(--page-left); padding-right: var(--page-right); }
+  .result-search { margin-left: var(--page-left); margin-right: var(--page-right); }
+  .result-search-icon { margin-left: 6px; }
+  .liquid-resource-row { padding: 20px; background: var(--surface-1); }
+}
 
 </style>

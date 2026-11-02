@@ -120,6 +120,7 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 
 <template>
   <main class="account-page">
+    <div class="account-content">
     <header class="page-heading">
       <div class="heading-copy">
         <button type="button" class="back-button" aria-label="返回上一页" @click="back">
@@ -130,23 +131,23 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
         <h1>{{ titles[section] }}</h1>
         </div>
       </div>
-      <UserAvatar class="profile-avatar" :username="user.username" />
     </header>
 
     <section v-if="section === 'overview'" class="profile-card" aria-labelledby="profile-title">
+      <UserAvatar class="profile-avatar" :username="user.username" />
       <div class="profile-copy">
         <small>{{ user.role === 'admin' ? '管理员账户' : '片库账户' }}</small>
         <h2 id="profile-title">{{ user.username }}</h2>
-        <p>你的影视内容保存在独立的个人片库目录中。</p>
+        <p>收藏喜欢的影片，接着上次的故事。</p>
       </div>
-      <span class="folder-chip">{{ user.folder }}</span>
+      <span class="folder-chip">专属片库</span>
     </section>
 
     <nav v-if="section === 'overview'" class="account-menu" aria-label="个人中心功能">
-      <button type="button" @click="showHistory"><Clock3 /><span><strong>观看历史</strong><small>找回每一段观影时光</small></span></button>
-      <button type="button" @click="section = 'playback'"><ShieldCheck /><span><strong>播放与片库</strong><small>认证、直连与自动追更</small></span></button>
-      <button type="button" @click="section = 'appearance'"><Palette /><span><strong>外观设置</strong><small>切换你喜欢的主题</small></span></button>
-      <button type="button" @click="section = 'device'"><Download /><span><strong>安装到桌面</strong><small>随时回来，接着看</small></span></button>
+      <button type="button" @click="showHistory"><span class="account-menu-icon"><Clock3 /></span><span class="account-menu-copy"><strong>观看历史</strong><small>找回每一段观影时光</small></span><ChevronRight class="account-menu-arrow" /></button>
+      <button type="button" @click="section = 'playback'"><span class="account-menu-icon"><ShieldCheck /></span><span class="account-menu-copy"><strong>播放与片库</strong><small>认证、直连与自动追更</small></span><ChevronRight class="account-menu-arrow" /></button>
+      <button type="button" @click="section = 'appearance'"><span class="account-menu-icon"><Palette /></span><span class="account-menu-copy"><strong>外观设置</strong><small>切换你喜欢的主题</small></span><ChevronRight class="account-menu-arrow" /></button>
+      <button type="button" @click="section = 'device'"><span class="account-menu-icon"><Download /></span><span class="account-menu-copy"><strong>安装到桌面</strong><small>随时回来，接着看</small></span><ChevronRight class="account-menu-arrow" /></button>
     </nav>
 
     <section v-if="section === 'overview' && continueHistory.length" class="continue-history-section" aria-labelledby="continue-history-title">
@@ -330,38 +331,41 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
       <LogOut aria-hidden="true" />
       退出登录
     </button>
+    </div>
   </main>
 </template>
 
 <style scoped>
-.account-page { position: relative; z-index: 1; width: min(780px, 100%); margin: 0 auto; padding: calc(40px + var(--safe-area-top)) 24px var(--mobile-content-bottom); }
-.account-page::-webkit-scrollbar { width: 10px; }
-.account-page::-webkit-scrollbar-track { border-radius: 8px; background: var(--glass-bg); }
-.account-page::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: var(--text-tertiary); background-clip: padding-box; }
-@supports not selector(::-webkit-scrollbar) {
-  .account-page { scrollbar-width: thin; scrollbar-color: var(--text-tertiary) transparent; }
-}
+.account-content { display: flex; flex-direction: column; gap: 24px; max-width: 1080px; min-width: 0; margin-inline: auto; }
 .page-heading, .heading-copy { display: flex; align-items: center; gap: 13px; }
-.page-heading { justify-content: space-between; margin-bottom: 27px; }
+.page-heading { justify-content: space-between; }
 .back-button { display: grid; width: 46px; height: 46px; flex-shrink: 0; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-bg); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
 .back-button svg { width: 22px; height: 22px; }
 .heading-kicker { color: var(--text-tertiary); font-size: .72rem; }
 .page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.05em; }
-.profile-avatar { width: 48px; height: 48px; border: 1px solid var(--divider); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); box-shadow: var(--glass-shadow-sm); }
-.profile-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0 28px; margin-bottom: 10px; border-bottom: 1px solid var(--divider); }
-.profile-copy { min-width: 0; }
-.profile-copy small { color: var(--liquid-accent); font-size: .73rem; font-weight: 600; }
+.profile-avatar { width: 64px; height: 64px; flex-shrink: 0; border: 1px solid var(--divider); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
+.profile-card { position: relative; display: flex; align-items: center; gap: 20px; padding: 28px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-panel); background: radial-gradient(ellipse at 100% 0, rgb(var(--accent-rgb) / .08), transparent 70%), var(--surface-1); }
+.profile-copy { min-width: 0; flex: 1 1 160px; }
+.profile-copy small { display: block; padding-right: 80px; color: var(--liquid-accent); font-size: .73rem; font-weight: 600; }
 .profile-copy h2 { margin: 5px 0; overflow-wrap: anywhere; font-size: 1.3rem; font-weight: 750; letter-spacing: -.03em; }
 .profile-copy p { color: var(--text-tertiary); font-size: .79rem; }
-.folder-chip { max-width: 36%; flex-shrink: 0; overflow: hidden; color: var(--text-tertiary); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-.settings-section { margin-top: 28px; padding: 24px; border: 0; border-radius: 16px; background: var(--surface-1); }
+.folder-chip { position: absolute; top: 24px; right: 24px; max-width: 100%; padding: 8px 12px; overflow: hidden; border-radius: 12px; color: var(--text-secondary); background: var(--glass-bg); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.account-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.account-menu button { position: relative; display: flex; flex-direction: column; align-items: start; gap: 16px; min-width: 0; min-height: 142px; padding: 24px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); color: var(--text-primary); background: var(--surface-1); text-align: left; transition: border-color .2s, background .2s; }
+.account-menu-icon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 14px; background: var(--liquid-accent-subtle); color: var(--liquid-accent); }
+.account-menu-icon svg { width: 22px; height: 22px; }
+.account-menu-copy { display: grid; gap: 6px; min-width: 0; }
+.account-menu-copy strong { font-size: 15px; font-weight: 650; }
+.account-menu-copy small { font-size: 12px; line-height: 1.7; color: var(--text-tertiary); }
+.account-menu-arrow { position: absolute; top: 26px; right: 18px; width: 18px; height: 18px; color: var(--text-tertiary); }
+.settings-section { padding: 28px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-panel); background: var(--surface-1); }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
 .section-title-row > div > span { color: var(--text-tertiary); font-size: .71rem; }
 .section-title-row h2 { margin-top: 2px; color: var(--text-primary); font-size: 1.08rem; font-weight: 700; letter-spacing: -.025em; }
 .history-count { color: var(--text-tertiary); font-size: .73rem; }
-.continue-history-section { margin-bottom: 26px; }
+.continue-history-section { min-width: 0; }
 .continue-history-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 12px; scroll-snap-type: x proximity; }
-.continue-history-card { position: relative; width: 192px; height: 130px; flex: 0 0 192px; overflow: hidden; border: 1px solid var(--divider); border-radius: 12px; text-align: left; background: #253b5a; box-shadow: var(--glass-shadow-sm); scroll-snap-align: start; }
+.continue-history-card { position: relative; width: 220px; height: 148px; flex: 0 0 220px; overflow: hidden; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); text-align: left; background: #253b5a; scroll-snap-align: start; }
 .continue-history-card img { width: 100%; height: 100%; object-fit: cover; object-position: center 28%; }
 .continue-history-shade { position: absolute; inset: 0; background: linear-gradient(180deg, transparent, rgb(8 21 44 / .88)); }
 .continue-history-copy { position: absolute; right: 13px; bottom: 17px; left: 13px; display: grid; gap: 2px; color: #fff; }
@@ -409,32 +413,35 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 .row-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .row-copy strong { font-size: .88rem; font-weight: 650; }
 .row-copy small { color: var(--text-tertiary); font-size: .73rem; }
-.logout-button { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; gap: 8px; margin-top: 24px; border: var(--glass-border); border-radius: 27px; color: var(--danger); background: var(--glass-bg); font-size: .9rem; font-weight: 600; }
+.logout-button { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-control); color: var(--danger); background: var(--surface-1); font-size: .9rem; font-weight: 600; }
 .logout-button svg { width: 19px; height: 19px; }
 :global(html.ios-standalone .app-section) { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 1024px) {
-  .account-page { padding-top: 32px; padding-bottom: 64px; }
-  .account-page > * { max-width: 1040px; }
-  .settings-section { max-width: 880px; }
-  .history-section { max-width: 1040px; }
+  .account-menu { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .logout-button { width: 180px; }
 }
+@media (min-width: 768px) {
+  .theme-section { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+  .theme-section .section-title-row { margin: 0; }
+  .theme-section :deep(.theme-switch) { width: min(480px, 65%); }
+}
+@media (min-width: 1024px) and (max-width: 1279px) { .account-menu { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
-  .account-page { padding: calc(22px + var(--safe-area-top)) calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }
-  .page-heading { margin-bottom: 24px; }
+  .account-content { gap: 24px; }
   .page-heading h1 { font-size: 1.75rem; }
-  .profile-card { padding: 8px 0 24px; flex-wrap: wrap; }
-  .folder-chip { max-width: 100%; }
-  .settings-section { padding: 20px; border-radius: 16px; }
-  .continue-history-scroll { margin-right: -20px; padding-right: 20px; }
+  .profile-card { padding: 22px; gap: 16px; }
+  .profile-avatar { width: 52px; height: 52px; }
+  .profile-copy { flex-basis: 140px; }
+  .folder-chip { top: 18px; right: 18px; }
+  .account-menu { gap: 12px; }
+  .account-menu button { padding: 18px; gap: 14px; min-height: 148px; }
+  .account-menu-arrow { top: 23px; right: 14px; width: 16px; height: 16px; }
+  .account-menu-copy strong { font-size: 14px; }
+  .account-menu-copy small { font-size: 11px; }
+  .settings-section { padding: 22px; }
+  .continue-history-card { width: 200px; height: 136px; flex-basis: 200px; }
   .history-main { gap: 10px; }
   .history-main .chevron { display: none; }
 }
-
-.account-page { display: block; }
-.profile-card { border-radius: 16px; background: var(--surface-1); box-shadow: none; }
-.settings-section { margin-top: 24px; border-radius: 14px; background: var(--surface-1); }
-.logout-button { margin-top: 32px; }
-@media (min-width: 1024px) { .account-page { display: block; max-width: 1000px; } }
 </style>

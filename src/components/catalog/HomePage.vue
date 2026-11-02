@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { ArrowRight, ChevronLeft, ChevronRight, Play, RefreshCw } from '@lucide/vue';
+import { ArrowRight, ChevronLeft, ChevronRight, Pause, Play, RefreshCw } from '@lucide/vue';
 import type { CatalogChannel, CatalogFeed, CatalogItem } from '../../types/catalog';
 import type { MediaItem, PlaybackHistoryEntry } from '../../types/media';
 import { catalogChannels } from '../../composables/useCatalog';
 import { findCatalogMedia } from '../../services/catalogMatching';
+import { useFeaturedCarousel } from '../../composables/useFeaturedCarousel';
 import CatalogCard from './CatalogCard.vue';
 import MediaPoster from '../common/MediaPoster.vue';
 const props = defineProps<{
   feeds: Partial<Record<CatalogChannel, CatalogFeed>>; loading: CatalogChannel[];
-  library: MediaItem[]; history: PlaybackHistoryEntry[];
+  library: MediaItem[]; history: PlaybackHistoryEntry[]; active?: boolean;
 }>();
 const emit = defineEmits<{
   (event: 'select', item: CatalogItem): void; (event: 'play', item: MediaItem): void;
@@ -17,13 +18,15 @@ const emit = defineEmits<{
   (event: 'history'): void; (event: 'refresh'): void;
 }>();
 const selected = ref<CatalogChannel | 'all'>('all');
-const heroIndex = ref(0);
+const carouselRoot = ref<HTMLElement | null>(null);
 const tabs: { id: CatalogChannel | 'all'; label: string }[] = [
   { id: 'all', label: '精选' }, { id: 'tv', label: '电视剧' }, { id: 'movie', label: '电影' },
   { id: 'anime', label: '动漫' }, { id: 'variety', label: '综艺' }
 ];
 const sections = computed(() => catalogChannels.filter(channel => selected.value === 'all' || channel.id === selected.value));
 const heroes = computed(() => props.feeds[selected.value === 'all' ? 'tv' : selected.value]?.items.slice(0, 5) || []);
+const carousel = useFeaturedCarousel(() => heroes.value.map(item => item.id), () => props.active !== false, carouselRoot);
+const { index: heroIndex, enabled: autoplayEnabled, running: autoplayRunning } = carousel;
 const hero = computed(() => heroes.value[heroIndex.value] || heroes.value[0]);
 const continuing = computed(() => props.history.filter(entry => !entry.completed && entry.position > 5).slice(0, 8));
 const updates = computed(() => props.library.filter(item => (item.newEpisodeCount || 0) > 0).slice(0, 8));
@@ -32,18 +35,18 @@ const channelDate = (channel: CatalogChannel) => {
   const value = props.feeds[channel]?.updatedAt;
   return value ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }).format(new Date(value)) : '';
 };
-function more(channel: CatalogChannel) { selected.value = channel; heroIndex.value = 0; window.scrollTo({ top: 0, behavior: 'smooth' }); }
-function stepHero(direction: number) { heroIndex.value = (heroes.value.indexOf(hero.value!) + direction + heroes.value.length) % heroes.value.length; }
+function more(channel: CatalogChannel) { selected.value = channel; carousel.select(0); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 </script>
 <template>
   <main class="discovery-page">
     <nav class="channel-nav" aria-label="影视频道">
-      <button v-for="tab in tabs" :key="tab.id" type="button" :class="{ active: selected === tab.id }" :aria-pressed="selected === tab.id" @click="selected = tab.id; heroIndex = 0">{{ tab.label }}</button>
+      <button v-for="tab in tabs" :key="tab.id" type="button" :class="{ active: selected === tab.id }" :aria-pressed="selected === tab.id" @click="selected = tab.id; carousel.select(0)">{{ tab.label }}</button>
     </nav>
-    <section v-if="hero" class="feature-film" aria-label="焦点影片">
-      <MediaPoster :src="hero.poster" alt="" class="feature-art" fetchpriority="high" />
+    <div ref="carouselRoot" class="feature-carousel" role="region" aria-roledescription="轮播图" aria-label="首页精选推荐" @pointerenter="carousel.enter" @pointerleave="carousel.leave" @focusin="carousel.focus" @focusout="carousel.blur" @pointerdown="carousel.press" @pointerup="carousel.release" @pointercancel="carousel.release">
+    <section v-if="hero" class="feature-film" aria-label="焦点影片" :aria-live="autoplayRunning ? 'off' : 'polite'">
+      <Transition name="hero-art"><MediaPoster :key="hero.id" :src="hero.poster" alt="" class="feature-art" fetchpriority="high" /></Transition>
       <div class="feature-shade"></div>
-      <div class="feature-copy">
+      <Transition name="hero-copy" mode="out-in"><div :key="hero.id" class="feature-copy">
         <span class="eyebrow">今晚 · 看点好故事</span>
         <h1>{{ hero.title }}</h1>
         <p>{{ hero.subtitle || hero.status || '在这里，发现下一部喜欢的作品' }}</p>
@@ -51,21 +54,26 @@ function stepHero(direction: number) { heroIndex.value = (heroes.value.indexOf(h
           <button class="cinema-button primary" type="button" @click="emit('select', hero)"><Play fill="currentColor" />查看影片</button>
           <span v-if="hero.rating" class="feature-rating">{{ hero.rating.toFixed(1) }}<small>豆瓣评分</small></span>
         </div>
-      </div>
+      </div></Transition>
+      <div v-if="heroes.length > 1" class="feature-controls">
+      <button type="button" class="feature-autoplay" :aria-label="autoplayEnabled ? '暂停推荐轮播' : '开启推荐轮播'" :aria-pressed="autoplayEnabled" @click="carousel.toggle"><Pause v-if="autoplayEnabled" /><Play v-else /></button>
       <div class="feature-pagination" aria-label="焦点影片切换">
-        <button v-for="(item, index) in heroes" :key="item.id" type="button" :aria-label="'查看焦点影片：' + item.title" :aria-pressed="hero.id === item.id" :class="{ active: hero.id === item.id }" @click="heroIndex = index"><span></span></button>
+        <button v-for="(item, index) in heroes" :key="item.id" type="button" :aria-label="'查看焦点影片：' + item.title" :aria-pressed="hero.id === item.id" :class="{ active: hero.id === item.id }" @click="carousel.select(index)"><span></span></button>
       </div>
-      <div v-if="heroes.length > 1" class="feature-arrows">
-        <button type="button" aria-label="上一部焦点影片" @click="stepHero(-1)"><ChevronLeft /></button>
-        <button type="button" aria-label="下一部焦点影片" @click="stepHero(1)"><ChevronRight /></button>
+      <span class="feature-counter">{{ String(heroIndex + 1).padStart(2, '0') }} / {{ String(heroes.length).padStart(2, '0') }}</span>
+      <div class="feature-arrows">
+        <button type="button" aria-label="上一部焦点影片" @click="carousel.step(-1)"><ChevronLeft /></button>
+        <button type="button" aria-label="下一部焦点影片" @click="carousel.step(1)"><ChevronRight /></button>
+      </div>
       </div>
     </section>
     <div v-else-if="loading.length" class="hero-skeleton skeleton-surface" role="status" aria-label="正在加载热门影视"></div>
     <nav v-if="heroes.length > 1" class="feature-choices" aria-label="精选片单">
-      <button v-for="(item, index) in heroes" :key="item.id" type="button" :class="{ active: hero?.id === item.id }" :aria-pressed="hero?.id === item.id" @click="heroIndex = index">
+      <button v-for="(item, index) in heroes" :key="item.id" type="button" :class="{ active: hero?.id === item.id }" :aria-pressed="hero?.id === item.id" @click="carousel.select(index)">
         <span class="feature-choice-number">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>{{ item.title }}</strong><small>{{ item.rating ? item.rating.toFixed(1) + ' 分 · ' : '' }}{{ item.status || item.year || '查看影片' }}</small></span>
       </button>
     </nav>
+    </div>
     <section v-if="continuing.length && selected === 'all'" class="content-section">
       <div class="section-heading"><div><h2>接着上次看</h2><p>好故事，继续发生</p></div><button type="button" class="text-link" @click="emit('history')">全部记录<ArrowRight /></button></div>
       <div class="continue-rail">

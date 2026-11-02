@@ -95,7 +95,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 <style scoped>
 .media-card { position: relative; min-width: 0; }
 .card-play-target { display: flex; width: 100%; min-width: 0; flex-direction: column; gap: 12px; padding: 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; border-radius: 10px; }
-.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border-radius: 10px; background: var(--surface-2); box-shadow: 0 6px 18px rgb(0 0 0 / .2); }
+.poster-viewport { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border-radius: var(--cinema-radius-poster); background: var(--surface-2); box-shadow: 0 6px 18px rgb(0 0 0 / .12); }
 .poster-image { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
 .quality-tag { position: absolute; top: 9px; left: 9px; max-width: calc(100% - 18px); overflow: hidden; padding: 2px 6px; border-radius: 4px; color: #fff; background: rgb(0 0 0 / .65); font-size: .6rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .card-caption { display: grid; min-width: 0; width: 100%; gap: 4px; padding: 0 30px 0 1px; }
@@ -112,5 +112,5 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 .play-disk svg { width: 22px; height: 22px; margin-left: 2px; }
 @media (hover: hover) { .card-play-target:hover .poster-image { transform: scale(1.035); } .card-play-target:hover .hover-play { opacity: 1; } }
 .card-play-target:focus-visible .hover-play { opacity: 1; }
-@media (max-width: 640px) { .media-title { font-size: .87rem; } .poster-viewport { border-radius: 10px; } .card-play-target { gap: 9px; } }
+@media (max-width: 640px) { .media-title { font-size: .87rem; } .card-play-target { gap: 12px; } }
 </style>
