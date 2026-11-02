@@ -496,7 +496,12 @@ const navigateMobileTab = async (tab: MobileDockTab) => {
   await nextTick();
   window.scrollTo({ top: pageScroll.get(tab) || 0 });
 };
-const focusMobileSearch = () => { void navigateMobileTab('search'); };
+const focusMobileSearch = async () => { await navigateMobileTab('search'); searchPageRef.value?.focus(); };
+const submitHeaderSearch = async (keyword: string) => {
+  if (isSavingTransfer.value) return;
+  await navigateMobileTab('search');
+  searchPageRef.value?.search(keyword);
+};
 const showHistory = async () => {
   await navigateMobileTab('account');
   accountPageRef.value?.showHistory();
@@ -540,7 +545,7 @@ const retryTransferSearch = () => { cancelAutomatic(); retrySearch(); };
   <template v-else-if="user">
     <div :inert="!!catalogDetail || isEmbedPlayerOpen || isTransferOpen || !!deletingMedia || !!categoryMedia || !!actionMedia">
       <DesktopSidebar :active-page="mobileTab" :user="user" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
-      <TopNavigation @home="navigateMobileTab('home')" @search="focusMobileSearch" @history="showHistory" />
+      <TopNavigation :active-page="mobileTab" :disabled="isSavingTransfer" @home="navigateMobileTab('home')" @search="focusMobileSearch" @submit="submitHeaderSearch" @history="showHistory" />
       <HomePage v-show="mobileTab === 'home'" :feeds="catalogFeeds" :loading="catalogLoading" :library="enrichedMediaList" :history="history" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" />
       <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :error="failedResourceId === 'direct' ? saveError : null" @search="handleSearchMedia" @select="openCatalogDetail" @play="handleSelectMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
       <main v-show="mobileTab === 'library'" class="page-container library-page">
@@ -585,9 +590,7 @@ const retryTransferSearch = () => { cancelAutomatic(); retrySearch(); };
 .check-updates-button.checking svg { animation: update-spin .9s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (min-width: 1024px) {
-  .app-navbar { width: calc(100% - 240px); margin-left: 240px; }
-  .page-container { width: calc(100% - 240px); max-width: none; margin-left: 240px; padding: 36px clamp(28px, 3vw, 56px) 72px; }
-  .category-toolbar { display: none; }
+  .page-container { padding-top: 32px; padding-bottom: 64px; }
 }
 @media (max-width: 640px) {
   .page-container { padding: 16px calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }

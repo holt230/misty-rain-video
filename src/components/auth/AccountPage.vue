@@ -334,7 +334,7 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 </template>
 
 <style scoped>
-.account-page { position: relative; z-index: 1; width: min(780px, 100%); height: var(--app-viewport-height); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; margin: 0 auto; padding: calc(40px + var(--safe-area-top)) 24px 70px; }
+.account-page { position: relative; z-index: 1; width: min(780px, 100%); margin: 0 auto; padding: calc(40px + var(--safe-area-top)) 24px var(--mobile-content-bottom); }
 .account-page::-webkit-scrollbar { width: 10px; }
 .account-page::-webkit-scrollbar-track { border-radius: 8px; background: var(--glass-bg); }
 .account-page::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 8px; background: var(--text-tertiary); background-clip: padding-box; }
@@ -414,13 +414,11 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 :global(html.ios-standalone .app-section) { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 1024px) {
-  .account-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: start; align-items: start; gap: 24px; width: calc(100% - 240px); margin-left: 240px; padding: 40px clamp(28px, 3vw, 56px); }
-  .page-heading, .profile-card, .continue-history-section { grid-column: 1 / -1; margin: 0; }
-  .settings-section { margin: 0; }
-  .history-section { grid-column: 1; }
-  .auth-section { grid-column: 2; grid-row: span 2; }
-  .theme-section, .app-section { grid-column: 1; }
-  .logout-button { grid-column: 1 / -1; justify-self: start; width: 180px; margin: 0; }
+  .account-page { padding-top: 32px; padding-bottom: 64px; }
+  .account-page > * { max-width: 1040px; }
+  .settings-section { max-width: 880px; }
+  .history-section { max-width: 1040px; }
+  .logout-button { width: 180px; }
 }
 @media (max-width: 640px) {
   .account-page { padding: calc(22px + var(--safe-area-top)) calc(20px + var(--safe-area-right)) var(--mobile-content-bottom) calc(20px + var(--safe-area-left)); }

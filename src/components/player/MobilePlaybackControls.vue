@@ -4,11 +4,12 @@ import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitl
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; hls?: Hls | null; username?: string }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; desktop?: boolean; hls?: Hls | null; username?: string }>();
 const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
 const visible = ref(true);
 const paused = ref(true);
 const muted = ref(false);
+const volume = ref(1);
 const time = ref(0);
 const duration = ref(0);
 const scrubbing = ref(false);
@@ -64,6 +65,11 @@ function toggleMute() {
   props.video.muted = !unmute;
   if (unmute && props.video.volume === 0) props.video.volume = 1;
 }
+function changeVolume(event: Event) {
+  props.video.volume = Number((event.target as HTMLInputElement).value);
+  props.video.muted = props.video.volume === 0;
+  reveal();
+}
 function selectSubtitle(event: Event) {
   const id = (event.target as HTMLSelectElement).value;
   const option = subtitles.value.find(item => item.id === id);
@@ -76,7 +82,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   release();
   scrubbing.value = false; notice.value = '';
   const sync = () => {
-    paused.value = video.paused; muted.value = video.muted || video.volume === 0;
+    paused.value = video.paused; muted.value = video.muted || video.volume === 0; volume.value = video.volume;
     duration.value = Number.isFinite(video.duration) ? video.duration : 0;
     if (!scrubbing.value) time.value = video.currentTime || 0;
   };
@@ -94,6 +100,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (boosted.value) { video.playbackRate = initialRate; boosted.value = false; suppressTap = true; }
   };
   const startPress = (event: PointerEvent) => {
+    if (event.pointerType === 'mouse') { video.focus({ preventScroll: true }); reveal(); return; }
     if (locked.value || video.paused || (event.button !== undefined && event.button !== 0)) return;
     origin = { x: event.clientX, y: event.clientY };
     clearTimeout(pressTimer);
@@ -105,6 +112,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     }, 450);
   };
   const movePress = (event: PointerEvent) => {
+    if (event.pointerType === 'mouse') reveal();
     if (Math.abs(event.clientX - origin.x) + Math.abs(event.clientY - origin.y) > 12) endPress();
   };
   const tap = () => {
@@ -115,7 +123,9 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   const doubleTap = (event: Event) => { if (!locked.value) { event.preventDefault(); void togglePlay(); } };
   const contextMenu = (event: Event) => event.preventDefault();
   const keyboard = (event: KeyboardEvent) => {
-    if (locked.value) return;
+    if (locked.value || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest('input, select, textarea, button, a, [contenteditable="true"]')) return;
     if (event.key === ' ' || event.key === 'k') { event.preventDefault(); void togglePlay(); }
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault();
@@ -125,6 +135,8 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (event.key === 'f') emit('fullscreen');
     if (event.key === 'm') toggleMute();
   };
+  const stage = video.closest('.video-stage') || video;
+  const hover = (event: Event) => { if ((event as PointerEvent).pointerType === 'mouse') reveal(); };
   try { const saved = Number(localStorage.getItem(rateKey())); speed.value = rates.includes(saved) ? saved : 1; } catch { speed.value = 1; }
   const restoreSpeed = () => {
     video.defaultPlaybackRate = speed.value;
@@ -139,7 +151,8 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   video.addEventListener('pointerleave', endPress);
   video.addEventListener('dblclick', doubleTap);
   video.addEventListener('contextmenu', contextMenu);
-  video.addEventListener('keydown', keyboard);
+  stage.addEventListener('keydown', keyboard as EventListener);
+  stage.addEventListener('pointermove', hover);
   const events = ['timeupdate', 'durationchange', 'loadedmetadata', 'volumechange', 'seeked'];
   events.forEach(event => video.addEventListener(event, sync));
   ['play', 'pause', 'ended'].forEach(event => video.addEventListener(event, playback));
@@ -161,7 +174,8 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     video.removeEventListener('pointerleave', endPress);
     video.removeEventListener('dblclick', doubleTap);
     video.removeEventListener('contextmenu', contextMenu);
-    video.removeEventListener('keydown', keyboard);
+    stage.removeEventListener('keydown', keyboard as EventListener);
+    stage.removeEventListener('pointermove', hover);
     video.removeEventListener('loadedmetadata', restoreSpeed);
     hlsEvents.forEach(event => hls?.off(event, syncTracks));
     clearTimeout(timer);
@@ -176,7 +190,8 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
     <p v-if="notice" role="status">{{ notice }}</p>
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
     <div class="control-tools">
-      <button v-if="expanded" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
+      <span class="desktop-shortcuts">空格 暂停 / 继续 · ← → 快进退 · F 全屏 · M 静音</span>
+      <button v-if="expanded && !desktop" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
       <template v-if="!locked">
         <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
         <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
@@ -185,12 +200,13 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
     <div v-show="!locked" class="transport">
       <button type="button" :aria-label="paused ? '播放' : '暂停'" @click="togglePlay"><Play v-if="paused" /><Pause v-else /></button>
       <span class="time">{{ clock(time) }}</span>
-      <input type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; reveal()" />
+      <input class="seek-slider" type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; reveal()" />
       <span class="time">{{ clock(duration) }}</span>
       <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
+      <input class="volume-slider" type="range" aria-label="音量" min="0" max="1" step="0.05" :value="muted ? 0 : volume" @input="changeVolume" />
       <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
       <select aria-label="播放倍速" :value="speed" @change="changeSpeed"><option v-for="rate in rates" :key="rate" :value="rate">{{ rate }}×</option></select>
-      <button type="button" :aria-label="expanded ? '退出横屏' : '横屏播放'" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
+      <button type="button" :aria-label="desktop ? (expanded ? '退出网页全屏' : '网页全屏播放') : (expanded ? '退出横屏' : '横屏播放')" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
     </div>
   </div>
 </template>
@@ -219,4 +235,17 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .transport select { margin-left: auto; border-radius: 5px; padding: 0 5px; max-width: 95px; }
 .mobile-controls { padding-top: 12px; }
 @media (min-width: 821px) { .transport { flex-wrap: nowrap; } .transport input { order: 0; flex: 1; } .transport .time { order: 0; } }
+.volume-slider, .desktop-shortcuts { display: none; }
+@media (min-width: 1024px) and (pointer: fine) {
+  .mobile-controls { padding: 28px 16px 8px; }
+  .transport { gap: 8px; flex-wrap: wrap; }
+  .transport .seek-slider { order: -2; flex: 1 0 100%; width: 100%; height: 24px; margin: 0; }
+  .transport .volume-slider { display: block; order: 0; flex: 0 1 72px; width: 72px; min-width: 40px; }
+  .transport .time { width: auto; }
+  .transport .time + .seek-slider + .time::before { content: '/'; padding-right: 8px; color: #c5c5ca; }
+  .transport select { min-width: 60px; margin-left: 0; }
+  .transport select:first-of-type { margin-left: auto; }
+  .desktop-shortcuts { display: block; margin-right: auto; color: #dedee3; font-size: 11px; }
+  button:hover { background: rgb(255 255 255 / .15); border-radius: 6px; }
+}
 </style>

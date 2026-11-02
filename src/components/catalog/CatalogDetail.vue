@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ArrowLeft, ExternalLink, Play, Search } from '@lucide/vue';
+import { ArrowLeft, ExternalLink, Play, Search, X } from '@lucide/vue';
 import type { CatalogItem } from '../../types/catalog';
 import { useDialog } from '../../composables/useDialog';
 import MediaPoster from '../common/MediaPoster.vue';
@@ -10,8 +10,9 @@ const root = ref<HTMLElement | null>(null);
 useDialog(root, () => true, () => emit('close'));
 </script>
 <template>
-  <section ref="root" class="catalog-detail screen-dialog" role="dialog" aria-modal="true" aria-labelledby="catalog-detail-title">
-    <header class="screen-header"><button type="button" class="icon-control" aria-label="返回浏览" @click="emit('close')"><ArrowLeft /></button><span>影片详情</span></header>
+  <section ref="root" class="catalog-detail screen-dialog" role="dialog" aria-modal="true" aria-labelledby="catalog-detail-title" @click.self="emit('close')">
+    <div class="detail-window">
+    <header class="screen-header"><button type="button" class="icon-control detail-back" aria-label="返回浏览" @click="emit('close')"><ArrowLeft /></button><span>影片详情</span><button type="button" class="icon-control detail-close" aria-label="关闭影片详情" @click="emit('close')"><X /></button></header>
     <div class="detail-stage">
       <MediaPoster :src="item.poster" alt="" class="detail-backdrop" />
       <div class="detail-stage-shade"></div>
@@ -23,6 +24,7 @@ useDialog(root, () => true, () => emit('close'));
       <section class="detail-information"><h2>影片信息</h2><p>{{ item.subtitle || '此来源暂未提供更多影片资料。' }}</p><p v-if="item.status">来源收录状态：{{ item.status }}。可播放集数以实际片源为准。</p></section>
       <button type="button" class="cinema-button secondary" @click="emit('sources')"><Search />自己选择片源</button>
       <a :href="item.sourceUrl" target="_blank" rel="noopener noreferrer" class="detail-source">查看豆瓣资料<ExternalLink /></a>
+    </div>
     </div>
   </section>
 </template>

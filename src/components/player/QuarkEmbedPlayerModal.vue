@@ -1199,6 +1199,10 @@ const close = () => {
 
 const openEpisodeSheet = () => {
   episodeGroupIndex.value = groupForEpisode(currentEpisodeIndex.value);
+  if (!immersive.value && window.matchMedia('(min-width: 1024px)').matches) {
+    void nextTick(() => episodePanelRef.value?.querySelector<HTMLElement>('.episode-item.active')?.focus({ preventScroll: false }));
+    return;
+  }
   episodeSheetOpen.value = true;
 };
 const dismissLayer = () => {
@@ -1328,7 +1332,7 @@ defineExpose({ retry, dismissLayer });
 
             <MobilePlaybackControls
               v-if="videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" @fullscreen="toggleWebFullscreen" @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
+              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" :desktop="!isMobilePlaybackDevice" @fullscreen="toggleWebFullscreen" @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
             />
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
@@ -1808,6 +1812,15 @@ defineExpose({ retry, dismissLayer });
 .episode-panel.sheet-open { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(420px, calc(100% - 48px)); height: min(75%, 700px); overflow: hidden; margin: 0; border-radius: 16px; border: 1px solid var(--divider); background: var(--surface-1); }
 .episode-panel.sheet-open .episode-list { overflow-y: auto; }
 @media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(100dvh - 200px); } }
+@media (min-width: 821px) and (max-width: 1199px) { .player-layout { grid-template-columns: minmax(0, 1fr) 260px; } }
+@media (min-width: 1024px) {
+  .player-window { max-width: 1920px; margin-inline: auto; }
+  .video-column { padding: 24px; }
+  .video-stage { max-height: calc(100dvh - 240px); }
+  .episode-panel { background: var(--surface-1); }
+  .episode-item { border-radius: 10px; }
+  .episode-heading { padding: 24px 16px 16px; }
+}
 @media (max-width: 820px) {
   .player-header { min-height: calc(74px + var(--safe-area-top)); padding: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)) 12px 12px; }
   .player-layout { display: block; }

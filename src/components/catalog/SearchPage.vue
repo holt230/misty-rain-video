@@ -46,7 +46,7 @@ function submit() {
     emit('save', { id: 'import-' + Date.now(), title: '待识别片名', category: category.value, poster: '', tag: '', quarkShareUrl: parsed.value.url, quarkPasscode: parsed.value.passcode });
   } else { remember(); emit('search', query.value.trim(), category.value); }
 }
-defineExpose({ focus: () => input.value?.focus() });
+defineExpose({ focus: () => input.value?.focus(), search: (keyword: string) => { query.value = keyword; submit(); } });
 </script>
 <template>
   <main class="search-page">

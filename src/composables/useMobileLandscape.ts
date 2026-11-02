@@ -8,7 +8,7 @@ export function useMobileLandscape(mobile: boolean, isOpen: () => boolean) {
   const height = ref(window.innerHeight);
   const landscape = computed(() => mobile && width.value > height.value && height.value <= 500);
   const immersive = computed(() => explicit.value || (landscape.value && !dismissed.value));
-  const rotated = computed(() => explicit.value && height.value > width.value);
+  const rotated = computed(() => mobile && explicit.value && height.value > width.value);
   const immersiveStyle = computed(() => immersive.value ? {
     '--player-width': `${width.value}px`, '--player-height': `${height.value}px`
   } : {});

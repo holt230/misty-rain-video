@@ -11,22 +11,23 @@ export const useDialog = (element: Ref<HTMLElement | null>, isOpen: () => boolea
   let previousFocus: HTMLElement | null = null;
   const release = () => {
     if (!active) return;
+    const wasTop = openDialogs.at(-1) === active;
     const index = openDialogs.indexOf(active);
     if (index >= 0) openDialogs.splice(index, 1);
     active = null;
     if (!openDialogs.length) {
       document.body.style.overflow = originalOverflow;
       document.documentElement.style.overflow = originalRootOverflow;
-      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
     }
+    if (wasTop && previousFocus?.isConnected && (!openDialogs.length || openDialogs.at(-1)?.contains(previousFocus))) previousFocus.focus({ preventScroll: true });
   };
   const onKeydown = (event: KeyboardEvent) => {
-    if (!active || openDialogs.at(-1) !== active) return;
+    if (event.defaultPrevented || !active || openDialogs.at(-1) !== active) return;
     // 全屏视频的退出和焦点导航交给浏览器原生控件。
     if (document.fullscreenElement && active.contains(document.fullscreenElement)) return;
     if (event.key === 'Escape' && close) {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       close();
     }
     if (event.key !== 'Tab') return;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { ArrowRight, Play, RefreshCw } from '@lucide/vue';
+import { ArrowRight, ChevronLeft, ChevronRight, Play, RefreshCw } from '@lucide/vue';
 import type { CatalogChannel, CatalogFeed, CatalogItem } from '../../types/catalog';
 import type { MediaItem, PlaybackHistoryEntry } from '../../types/media';
 import { catalogChannels } from '../../composables/useCatalog';
@@ -33,6 +33,7 @@ const channelDate = (channel: CatalogChannel) => {
   return value ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }).format(new Date(value)) : '';
 };
 function more(channel: CatalogChannel) { selected.value = channel; heroIndex.value = 0; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+function stepHero(direction: number) { heroIndex.value = (heroes.value.indexOf(hero.value!) + direction + heroes.value.length) % heroes.value.length; }
 </script>
 <template>
   <main class="discovery-page">
@@ -54,8 +55,17 @@ function more(channel: CatalogChannel) { selected.value = channel; heroIndex.val
       <div class="feature-pagination" aria-label="焦点影片切换">
         <button v-for="(item, index) in heroes" :key="item.id" type="button" :aria-label="'查看焦点影片：' + item.title" :aria-pressed="hero.id === item.id" :class="{ active: hero.id === item.id }" @click="heroIndex = index"><span></span></button>
       </div>
+      <div v-if="heroes.length > 1" class="feature-arrows">
+        <button type="button" aria-label="上一部焦点影片" @click="stepHero(-1)"><ChevronLeft /></button>
+        <button type="button" aria-label="下一部焦点影片" @click="stepHero(1)"><ChevronRight /></button>
+      </div>
     </section>
     <div v-else-if="loading.length" class="hero-skeleton skeleton-surface" role="status" aria-label="正在加载热门影视"></div>
+    <nav v-if="heroes.length > 1" class="feature-choices" aria-label="精选片单">
+      <button v-for="(item, index) in heroes" :key="item.id" type="button" :class="{ active: hero?.id === item.id }" :aria-pressed="hero?.id === item.id" @click="heroIndex = index">
+        <span class="feature-choice-number">{{ String(index + 1).padStart(2, '0') }}</span><span><strong>{{ item.title }}</strong><small>{{ item.rating ? item.rating.toFixed(1) + ' 分 · ' : '' }}{{ item.status || item.year || '查看影片' }}</small></span>
+      </button>
+    </nav>
     <section v-if="continuing.length && selected === 'all'" class="content-section">
       <div class="section-heading"><div><h2>接着上次看</h2><p>好故事，继续发生</p></div><button type="button" class="text-link" @click="emit('history')">全部记录<ArrowRight /></button></div>
       <div class="continue-rail">

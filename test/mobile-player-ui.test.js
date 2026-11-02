@@ -39,8 +39,8 @@ function video() {
   return element;
 }
 function mount() {
-  document.body.innerHTML = '<div id="mount"></div>';
-  const media = video(); document.body.appendChild(media);
+  document.body.innerHTML = '<div class="video-stage"><div id="mount"></div></div>';
+  const media = video(); media.tabIndex = 0; document.querySelector('.video-stage').appendChild(media);
   const props = reactive({ video: markRaw(media), expanded: false });
   let toggles = 0;
   const app = createApp({ render: () => h(Controls, { ...props, onFullscreen: () => { toggles++; props.expanded = !props.expanded; } }) });
@@ -167,6 +167,62 @@ test('speed selection persists, long press restores the selected speed and locki
     view.media.dispatchEvent(event('dblclick')); await nextTick(); assert.equal(view.media.paused, true);
     assert.notEqual(document.querySelector('.transport').style.display, 'none');
   } finally { view.app.unmount(); globalThis.setTimeout = originalTimeout; localStorage.clear(); }
+});
+
+test('desktop pointer wakes hidden controls, focuses the video and never starts touch hold acceleration', async () => {
+  const originalTimeout = globalThis.setTimeout;
+  let hide, holdCalls = 0;
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay === 3500) { hide = callback; return 0; }
+    if (delay === 450) { holdCalls++; return 0; }
+    return originalTimeout(callback, delay, ...args);
+  };
+  const view = mount();
+  const pointer = name => { const value = event(name); Object.defineProperty(value, 'pointerType', { value: 'mouse' }); return value; };
+  try {
+    await view.media.play(); hide(); await nextTick();
+    assert.ok(document.querySelector('.mobile-controls.concealed'));
+    document.querySelector('.video-stage').dispatchEvent(pointer('pointermove')); await nextTick();
+    assert.equal(document.querySelector('.mobile-controls.concealed'), null);
+    view.media.dispatchEvent(pointer('pointerdown'));
+    assert.equal(document.activeElement, view.media);
+    assert.equal(holdCalls, 0);
+  } finally { view.app.unmount(); globalThis.setTimeout = originalTimeout; }
+});
+
+test('desktop volume and keyboard controls work without intercepting form fields or surviving unmount', async () => {
+  const view = mount();
+  const key = (target, value, options = {}) => target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...options }));
+  try {
+    const volume = document.querySelector('input[aria-label="音量"]');
+    volume.value = '0'; volume.dispatchEvent(event('input')); await nextTick();
+    assert.equal(view.media.volume, 0); assert.equal(view.media.muted, true);
+    volume.value = '0.45'; volume.dispatchEvent(event('input')); await nextTick();
+    assert.equal(view.media.volume, 0.45); assert.equal(view.media.muted, false);
+    key(view.media, ' '); await nextTick(); assert.equal(view.media.paused, false);
+    view.media.currentTime = 40;
+    key(view.media, 'ArrowRight'); assert.equal(view.media.currentTime, 50);
+    key(volume, 'ArrowRight'); assert.equal(view.media.currentTime, 50);
+    key(document.querySelector('select'), 'k'); await nextTick(); assert.equal(view.media.paused, false);
+    key(view.media, 'k', { ctrlKey: true }); await nextTick(); assert.equal(view.media.paused, false);
+    key(view.media, 'f'); await nextTick(); assert.equal(view.toggles, 1);
+    key(view.media, 'm'); assert.equal(view.media.muted, true);
+    view.app.unmount();
+    key(view.media, 'ArrowRight'); assert.equal(view.media.currentTime, 50);
+  } finally { if (document.querySelector('.mobile-controls')) view.app.unmount(); }
+});
+
+test('desktop portrait windows expand without applying the phone rotation transform', async () => {
+  document.body.innerHTML = '<div id="mount"></div>';
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 900 });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1200 });
+  let layout;
+  const app = createApp({ setup() { layout = useMobileLandscape(false, () => true); return () => h('div'); } });
+  app.mount('#mount');
+  try {
+    layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, true); assert.equal(layout.rotated.value, false);
+    layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, false);
+  } finally { app.unmount(); }
 });
 
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });

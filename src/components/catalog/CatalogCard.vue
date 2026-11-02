@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowUpRight } from '@lucide/vue';
 import type { CatalogItem } from '../../types/catalog';
 import MediaPoster from '../common/MediaPoster.vue';
 defineProps<{ item: CatalogItem; inLibrary?: boolean }>();
@@ -10,6 +11,7 @@ defineEmits<{ (event: 'select', item: CatalogItem): void }>();
       <MediaPoster :src="item.poster" alt="" loading="lazy" decoding="async" />
       <span v-if="inLibrary" class="saved-label">已入库</span>
       <span v-if="item.rating" class="catalog-rating">{{ item.rating.toFixed(1) }}<small>豆瓣</small></span>
+      <span class="catalog-hover" aria-hidden="true"><ArrowUpRight />查看详情</span>
     </span>
     <strong>{{ item.title }}</strong>
     <small>{{ item.status || item.subtitle || '查看影片详情' }}</small>

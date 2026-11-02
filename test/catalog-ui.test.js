@@ -86,4 +86,39 @@ test('resource back navigation climbs folders before returning to search results
     assert.equal(reads, 1);
   } finally { app.unmount(); }
 });
+const dialogOutput = path.resolve(directory, 'dialog.mjs');
+await build({ entryPoints: ['src/composables/useDialog.ts'], outfile: dialogOutput, bundle: true, format: 'esm', external: ['vue'], logLevel: 'silent' });
+const { useDialog } = await import(pathToFileURL(dialogOutput));
+
+test('Escape closes only the top dialog and restores focus before closing the player on the next Escape', async () => {
+  document.body.innerHTML = '<div id="app"></div>';
+  const outerOpen = ref(true), innerOpen = ref(false), outer = ref(null), inner = ref(null);
+  let laterListenerCalls = 0;
+  const laterListener = () => { laterListenerCalls++; };
+  const app = createApp({ setup() {
+    // Player sheets register before the containing player dialog.
+    useDialog(inner, () => innerOpen.value, () => { innerOpen.value = false; });
+    useDialog(outer, () => outerOpen.value, () => { outerOpen.value = false; });
+    return () => outerOpen.value ? h('section', { ref: outer }, [
+      h('button', { id: 'open-settings', onClick: () => { innerOpen.value = true; } }, '设置'),
+      innerOpen.value ? h('aside', { ref: inner }, '设置内容') : null
+    ]) : null;
+  } });
+  app.mount('#app'); await nextTick(); await nextTick();
+  document.addEventListener('keydown', laterListener, true);
+  try {
+    const trigger = document.querySelector('#open-settings'); trigger.focus(); trigger.click();
+    await nextTick(); await nextTick();
+    assert.equal(document.activeElement, inner.value);
+    inner.value.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await nextTick();
+    assert.equal(innerOpen.value, false); assert.equal(outerOpen.value, true);
+    assert.equal(laterListenerCalls, 0);
+    assert.equal(document.activeElement, trigger);
+    assert.equal(document.body.style.overflow, 'hidden');
+    trigger.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await nextTick(); assert.equal(outerOpen.value, false); assert.equal(document.body.style.overflow, '');
+  } finally { document.removeEventListener('keydown', laterListener, true); app.unmount(); }
+});
+
 test.after(async () => { dom.window.close(); await fs.rm(directory, { recursive: true, force: true }); });
