@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { ArrowRight, ChevronLeft, ChevronRight, Pause, Play, RefreshCw } from '@lucide/vue';
+import { ArrowRight, ChevronLeft, ChevronRight, Play, RefreshCw } from '@lucide/vue';
 import type { CatalogChannel, CatalogFeed, CatalogItem } from '../../types/catalog';
 import type { MediaItem, PlaybackHistoryEntry } from '../../types/media';
 import { catalogChannels } from '../../composables/useCatalog';
@@ -26,7 +26,7 @@ const tabs: { id: CatalogChannel | 'all'; label: string }[] = [
 const sections = computed(() => catalogChannels.filter(channel => selected.value === 'all' || channel.id === selected.value));
 const heroes = computed(() => props.feeds[selected.value === 'all' ? 'tv' : selected.value]?.items.slice(0, 5) || []);
 const carousel = useFeaturedCarousel(() => heroes.value.map(item => item.id), () => props.active !== false, carouselRoot);
-const { index: heroIndex, enabled: autoplayEnabled, running: autoplayRunning } = carousel;
+const { index: heroIndex, running: autoplayRunning } = carousel;
 const hero = computed(() => heroes.value[heroIndex.value] || heroes.value[0]);
 const continuing = computed(() => props.history.filter(entry => !entry.completed && entry.position > 5).slice(0, 8));
 const updates = computed(() => props.library.filter(item => (item.newEpisodeCount || 0) > 0).slice(0, 8));
@@ -56,7 +56,6 @@ function more(channel: CatalogChannel) { selected.value = channel; carousel.sele
         </div>
       </div></Transition>
       <div v-if="heroes.length > 1" class="feature-controls">
-      <button type="button" class="feature-autoplay" :aria-label="autoplayEnabled ? '暂停推荐轮播' : '开启推荐轮播'" :aria-pressed="autoplayEnabled" @click="carousel.toggle"><Pause v-if="autoplayEnabled" /><Play v-else /></button>
       <div class="feature-pagination" aria-label="焦点影片切换">
         <button v-for="(item, index) in heroes" :key="item.id" type="button" :aria-label="'查看焦点影片：' + item.title" :aria-pressed="hero.id === item.id" :class="{ active: hero.id === item.id }" @click="carousel.select(index)"><span></span></button>
       </div>

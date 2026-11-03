@@ -79,18 +79,16 @@ test('hover, keyboard focus, touching, offscreen and background tabs pause recom
     v.intersect(true); assert.equal(v.timers.size, 1);
     v.hidden(true); assert.equal(v.timers.size, 0);
     v.hidden(false); assert.equal(v.timers.size, 1);
-    v.carousel.toggle(); assert.equal(v.timers.size, 0);
-    v.carousel.select(1); assert.equal(v.carousel.index.value, 1); assert.equal(v.timers.size, 0);
+    v.carousel.select(1); assert.equal(v.carousel.index.value, 1); assert.equal(v.timers.size, 1);
   } finally { v.app.unmount(); }
 });
 
-test('reduced-motion preference starts still and allows explicit playback; preference changes and unmount clean up', t => {
+test('reduced-motion preference pauses autoplay and preference changes and unmount clean up', t => {
   const v = mount(t, true);
   try {
-    assert.equal(v.carousel.enabled.value, false); assert.equal(v.timers.size, 0);
-    v.carousel.toggle(); assert.equal(v.timers.size, 1);
-    v.motionListeners.forEach(cb => cb()); assert.equal(v.timers.size, 0);
+    assert.equal(v.carousel.running.value, false); assert.equal(v.timers.size, 0);
     v.motion.matches = false; v.motionListeners.forEach(cb => cb()); assert.equal(v.timers.size, 1);
+    v.motion.matches = true; v.motionListeners.forEach(cb => cb()); assert.equal(v.timers.size, 0);
   } finally { v.app.unmount(); }
   v.hidden(true); assert.equal(v.timers.size, 0); assert.equal(v.motionListeners.size, 0);
 });

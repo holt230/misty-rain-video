@@ -317,12 +317,18 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           @save="saveDetails"
         />
         <template v-else-if="isAnalyzing">
+          <div class="resource-loading">
           <div class="loading-bar">
             <div class="mini-spinner"></div>
             <span role="status">{{ automaticStatus || `正在检索《${searchKeyword || media.title}》网盘资源…` }}</span>
           </div>
+          <div class="resource-placeholders" aria-hidden="true">
           <SkeletonCard v-for="i in 3" :key="i" />
-          <button v-if="automaticStatus" type="button" class="cinema-button secondary" :disabled="isSaving" @click="emit('cancel-automatic')">自己选择片源</button>
+          </div>
+          <div v-if="automaticStatus" class="resource-loading-actions">
+            <button type="button" class="cinema-button secondary" :disabled="isSaving" @click="emit('cancel-automatic')">自己选择片源</button>
+          </div>
+          </div>
         </template>
 
         <template v-else>
@@ -442,6 +448,11 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .retry-search-button svg { width: 17px; height: 17px; }
 .load-more-button { width: 100%; margin-top: 0; }
 .loading-bar { display: flex; align-items: center; gap: 10px; padding: 24px 0; color: var(--text-secondary); font-size: .88rem; }
+.resource-loading { display: grid; gap: 24px; padding: 24px 0 4px; }
+.resource-loading .loading-bar { padding: 0; }
+.resource-placeholders { display: grid; gap: 12px; }
+.resource-placeholders :deep(.skeleton-resource-card) { margin: 0; border-radius: var(--cinema-radius-card); }
+.resource-loading-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .mini-spinner { width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--surface-3); border-top-color: var(--liquid-accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {

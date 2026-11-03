@@ -45,9 +45,8 @@ export function useFeaturedCarousel(items: () => string[], active: () => boolean
     document.removeEventListener('visibilitychange', updateVisibility);
   });
   return {
-    index, enabled, running, select,
+    index, running, select,
     step: (direction: number) => select(index.value + direction),
-    toggle: () => { enabled.value = !enabled.value; },
     enter: (event: PointerEvent) => { if (event.pointerType === 'mouse') hovered.value = true; },
     leave: () => { hovered.value = false; touching.value = false; },
     focus: () => { if (!touching.value) focused.value = true; },

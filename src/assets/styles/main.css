@@ -38,8 +38,10 @@
 }
 @supports (height: 100dvh) { :root { --app-viewport-height: 100dvh; } }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { width: 100%; min-height: var(--app-viewport-height); overflow-x: hidden; color: var(--text-primary); background: var(--liquid-canvas); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; font-synthesis: none; -webkit-font-smoothing: antialiased; line-height: 1.5; }
-body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+html, body { width: 100%; min-height: var(--app-viewport-height); color: var(--text-primary); background: var(--liquid-canvas); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; font-synthesis: none; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+/* The document owns page scrolling; body must not trap wheel input in a second scroll container. */
+html { overflow-x: hidden; overscroll-behavior-y: none; }
+body { -webkit-tap-highlight-color: transparent; }
 #app { min-height: var(--app-viewport-height); }
 button, input, textarea, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }

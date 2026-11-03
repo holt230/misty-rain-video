@@ -65,8 +65,6 @@
 .feature-rating { display: flex; align-items: baseline; gap: 6px; font-size: 24px; font-weight: 750; color: #ffc58b; }
 .feature-rating small { font-size: 11px; font-weight: 400; color: #dedee3; }
 .feature-controls { position: absolute; right: 24px; bottom: 18px; left: 24px; display: flex; align-items: center; gap: 10px; }
-.feature-autoplay { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; padding: 12px; border: 1px solid rgb(255 255 255 / .18); border-radius: 50%; color: #fff; background: rgb(0 0 0 / .32); }
-.feature-autoplay svg { width: 16px; height: 16px; }
 .feature-counter { margin-left: auto; padding: 8px 10px; border-radius: 20px; background: rgb(0 0 0 / .4); color: #e1e3e8; font-size: 11px; font-variant-numeric: tabular-nums; letter-spacing: .1em; white-space: nowrap; }
 .feature-pagination { display: flex; gap: 2px; }
 .feature-pagination button { width: 24px; height: 44px; padding: 0 4px; border: 0; background: transparent; }
