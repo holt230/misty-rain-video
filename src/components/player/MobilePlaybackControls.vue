@@ -2,7 +2,7 @@
 import type Hls from 'hls.js';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 import { onBeforeUnmount, ref, watch } from 'vue';
-import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Maximize, Minimize, Pause, Play, Volume2, VolumeX } from '@lucide/vue';
+import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
 
 const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; desktop?: boolean; hls?: Hls | null; username?: string }>();
 const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
@@ -14,6 +14,7 @@ const time = ref(0);
 const duration = ref(0);
 const scrubbing = ref(false);
 const notice = ref('');
+const seekNotice = ref('');
 const subtitles = ref<SubtitleTrackOption[]>([]);
 const subtitle = ref('off');
 const speed = ref(1);
@@ -32,6 +33,7 @@ function changeSpeed(event: Event) {
 }
 watch(locked, value => emit('lock-change', value));
 let timer: ReturnType<typeof setTimeout> | undefined;
+let seekNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 let release = () => {};
 const clock = (value: number) => {
   const seconds = Math.max(0, Math.floor(value || 0));
@@ -60,6 +62,22 @@ function seek() {
   scrubbing.value = false;
   reveal();
 }
+function seekBy(seconds: number) {
+  const video = props.video;
+  if (locked.value || !Number.isFinite(video.duration) || video.duration <= 0) return;
+  const position = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  const target = Math.max(0, Math.min(video.duration, position + seconds));
+  try {
+    video.currentTime = target;
+    scrubbing.value = false;
+    time.value = target;
+    notice.value = '';
+    seekNotice.value = target === position ? (target === 0 ? '已到片头' : '已到片尾') : `${seconds > 0 ? '快进' : '快退'} ${Math.round(Math.abs(target - position))} 秒`;
+    clearTimeout(seekNoticeTimer);
+    seekNoticeTimer = setTimeout(() => { seekNotice.value = ''; }, 1400);
+  } catch { notice.value = '暂时无法跳转，请稍候重试'; }
+  reveal();
+}
 function toggleMute() {
   const unmute = muted.value;
   props.video.muted = !unmute;
@@ -80,7 +98,7 @@ function selectSubtitle(event: Event) {
 
 watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   release();
-  scrubbing.value = false; notice.value = '';
+  scrubbing.value = false; notice.value = ''; seekNotice.value = '';
   const sync = () => {
     paused.value = video.paused; muted.value = video.muted || video.volume === 0; volume.value = video.volume;
     duration.value = Number.isFinite(video.duration) ? video.duration : 0;
@@ -129,8 +147,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (event.key === ' ' || event.key === 'k') { event.preventDefault(); void togglePlay(); }
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault();
-      video.currentTime = Math.max(0, Math.min(Number.isFinite(video.duration) ? video.duration : video.currentTime, video.currentTime + (event.key === 'ArrowRight' ? 10 : -10)));
-      reveal();
+      seekBy(event.key === 'ArrowRight' ? 10 : -10);
     }
     if (event.key === 'f') emit('fullscreen');
     if (event.key === 'm') toggleMute();
@@ -179,6 +196,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     video.removeEventListener('loadedmetadata', restoreSpeed);
     hlsEvents.forEach(event => hls?.off(event, syncTracks));
     clearTimeout(timer);
+    clearTimeout(seekNoticeTimer);
   };
 }, { immediate: true });
 watch(() => props.expanded, value => { if (!value) locked.value = false; reveal(); });
@@ -189,10 +207,15 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
   <div class="mobile-controls" :class="{ concealed: !visible, locked }" @pointerdown="reveal" @focusin="reveal">
     <p v-if="notice" role="status">{{ notice }}</p>
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
+    <div v-if="seekNotice && !boosted" class="speed-notice" role="status">{{ seekNotice }}</div>
     <div class="control-tools">
       <span class="desktop-shortcuts">空格 暂停 / 继续 · ← → 快进退 · F 全屏 · M 静音</span>
       <button v-if="expanded && !desktop" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
       <template v-if="!locked">
+        <div class="seek-actions" role="group" aria-label="快进和快退">
+          <button type="button" class="seek-step" aria-label="快退10秒" title="快退10秒" :disabled="!duration" @click="seekBy(-10)"><span class="seek-symbol"><RotateCcw /><span>10</span></span></button>
+          <button type="button" class="seek-step" aria-label="快进10秒" title="快进10秒" :disabled="!duration" @click="seekBy(10)"><span class="seek-symbol"><RotateCw /><span>10</span></span></button>
+        </div>
         <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
         <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
       </template>
@@ -227,6 +250,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .control-tools { display: flex; align-items: center; justify-content: end; gap: 6px; margin-bottom: 2px; }
 .control-tools button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; width: auto; min-width: 44px; flex-basis: auto; padding: 8px 12px; border-radius: 6px; background: rgb(0 0 0 / .25); font-size: 12px; }
 .control-tools svg { width: 18px; height: 18px; }
+.seek-actions { display: flex; align-items: center; gap: 8px; margin-right: auto; }
+.control-tools .seek-step { width: 44px; height: 44px; min-width: 44px; padding: 10px; border-radius: 10px; }
+.seek-symbol { position: relative; display: block; width: 24px; height: 24px; }
+.seek-symbol svg { width: 24px; height: 24px; }
+.seek-symbol > span { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 2px; font-size: 9px; font-weight: 700; line-height: 1; }
 .mobile-controls.locked { background: transparent; }
 .speed-notice { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 8px; padding: 8px 14px; background: rgb(0 0 0 / .7); color: #fff; border-radius: 8px; font-size: 12px; white-space: nowrap; }
 .transport { flex-wrap: wrap; }
@@ -246,6 +274,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .transport select { min-width: 60px; margin-left: 0; }
   .transport select:first-of-type { margin-left: auto; }
   .desktop-shortcuts { display: block; margin-right: auto; color: #dedee3; font-size: 11px; }
+  .seek-actions { order: -1; margin-right: 4px; }
   button:hover { background: rgb(255 255 255 / .15); border-radius: 6px; }
 }
 </style>

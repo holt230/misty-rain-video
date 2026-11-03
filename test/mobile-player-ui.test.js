@@ -28,7 +28,7 @@ function video() {
   const element = document.createElement('video');
   let paused = true;
   Object.defineProperty(element, 'paused', { get: () => paused });
-  Object.defineProperty(element, 'duration', { value: 120 });
+  Object.defineProperty(element, 'duration', { configurable: true, value: 120 });
   element.play = async () => { paused = false; element.dispatchEvent(event('play')); };
   element.pause = () => { paused = true; element.dispatchEvent(event('pause')); };
   const tracks = [{ kind: 'subtitles', label: '中文', mode: 'showing' }, { kind: 'metadata', mode: 'hidden' }];
@@ -77,6 +77,44 @@ test('subtitle selection leaves metadata tracks alone; mute can restore zero vol
     view.media.volume = 0; view.media.dispatchEvent(event('volumechange')); await nextTick();
     button('取消静音').click(); await nextTick();
     assert.equal(view.media.volume, 1); assert.equal(view.media.muted, false);
+  } finally { view.app.unmount(); }
+});
+test('ten-second buttons seek immediately, preserve pause and speed, clamp boundaries and cancel pending scrubs', async () => {
+  const view = mount();
+  try {
+    view.media.currentTime = 40;
+    button('快进10秒').click(); await nextTick();
+    assert.equal(view.media.currentTime, 50); assert.equal(view.media.paused, true);
+    assert.equal(document.querySelector('.seek-slider').value, '50');
+    assert.match(document.querySelector('[role="status"]').textContent, /快进 10 秒/);
+    button('快退10秒').click(); assert.equal(view.media.currentTime, 40);
+    await view.media.play(); view.media.playbackRate = 1.5;
+    button('快进10秒').click(); assert.equal(view.media.currentTime, 50); assert.equal(view.media.paused, false); assert.equal(view.media.playbackRate, 1.5);
+    const slider = document.querySelector('.seek-slider');
+    slider.value = '90'; slider.dispatchEvent(event('input'));
+    button('快进10秒').click(); slider.dispatchEvent(event('change'));
+    assert.equal(view.media.currentTime, 60);
+    view.media.currentTime = 117; button('快进10秒').click(); assert.equal(view.media.currentTime, 120);
+    button('快进10秒').click(); await nextTick(); assert.match(document.querySelector('[role="status"]').textContent, /片尾/);
+    view.media.currentTime = 3; button('快退10秒').click(); assert.equal(view.media.currentTime, 0);
+    button('快退10秒').click(); await nextTick(); assert.match(document.querySelector('[role="status"]').textContent, /片头/);
+  } finally { view.app.unmount(); }
+});
+test('skip buttons are disabled without metadata and hidden while locked, then work after unlocking', async () => {
+  const view = mount();
+  try {
+    Object.defineProperty(view.media, 'duration', { configurable: true, value: NaN });
+    view.media.dispatchEvent(event('durationchange')); await nextTick();
+    assert.equal(button('快进10秒').disabled, true); assert.equal(button('快退10秒').disabled, true);
+    button('快进10秒').click(); assert.equal(view.media.currentTime, 0);
+    Object.defineProperty(view.media, 'duration', { configurable: true, value: 120 });
+    view.media.dispatchEvent(event('loadedmetadata')); await nextTick();
+    assert.equal(button('快进10秒').disabled, false);
+    view.props.expanded = true; await nextTick(); button('锁定播放控制').click(); await nextTick();
+    assert.equal(button('快进10秒'), null); assert.equal(button('快退10秒'), null);
+    view.media.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    assert.equal(view.media.currentTime, 0);
+    button('解锁播放控制').click(); await nextTick(); button('快进10秒').click(); assert.equal(view.media.currentTime, 10);
   } finally { view.app.unmount(); }
 });
 test('playing fades controls, tapping the video reveals them, and pausing keeps controls visible', async () => {
