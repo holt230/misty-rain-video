@@ -53,6 +53,76 @@ test('cached catalog refresh replaces visible data without reloading and stops a
   } finally { app.unmount(); }
 });
 
+const pageItems = (start, count = 24) => Array.from({ length: count }, (_, i) => ({ id: 'douban:' + (start + i), catalogId: 'douban:' + (start + i), title: '影片' + (start + i), poster: '/api/catalog/posters/' + (start + i), category: 'tv' }));
+const catalogPage = (channel, page = 1, items = pageItems(1), revision = 'aaaaaaaaaaaaaaaa', hasMore = true) => Response.json({ code: 0, data: { channel, page, items: channel === 'tv' ? items : [], revision, hasMore: channel === 'tv' && hasMore, updatedAt: '2026-11-03T00:00:00Z', stale: false, refreshing: false, message: '' } });
+function mountCatalog() {
+  document.body.innerHTML = '<div id="app"></div>';
+  const enabled = ref(true); let catalog;
+  const app = createApp({ setup() { catalog = useCatalog(enabled); return () => h('div'); } }); app.mount('#app');
+  return { app, enabled, get catalog() { return catalog; } };
+}
+test('later pages deduplicate, failed loads retry the same page, and double clicks do not duplicate requests', async t => {
+  const requested = []; let fail = true;
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(input, 'http://localhost'), channel = url.searchParams.get('channel'), page = Number(url.searchParams.get('page'));
+    if (channel === 'tv' && page > 1) {
+      requested.push(page); assert.equal(url.searchParams.get('revision'), 'aaaaaaaaaaaaaaaa');
+      if (fail) throw Error('offline');
+      return catalogPage(channel, page, page === 2 ? pageItems(24) : pageItems(48, 2), 'aaaaaaaaaaaaaaaa', page === 2);
+    }
+    return catalogPage(channel);
+  });
+  const view = mountCatalog();
+  try {
+    await flush();
+    await Promise.all([view.catalog.loadMore('tv'), view.catalog.loadMore('tv')]);
+    assert.deepEqual(requested, [2]); assert.equal(view.catalog.browse.value.tv.items.length, 24); assert.equal(view.catalog.browse.value.tv.page, 1);
+    fail = false; await view.catalog.loadMore('tv');
+    assert.deepEqual(requested, [2, 2]); assert.equal(view.catalog.browse.value.tv.items.length, 47); assert.equal(view.catalog.browse.value.tv.page, 2);
+    assert.match(view.catalog.browse.value.tv.items[24].poster, /^\/misty-rain\/api/);
+    assert.equal(view.catalog.feeds.value.tv.items.length, 24);
+    await view.catalog.loadMore('tv'); assert.equal(view.catalog.browse.value.tv.items.length, 49); assert.equal(view.catalog.browse.value.tv.hasMore, false);
+    await view.catalog.loadMore('tv'); assert.deepEqual(requested, [2, 2, 3]);
+  } finally { view.app.unmount(); }
+});
+test('a changed directory preserves the visible list until the user refreshes the channel', async t => {
+  let changed = false, moreCalls = 0;
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(input, 'http://localhost'), channel = url.searchParams.get('channel'), page = Number(url.searchParams.get('page'));
+    if (channel === 'tv' && page > 1) { moreCalls++; return Response.json({ code: 'CATALOG_CHANGED', message: '目录更新' }, { status: 409 }); }
+    return catalogPage(channel, page, pageItems(changed ? 100 : 1), changed ? 'bbbbbbbbbbbbbbbb' : 'aaaaaaaaaaaaaaaa');
+  });
+  const view = mountCatalog();
+  try {
+    await flush(); await view.catalog.loadMore('tv');
+    assert.equal(view.catalog.browse.value.tv.items[0].id, 'douban:1'); assert.equal(view.catalog.browse.value.tv.needsRefresh, true);
+    await view.catalog.loadMore('tv'); assert.equal(moreCalls, 1);
+    changed = true; await view.catalog.refreshChannel('tv');
+    assert.equal(view.catalog.browse.value.tv.items[0].id, 'douban:100'); assert.equal(view.catalog.browse.value.tv.needsRefresh, false);
+    assert.equal(view.catalog.browse.value.tv.page, 1);
+  } finally { view.app.unmount(); }
+});
+test('refreshing cancels a pending next page and logout cannot be undone by late pagination responses', async t => {
+  const pending = []; let revision = 'aaaaaaaaaaaaaaaa';
+  t.mock.method(globalThis, 'fetch', (input, options) => {
+    const url = new URL(input, 'http://localhost'), channel = url.searchParams.get('channel'), page = Number(url.searchParams.get('page'));
+    if (channel === 'tv' && page > 1) return new Promise(resolve => pending.push({ resolve, signal: options.signal, revision }));
+    return Promise.resolve(catalogPage(channel, page, pageItems(revision.startsWith('b') ? 100 : 1), revision));
+  });
+  const view = mountCatalog();
+  try {
+    await flush(); const old = view.catalog.loadMore('tv');
+    revision = 'bbbbbbbbbbbbbbbb'; await view.catalog.refreshChannel('tv');
+    assert.equal(pending[0].signal.aborted, true);
+    pending[0].resolve(catalogPage('tv', 2, pageItems(25), pending[0].revision)); await old;
+    assert.equal(view.catalog.browse.value.tv.items.length, 24); assert.equal(view.catalog.browse.value.tv.items[0].id, 'douban:100');
+    const next = view.catalog.loadMore('tv'); view.enabled.value = false; await nextTick();
+    assert.equal(pending[1].signal.aborted, true);
+    pending[1].resolve(catalogPage('tv', 2, pageItems(124), pending[1].revision)); await next;
+    assert.deepEqual(view.catalog.browse.value, {}); assert.deepEqual(view.catalog.feeds.value, {});
+  } finally { view.app.unmount(); }
+});
+
 const componentSource = await fs.readFile('src/components/quark/QuarkResourceDetails.vue', 'utf8');
 const compiled = compileScript(parse(componentSource).descriptor, { id: 'resource-directory-test', inlineTemplate: true });
 const detailFile = path.resolve(directory, 'details.mjs');

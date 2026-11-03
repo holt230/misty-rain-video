@@ -7,7 +7,7 @@ import TopNavigation from './components/layout/TopNavigation.vue';
 import HomePage from './components/catalog/HomePage.vue';
 import SearchPage from './components/catalog/SearchPage.vue';
 import CatalogDetail from './components/catalog/CatalogDetail.vue';
-import { catalogChannels, useCatalog } from './composables/useCatalog';
+import { useCatalog } from './composables/useCatalog';
 import { findCatalogMedia } from './services/catalogMatching';
 import { prepareCatalogPlayback } from './services/catalogPlayback';
 import { QuarkStreamService } from './services/quarkStreamService';
@@ -82,8 +82,7 @@ const {
 } = useQuarkTransfer();
 
 const searchPageRef = ref<InstanceType<typeof SearchPage> | null>(null);
-const { feeds: catalogFeeds, loading: catalogLoading, refresh: refreshCatalog } = useCatalog(authenticated);
-const catalogItems = computed(() => catalogChannels.flatMap(channel => catalogFeeds.value[channel.id]?.items || []));
+const { feeds: catalogFeeds, browse: catalogBrowse, items: catalogItems, loading: catalogLoading, refresh: refreshCatalog, refreshChannel: refreshCatalogChannel, loadMore: loadMoreCatalog } = useCatalog(authenticated);
 const catalogDetail = ref<CatalogItem | null>(null);
 const pendingCatalog = ref<CatalogItem | null>(null);
 const playAfterTransfer = ref(false);
@@ -296,10 +295,18 @@ const handleReSearch = (media: MediaItem) => {
   setMobileHistoryLayer('transfer', replaceHistory);
 };
 
+let catalogOrigin: { page: MobileDockTab; top: number } | null = null;
 const openCatalogDetail = (item: CatalogItem) => {
+  if (!catalogDetail.value) catalogOrigin = { page: mobileTab.value, top: window.scrollY };
   catalogDetail.value = item;
   setMobileHistoryLayer('detail');
 };
+watch(catalogDetail, async (value, previous) => {
+  if (value || !previous || !catalogOrigin) return;
+  const origin = catalogOrigin; catalogOrigin = null;
+  await nextTick();
+  if (authenticated.value && mobileTab.value === origin.page) window.scrollTo({ top: origin.top });
+});
 const closeCatalogDetail = () => requestLayerClose('detail', () => { catalogDetail.value = null; });
 const startCatalogPlayback = (automatic = true) => {
   const item = catalogDetail.value;
@@ -546,7 +553,7 @@ const retryTransferSearch = () => { cancelAutomatic(); retrySearch(); };
     <div :inert="!!catalogDetail || isEmbedPlayerOpen || isTransferOpen || !!deletingMedia || !!categoryMedia || !!actionMedia">
       <DesktopSidebar :active-page="mobileTab" :user="user" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
       <TopNavigation :active-page="mobileTab" :disabled="isSavingTransfer" @home="navigateMobileTab('home')" @search="focusMobileSearch" @submit="submitHeaderSearch" @history="showHistory" />
-      <HomePage v-show="mobileTab === 'home'" :active="mobileTab === 'home' && !catalogDetail && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia" :feeds="catalogFeeds" :loading="catalogLoading" :library="enrichedMediaList" :history="history" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" />
+      <HomePage v-show="mobileTab === 'home'" :active="mobileTab === 'home' && !catalogDetail && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia" :feeds="catalogFeeds" :browse="catalogBrowse" :loading="catalogLoading" :library="enrichedMediaList" :history="history" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" @refresh-channel="refreshCatalogChannel" @load-more="loadMoreCatalog" />
       <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :error="failedResourceId === 'direct' ? saveError : null" @search="handleSearchMedia" @select="openCatalogDetail" @play="handleSelectMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
       <main v-show="mobileTab === 'library'" class="page-container library-page">
         <header class="library-intro"><div class="library-title"><h1>我的片库</h1><p>{{ allMediaList.length }} 部影片，随时开场</p></div><div class="library-actions"><button type="button" class="check-updates-button" :class="{ checking: isCheckingUpdates }" :disabled="isCheckingUpdates || isApplyingUpdates" aria-label="检查片库更新" @click="checkLibraryUpdates(true, true)"><RefreshCw /><span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span></button><button type="button" class="add-library-button" @click="focusMobileSearch"><Plus />添加</button></div></header>

@@ -285,7 +285,9 @@ export const handleApiRequest = async (request, response, context) => {
     }
 
     if (pathname === '/api/catalog' && request.method === 'GET') {
-      sendSuccess(response, await context.catalog.get(url.searchParams.get('channel') || 'tv'));
+      const page = url.searchParams.get('page') || '1';
+      if (!/^\d{1,2}$/.test(page)) throw Object.assign(new Error('无效的目录分页'), { statusCode: 400 });
+      sendSuccess(response, await context.catalog.get(url.searchParams.get('channel') || 'tv', Number(page), url.searchParams.get('revision') || ''));
       return true;
     }
     const catalogComments = pathname.match(/^\/api\/catalog\/works\/(\d{1,20})\/comments$/);

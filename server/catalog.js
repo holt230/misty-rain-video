@@ -12,6 +12,14 @@ const CHANNELS = {
 };
 const TTL = 6 * 60 * 60_000;
 const RETRY = 60_000;
+const PAGE_SIZE = 24;
+const MAX_PAGES = 50;
+const pageKey = (channel, page, revision = '') => page === 1 ? channel : channel + '-' + revision + '-' + page;
+const validatePage = (channel, page) => {
+  if (!Object.hasOwn(CHANNELS, channel)) throw Object.assign(new Error('未知的影视频道'), { statusCode: 400 });
+  if (!Number.isInteger(page) || page < 1 || page > MAX_PAGES) throw Object.assign(new Error('无效的目录分页'), { statusCode: 400 });
+};
+const changed = () => Object.assign(new Error('目录已有更新，请重新加载此频道后继续浏览'), { statusCode: 409, code: 'CATALOG_CHANGED' });
 const clean = (value, length = 240) => String(value || '').replace(/<[^>]*>/g, '').trim().slice(0, length);
 const imageHost = catalogImageHost;
 
@@ -19,9 +27,9 @@ export function normalizeCatalog(rows, channel) {
   const config = CHANNELS[channel];
   const seen = new Set();
   return rows.flatMap(row => {
-    const id = clean(row.id, 30);
-    const title = clean(row.title, 160);
-    if (row.type && row.type !== config.type) return [];
+    const id = clean(row?.id, 30);
+    const title = clean(row?.title, 160);
+    if (row?.type && row.type !== config.type) return [];
     if (!/^\d{1,20}$/.test(id) || !title || seen.has(id)) return [];
     seen.add(id);
     const subtitle = clean(row.card_subtitle);
@@ -36,7 +44,7 @@ export function normalizeCatalog(rows, channel) {
       rating: rating > 0 && rating <= 10 ? rating : undefined,
       sourceName: '豆瓣', sourceUrl: 'https://movie.douban.com/subject/' + id + '/'
     }];
-  }).slice(0, 24);
+  }).slice(0, PAGE_SIZE);
 }
 
 /** Public metadata is shared; no user credentials, library or playback state enter this cache. */
@@ -56,10 +64,11 @@ export class CatalogService {
   async load() {
     await fs.mkdir(this.directory, { recursive: true });
     await fs.mkdir(path.join(this.directory, 'works'), { recursive: true });
+    await fs.mkdir(path.join(this.directory, 'pages'), { recursive: true });
     for (const channel of Object.keys(CHANNELS)) {
       try {
         const value = JSON.parse(await fs.readFile(path.join(this.directory, channel + '.json'), 'utf8'));
-        if (value.version === 1 && Array.isArray(value.items) && value.items.length && Number.isFinite(Date.parse(value.updatedAt))) {
+        if ([1, 2].includes(value.version) && Array.isArray(value.items) && Number.isFinite(Date.parse(value.updatedAt))) {
           this.feeds.set(channel, value);
         }
       } catch { /* First launch and invalid snapshots are refreshed on demand. */ }
@@ -75,62 +84,104 @@ export class CatalogService {
     return response.json();
   }
 
-  async refresh(channel) {
-    if (this.pending.has(channel)) return this.pending.get(channel);
+  async fetchPage(channel, page, provider) {
+    const config = CHANNELS[channel];
+    const start = (page - 1) * PAGE_SIZE;
+    const fetchFrom = async source => {
+      const params = source === 'primary'
+        ? new URLSearchParams({ start: String(start), limit: String(PAGE_SIZE), category: config.category, sort: 'recommend' })
+        : new URLSearchParams({ type: config.type, tag: config.tag, sort: 'recommend', page_limit: String(PAGE_SIZE), page_start: String(start) });
+      if (source === 'primary' && config.filter) params.set('type', config.filter);
+      const data = await this.json(source === 'primary'
+        ? 'https://m.douban.com/rexxar/api/v2/subject/recent_hot/' + config.type + '?' + params
+        : 'https://movie.douban.com/j/search_subjects?' + params);
+      const rows = source === 'primary' ? data.items : data.subjects;
+      if (!Array.isArray(rows)) throw new Error('目录数据无效');
+      let items = normalizeCatalog(rows, channel);
+      if ((rows.length && !items.length) || (page === 1 && !items.length && data.total !== 0)) throw new Error('目录为空');
+      if (source === 'legacy' && channel === 'anime') items = items.map(item => ({ ...item, subtitle: item.subtitle || '日本动画 · 豆瓣分类' }));
+      const total = Number.isSafeInteger(data.total) && data.total >= 0 ? data.total : undefined;
+      return { items, source, total, hasMore: page < MAX_PAGES && rows.length >= PAGE_SIZE && (total === undefined || start + rows.length < total) };
+    };
+    if (provider) return fetchFrom(provider);
+    try { return await fetchFrom('primary'); } catch { return fetchFrom('legacy'); }
+  }
+
+  async refresh(channel, page = 1) {
+    validatePage(channel, page);
+    const parent = this.feeds.get(channel);
+    const revision = page > 1 ? parent?.revision : '';
+    const key = pageKey(channel, page, revision);
+    if (this.pending.has(key)) return this.pending.get(key);
     const task = (async () => {
-      const config = CHANNELS[channel];
       try {
-        const params = new URLSearchParams({ start: '0', limit: '24', category: config.category, sort: 'recommend' });
-        if (config.filter) params.set('type', config.filter);
-        let items;
-        try {
-          const data = await this.json('https://m.douban.com/rexxar/api/v2/subject/recent_hot/' + config.type + '?' + params);
-          items = normalizeCatalog(Array.isArray(data.items) ? data.items : [], channel);
-          if (!items.length) throw new Error('目录为空');
-        } catch {
-          const params = new URLSearchParams({ type: config.type, tag: config.tag, sort: 'recommend', page_limit: '24', page_start: '0' });
-          const data = await this.json('https://movie.douban.com/j/search_subjects?' + params);
-          items = normalizeCatalog(Array.isArray(data.subjects) ? data.subjects : [], channel);
-          // The legacy anime feed covers Japanese animation only; retain that provenance in the subtitle.
-          if (channel === 'anime') items = items.map(item => ({ ...item, subtitle: item.subtitle || '日本动画 · 豆瓣分类' }));
-        }
-        if (!items.length) throw new Error('目录为空');
+        if (page > 1 && !parent?.source) throw new Error('目录尚未就绪');
+        const result = await this.fetchPage(channel, page, page > 1 ? parent.source : undefined);
+        if (page > 1 && this.feeds.get(channel)?.revision !== revision) throw changed();
+        const { items } = result;
+        if (page > 1 && items.length && items.every(item => parent.items.some(first => first.id === item.id))) result.hasMore = false;
         // Keep artwork addresses for films already saved by a user after they leave a popular feed.
         await Promise.all(items.map(item => fs.writeFile(path.join(this.directory, 'works', item.catalogId.slice(7) + '.json'), JSON.stringify({
           posterUrl: item.posterUrl, title: item.title, category: item.category, year: item.year
         }))));
-        const feed = { version: 1, channel, items, updatedAt: new Date(this.now()).toISOString() };
-        const file = path.join(this.directory, channel + '.json');
-        await fs.writeFile(file + '.tmp', JSON.stringify(feed));
-        await fs.rename(file + '.tmp', file);
-        this.feeds.set(channel, feed);
-        this.failures.delete(channel);
+        const feed = { version: 2, channel, page, ...result, updatedAt: new Date(this.now()).toISOString(),
+          revision: revision || crypto.createHash('sha256').update(JSON.stringify([result.source, items.map(item => item.id)])).digest('hex').slice(0, 16) };
+        const file = page === 1 ? path.join(this.directory, channel + '.json') : path.join(this.directory, 'pages', channel + '-' + page + '.json');
+        const temporary = file + '.' + crypto.randomBytes(6).toString('hex') + '.tmp';
+        await fs.writeFile(temporary, JSON.stringify(feed));
+        await fs.rename(temporary, file);
+        if (page > 1 && this.feeds.get(channel)?.revision !== revision) throw changed();
+        this.feeds.set(key, feed);
+        this.failures.delete(key);
+        if (page === 1 && parent?.revision !== feed.revision) {
+          for (const old of this.feeds.keys()) if (old.startsWith(channel + '-')) this.feeds.delete(old);
+          for (const old of this.failures.keys()) if (old.startsWith(channel + '-')) this.failures.delete(old);
+        }
       } catch {
-        this.failures.set(channel, this.now());
+        if (page === 1 || this.feeds.get(channel)?.revision === revision) this.failures.set(key, this.now());
       }
-    })().finally(() => this.pending.delete(channel));
-    this.pending.set(channel, task);
+    })().finally(() => this.pending.delete(key));
+    this.pending.set(key, task);
     return task;
   }
 
-  async get(channel) {
-    if (!Object.hasOwn(CHANNELS, channel)) throw Object.assign(new Error('未知的影视频道'), { statusCode: 400 });
+  async get(channel, page = 1, expectedRevision = '') {
+    validatePage(channel, page);
+    if (expectedRevision && !/^[a-f0-9]{16}$/.test(expectedRevision)) throw Object.assign(new Error('无效的目录版本'), { statusCode: 400 });
     await this.ready;
-    const cached = this.feeds.get(channel);
-    const stale = !cached || this.now() - Date.parse(cached.updatedAt) > TTL;
-    const failure = this.failures.get(channel);
-    if (stale && (failure === undefined || this.now() - failure >= RETRY)) {
-      if (cached) void this.refresh(channel);
-      else await this.refresh(channel);
+    let parent;
+    if (page > 1) {
+      await this.get(channel);
+      if (!this.feeds.get(channel)?.source && this.pending.has(channel)) await this.pending.get(channel);
+      parent = this.feeds.get(channel);
+      if (!parent?.source) throw Object.assign(new Error('目录暂时无法更新，请稍后再试'), { statusCode: 503 });
+      if (expectedRevision && parent.revision !== expectedRevision) throw changed();
     }
-    const feed = this.feeds.get(channel);
+    const key = pageKey(channel, page, parent?.revision);
+    if (page > 1 && !this.feeds.has(key)) {
+      try {
+        const disk = JSON.parse(await fs.readFile(path.join(this.directory, 'pages', channel + '-' + page + '.json'), 'utf8'));
+        if (disk.version === 2 && disk.channel === channel && disk.page === page && disk.revision === parent.revision && Array.isArray(disk.items) && Number.isFinite(Date.parse(disk.updatedAt))) this.feeds.set(key, disk);
+      } catch { /* Later pages load on demand. */ }
+    }
+    let cached = this.feeds.get(key);
+    if (page > 1 && cached && cached.revision !== parent.revision) { this.feeds.delete(key); this.failures.delete(key); cached = undefined; }
+    const stale = !cached || cached.version !== 2 || this.now() - Date.parse(cached.updatedAt) >= TTL;
+    const failure = this.failures.get(key);
+    if (stale && (failure === undefined || this.now() - failure >= RETRY)) {
+      if (cached) void this.refresh(channel, page);
+      else await this.refresh(channel, page);
+    }
+    if (page > 1 && this.feeds.get(channel)?.revision !== parent.revision) throw changed();
+    const feed = this.feeds.get(key);
     return {
-      channel,
+      channel, page, pageSize: PAGE_SIZE,
       items: (feed?.items || []).map(({ posterUrl, ...item }) => item),
+      revision: feed?.revision || (feed ? crypto.createHash('sha256').update(feed.updatedAt).digest('hex').slice(0, 16) : ''), hasMore: feed?.hasMore ?? true, total: feed?.total,
       updatedAt: feed?.updatedAt || '',
-      stale: !feed || this.now() - Date.parse(feed.updatedAt) > TTL,
-      refreshing: this.pending.has(channel),
-      message: this.failures.has(channel)
+      stale: !feed || feed.version !== 2 || this.now() - Date.parse(feed.updatedAt) >= TTL,
+      refreshing: this.pending.has(key), loadError: !feed && this.failures.has(key),
+      message: this.failures.has(key)
         ? feed ? '来源暂未更新，展示上次获取的内容' : '暂时无法获取此频道，请稍后重试，也可以直接搜索影片'
         : stale && cached ? '正在更新目录，先展示上次内容' : ''
     };

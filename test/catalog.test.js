@@ -13,7 +13,7 @@ async function directory(t) {
   return directory;
 }
 test('normalizes real provider fields without treating a provider playable flag as local playback', () => {
-  const [item] = normalizeCatalog([{ ...row, playable: true }, row, { ...row, id: '../../bad' }], 'tv');
+  const [item] = normalizeCatalog([{ ...row, playable: true }, row, { ...row, id: '../../bad' }, null], 'tv');
   assert.equal(item.year, '2026'); assert.equal(item.rating, 8.2); assert.equal(item.quarkFid, undefined);
   assert.equal(item.catalogId, 'douban:123456'); assert.equal(item.category, 'tv');
   assert.equal(item.poster, '/api/catalog/posters/123456');

@@ -11,11 +11,27 @@ export interface CatalogItem extends MediaItem {
 }
 export interface CatalogFeed {
   channel: CatalogChannel;
+  page?: number;
+  pageSize?: number;
+  revision?: string;
+  hasMore?: boolean;
+  total?: number;
+  loadError?: boolean;
   items: CatalogItem[];
   updatedAt: string;
   stale: boolean;
   refreshing?: boolean;
   message: string;
+}
+export interface CatalogBrowseState {
+  items: CatalogItem[];
+  page: number;
+  revision: string;
+  hasMore: boolean;
+  loading: boolean;
+  error: string;
+  needsRefresh: boolean;
+  endMessage: string;
 }
 
 export interface CatalogCredit {
