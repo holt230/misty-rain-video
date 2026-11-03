@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { CatalogDetailsService, catalogImageHost } from './catalogDetails.js';
 
 const CHANNELS = {
   tv: { type: 'tv', category: 'tv', tag: '热门', mediaCategory: 'tv' },
@@ -12,12 +13,7 @@ const CHANNELS = {
 const TTL = 6 * 60 * 60_000;
 const RETRY = 60_000;
 const clean = (value, length = 240) => String(value || '').replace(/<[^>]*>/g, '').trim().slice(0, length);
-const imageHost = value => {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && /^[a-z0-9-]+\.doubanio\.com$/.test(url.hostname) && !url.port && !url.username && !url.password;
-  } catch { return false; }
-};
+const imageHost = catalogImageHost;
 
 export function normalizeCatalog(rows, channel) {
   const config = CHANNELS[channel];
@@ -53,6 +49,7 @@ export class CatalogService {
     this.pending = new Map();
     this.failures = new Map();
     this.images = new Map();
+    this.details = new CatalogDetailsService(this.directory, { fetcher, now });
     this.ready = this.load();
   }
 
@@ -99,7 +96,9 @@ export class CatalogService {
         }
         if (!items.length) throw new Error('目录为空');
         // Keep artwork addresses for films already saved by a user after they leave a popular feed.
-        await Promise.all(items.map(item => fs.writeFile(path.join(this.directory, 'works', item.catalogId.slice(7) + '.json'), JSON.stringify({ posterUrl: item.posterUrl }))));
+        await Promise.all(items.map(item => fs.writeFile(path.join(this.directory, 'works', item.catalogId.slice(7) + '.json'), JSON.stringify({
+          posterUrl: item.posterUrl, title: item.title, category: item.category, year: item.year
+        }))));
         const feed = { version: 1, channel, items, updatedAt: new Date(this.now()).toISOString() };
         const file = path.join(this.directory, channel + '.json');
         await fs.writeFile(file + '.tmp', JSON.stringify(feed));
@@ -149,15 +148,25 @@ export class CatalogService {
 
   stop() { clearTimeout(this.startTimer); clearInterval(this.timer); }
 
-  async poster(id) {
+  async workItem(id) {
     await this.ready;
     if (!/^\d{1,20}$/.test(id)) return null;
     let item = [...this.feeds.values()].flatMap(feed => feed.items).find(item => item.catalogId === 'douban:' + id);
     if (!item) {
       try { item = JSON.parse(await fs.readFile(path.join(this.directory, 'works', id + '.json'), 'utf8')); } catch { return null; }
     }
-    if (!item || !imageHost(item.posterUrl)) return null;
-    const key = crypto.createHash('sha256').update(item.posterUrl).digest('hex').slice(0, 32);
+    return item || null;
+  }
+
+  async detail(id, category) { return this.details.work(id, await this.workItem(id), category); }
+  async comments(id, category, start) { return this.details.comments(id, await this.workItem(id), category, start); }
+  async person(id) { return this.details.person(id); }
+  async portrait(id) { return this.image((await this.details.personSeed(id))?.photoUrl); }
+  async poster(id) { return this.image((await this.workItem(id))?.posterUrl); }
+
+  async image(url) {
+    if (!imageHost(url)) return null;
+    const key = crypto.createHash('sha256').update(url).digest('hex').slice(0, 32);
     if (this.images.has(key)) return this.images.get(key);
     const file = path.join(this.directory, key + '.jpg');
     try {
@@ -167,7 +176,7 @@ export class CatalogService {
     while (this.images.size >= 4) await Promise.race(this.images.values());
     if (this.images.has(key)) return this.images.get(key);
     const task = (async () => {
-      const response = await this.fetcher(item.posterUrl, {
+      const response = await this.fetcher(url, {
         redirect: 'error',
         headers: { 'User-Agent': 'MistyRainVideo/1.0', Referer: 'https://movie.douban.com/', Accept: 'image/jpeg' },
         signal: AbortSignal.timeout(8_000)
@@ -189,11 +198,12 @@ export class CatalogService {
       const buffer = Buffer.concat(chunks);
       if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
       await fs.writeFile(file, buffer);
-      // Bound the disk cache as popular works rotate.
+      // Artwork and portraits share a bounded cache, without evicting the image just written.
       const files = (await fs.readdir(this.directory)).filter(name => /^[a-f0-9]{32}\.jpg$/.test(name));
       if (files.length > 200) {
-        const current = new Set([...this.feeds.values()].flatMap(feed => feed.items).map(item => crypto.createHash('sha256').update(item.posterUrl || '').digest('hex').slice(0, 32) + '.jpg'));
-        await Promise.all(files.filter(name => !current.has(name)).map(name => fs.unlink(path.join(this.directory, name)).catch(() => {})));
+        const old = await Promise.all(files.filter(name => name !== key + '.jpg').map(async name => ({ name, time: (await fs.stat(path.join(this.directory, name)).catch(() => ({ mtimeMs: 0 }))).mtimeMs })));
+        old.sort((a, b) => a.time - b.time);
+        await Promise.all(old.slice(0, files.length - 200).map(({ name }) => fs.unlink(path.join(this.directory, name)).catch(() => {})));
       }
       return { buffer, contentType };
     })().catch(() => null).finally(() => this.images.delete(key));

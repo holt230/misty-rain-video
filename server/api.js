@@ -288,6 +288,38 @@ export const handleApiRequest = async (request, response, context) => {
       sendSuccess(response, await context.catalog.get(url.searchParams.get('channel') || 'tv'));
       return true;
     }
+    const catalogComments = pathname.match(/^\/api\/catalog\/works\/(\d{1,20})\/comments$/);
+    if (catalogComments && request.method === 'GET') {
+      const category = url.searchParams.get('category') || 'tv';
+      if (!['tv', 'movie', 'anime', 'variety'].includes(category)) throw Object.assign(new Error('未知的影片类型'), { statusCode: 400 });
+      const start = url.searchParams.get('start') || '0';
+      if (!/^\d{1,2}$/.test(start)) throw Object.assign(new Error('无效的短评分页'), { statusCode: 400 });
+      sendSuccess(response, await context.catalog.comments(catalogComments[1], category, Number(start)));
+      return true;
+    }
+    const catalogDetail = pathname.match(/^\/api\/catalog\/works\/(\d{1,20})$/);
+    if (catalogDetail && request.method === 'GET') {
+      const category = url.searchParams.get('category') || 'tv';
+      if (!['tv', 'movie', 'anime', 'variety'].includes(category)) throw Object.assign(new Error('未知的影片类型'), { statusCode: 400 });
+      sendSuccess(response, await context.catalog.detail(catalogDetail[1], category));
+      return true;
+    }
+    const catalogPerson = pathname.match(/^\/api\/catalog\/people\/(\d{1,20})$/);
+    if (catalogPerson && request.method === 'GET') {
+      sendSuccess(response, await context.catalog.person(catalogPerson[1]));
+      return true;
+    }
+    const catalogPortrait = pathname.match(/^\/api\/catalog\/people\/(\d{1,20})\/portrait$/);
+    if (catalogPortrait && request.method === 'GET') {
+      const asset = await context.catalog.portrait(catalogPortrait[1]);
+      if (!asset) sendJson(response, 404, { code: 'PORTRAIT_NOT_FOUND', message: '头像暂不可用' });
+      else {
+        response.setHeader('Content-Type', asset.contentType);
+        response.setHeader('Cache-Control', 'private, max-age=86400');
+        response.end(asset.buffer);
+      }
+      return true;
+    }
     const catalogPoster = pathname.match(/^\/api\/catalog\/posters\/(\d{1,20})$/);
     if (catalogPoster && request.method === 'GET') {
       const asset = await context.catalog.poster(catalogPoster[1]);

@@ -142,8 +142,6 @@
 .detail-information { padding: 24px; margin: 24px 0; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); }
 .detail-information h2 { font-size: 18px; margin-bottom: 12px; }
 .detail-information p { font-size: 14px; line-height: 1.9; color: var(--text-secondary); margin-bottom: 8px; }
-.detail-source { display: flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; color: var(--text-tertiary); font-size: 12px; text-decoration: none; }
-.detail-source svg { width: 14px; height: 14px; }
 .hero-art-enter-active, .hero-art-leave-active { transition: opacity .4s ease; }
 .hero-art-enter-from, .hero-art-leave-to { opacity: 0; }
 .hero-copy-enter-active, .hero-copy-leave-active { transition: opacity .18s ease, transform .18s ease; }

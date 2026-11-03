@@ -17,3 +17,56 @@ export interface CatalogFeed {
   refreshing?: boolean;
   message: string;
 }
+
+export interface CatalogCredit {
+  id: string;
+  name: string;
+  latinName: string;
+  role: string;
+  avatar: string;
+}
+export interface CatalogMetadataState {
+  updatedAt: string;
+  stale: boolean;
+  refreshing: boolean;
+  message: string;
+  sourceUrl: string;
+  sourceName: string;
+}
+export interface CatalogWorkDetails extends CatalogMetadataState {
+  catalogId: string;
+  title: string;
+  year?: string;
+  summary: string;
+  genres: string[];
+  countries: string[];
+  languages: string[];
+  releaseDates: string[];
+  durations: string[];
+  episodeCount?: number;
+  directors: CatalogCredit[];
+  actors: CatalogCredit[];
+}
+export interface CatalogPersonDetails extends CatalogMetadataState {
+  id: string;
+  name: string;
+  latinName: string;
+  avatar: string;
+  description: string;
+  info: { label: string; value: string }[];
+}
+export interface CatalogComment {
+  id: string;
+  text: string;
+  author: string;
+  createdAt: string;
+  rating?: number;
+  upvotes: number;
+}
+export interface CatalogComments extends CatalogMetadataState {
+  catalogId: string;
+  start: number;
+  total: number;
+  items: CatalogComment[];
+  hasMore: boolean;
+}
