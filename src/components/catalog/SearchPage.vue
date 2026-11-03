@@ -40,6 +40,10 @@ function remember() {
   try { localStorage.setItem(storageKey.value, JSON.stringify(recent.value)); } catch { /* Search works without persistence. */ }
 }
 function clearHistory() { recent.value = []; try { localStorage.removeItem(storageKey.value); } catch { /* No persistent history available. */ } }
+function removeHistory(term: string) {
+  recent.value = recent.value.filter(item => item !== term);
+  try { localStorage.setItem(storageKey.value, JSON.stringify(recent.value)); } catch { /* Search works without persistence. */ }
+}
 function submit() {
   if (props.busy || !query.value.trim() || parsed.value.kind === 'invalid') return;
   if (parsed.value.kind === 'share') {
@@ -60,7 +64,15 @@ defineExpose({ focus: () => input.value?.focus(), search: (keyword: string) => {
     <p v-if="parsed.kind === 'share'" class="feed-notice"><Link />已识别分享链接，添加时读取真实片名并验证资源。</p>
     <p v-if="parsed.kind === 'invalid'" role="alert" class="feed-notice">链接格式不正确，请输入完整的夸克分享链接。</p>
     <div v-if="error" class="inline-feedback" role="alert"><strong>{{ error.title }}</strong><p>{{ error.message }}</p><button v-if="error.needsAuth" type="button" @click="emit('auth')">前往认证设置</button></div>
-    <section v-if="recent.length && !query.trim()" class="content-section"><div class="section-heading"><h2><Clock3 />最近搜索</h2><button type="button" class="icon-control" aria-label="清空搜索历史" @click="clearHistory"><Trash2 /></button></div><div class="recent-searches"><button v-for="term in recent" :key="term" type="button" @click="query = term; submit()">{{ term }}<ArrowUpRight /></button></div></section>
+    <section v-if="recent.length && !query.trim()" class="content-section">
+      <div class="section-heading"><h2><Clock3 />最近搜索</h2><button type="button" class="icon-control" aria-label="清空搜索历史" @click="clearHistory"><Trash2 /></button></div>
+      <div class="recent-searches">
+        <span v-for="term in recent" :key="term" class="recent-chip">
+          <button type="button" class="recent-text" @click="query = term; submit()">{{ term }}<ArrowUpRight /></button>
+          <button type="button" class="recent-remove" :aria-label="'删除搜索记录：' + term" @click.stop="removeHistory(term)"><X aria-hidden="true" /></button>
+        </span>
+      </div>
+    </section>
     <section v-if="libraryMatches.length" class="content-section"><div class="section-heading"><div><h2>你的片库中有</h2><p>直接播放，无需再次添加</p></div></div><div class="continue-rail"><button v-for="item in libraryMatches" :key="item.id" type="button" class="resume-card" @click="emit('play', item)"><MediaPoster :src="item.poster" alt="" /><span><strong>{{ item.title }}</strong><small>已入库 · 播放 / 续播</small></span></button></div></section>
     <section v-if="catalogMatches.length && parsed.kind !== 'share'" class="content-section"><div class="section-heading"><div><h2>{{ query.trim() ? '相关影片' : '现在大家在看' }}</h2><p>从热门作品开始探索</p></div></div><div class="catalog-grid"><CatalogCard v-for="item in catalogMatches" :key="item.id" :item="item" @select="emit('select', $event)" /></div></section>
     <p v-if="query.trim() && !catalogMatches.length && !libraryMatches.length && parsed.kind !== 'share'" class="search-hint">目录中暂未收录，点击“搜索”继续查找外部资源。</p>

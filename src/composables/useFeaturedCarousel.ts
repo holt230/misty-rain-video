@@ -14,6 +14,9 @@ export function useFeaturedCarousel(items: () => string[], active: () => boolean
   let timer: ReturnType<typeof setTimeout> | undefined;
   let observer: IntersectionObserver | undefined;
   let motion: MediaQueryList | undefined;
+  let startX: number | null = null;
+  let startY: number | null = null;
+  let startTime = 0;
   const stop = () => { clearTimeout(timer); timer = undefined; };
   const schedule = () => {
     stop();
@@ -51,7 +54,31 @@ export function useFeaturedCarousel(items: () => string[], active: () => boolean
     leave: () => { hovered.value = false; touching.value = false; },
     focus: () => { if (!touching.value) focused.value = true; },
     blur: (event: FocusEvent) => { focused.value = event.relatedTarget instanceof Node && Boolean(root.value?.contains(event.relatedTarget)); },
-    press: () => { touching.value = true; focused.value = false; },
-    release: () => { touching.value = false; }
+    press: (event?: PointerEvent) => {
+      touching.value = true;
+      focused.value = false;
+      if (event && typeof event.clientX === 'number') {
+        startX = event.clientX;
+        startY = event.clientY;
+        startTime = Date.now();
+      } else {
+        startX = null;
+        startY = null;
+      }
+    },
+    release: (event?: PointerEvent) => {
+      touching.value = false;
+      if (startX !== null && startY !== null && event && typeof event.clientX === 'number') {
+        const deltaX = event.clientX - startX;
+        const deltaY = event.clientY - startY;
+        const elapsed = Date.now() - startTime;
+        if (Math.abs(deltaX) >= 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2 && elapsed < 800) {
+          if (deltaX < 0) select(index.value + 1);
+          else select(index.value - 1);
+        }
+      }
+      startX = null;
+      startY = null;
+    }
   };
 }

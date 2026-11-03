@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
 
 const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; desktop?: boolean; hls?: Hls | null; username?: string }>();
@@ -13,6 +13,16 @@ const volume = ref(1);
 const time = ref(0);
 const duration = ref(0);
 const scrubbing = ref(false);
+const buffered = ref(0);
+const seekSliderStyle = computed(() => {
+  if (!duration.value) return {};
+  const played = Math.min(100, Math.max(0, (time.value / duration.value) * 100));
+  const buff = Math.min(100, Math.max(0, (buffered.value / duration.value) * 100));
+  const maxBuff = Math.max(played, buff);
+  return {
+    background: `linear-gradient(to right, #fff 0%, #fff ${played}%, rgba(255, 255, 255, 0.38) ${played}%, rgba(255, 255, 255, 0.38) ${maxBuff}%, rgba(255, 255, 255, 0.14) ${maxBuff}%, rgba(255, 255, 255, 0.14) 100%)`
+  };
+});
 const notice = ref('');
 const seekNotice = ref('');
 const subtitles = ref<SubtitleTrackOption[]>([]);
@@ -54,12 +64,15 @@ async function togglePlay() {
 function preview(event: Event) {
   scrubbing.value = true;
   time.value = Number((event.target as HTMLInputElement).value);
+  seekNotice.value = `${clock(time.value)} / ${clock(duration.value)}`;
+  clearTimeout(seekNoticeTimer);
   reveal();
 }
 function seek() {
   if (!scrubbing.value) return;
   props.video.currentTime = Math.max(0, Math.min(duration.value, time.value));
   scrubbing.value = false;
+  seekNotice.value = '';
   reveal();
 }
 function seekBy(seconds: number) {
@@ -103,6 +116,17 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     paused.value = video.paused; muted.value = video.muted || video.volume === 0; volume.value = video.volume;
     duration.value = Number.isFinite(video.duration) ? video.duration : 0;
     if (!scrubbing.value) time.value = video.currentTime || 0;
+    const b = video.buffered;
+    if (b && b.length > 0) {
+      const cur = video.currentTime || 0;
+      let end = 0;
+      for (let i = 0; i < b.length; i++) {
+        if (b.start(i) <= cur + 1 && b.end(i) >= cur) { end = b.end(i); break; }
+      }
+      buffered.value = end || b.end(b.length - 1);
+    } else {
+      buffered.value = 0;
+    }
   };
   const syncTracks = () => {
     subtitles.value = subtitleTrackOptions(video, hls);
@@ -138,7 +162,26 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (suppressTap) { suppressTap = false; return; }
     if (visible.value && !video.paused) visible.value = false; else reveal();
   };
-  const doubleTap = (event: Event) => { if (!locked.value) { event.preventDefault(); void togglePlay(); } };
+  const doubleTap = (event: Event) => {
+    if (locked.value) return;
+    event.preventDefault();
+    const mouseEvt = event as MouseEvent;
+    if (typeof mouseEvt.clientX === 'number') {
+      const rect = video.getBoundingClientRect();
+      if (rect.width > 0) {
+        const xRatio = (mouseEvt.clientX - rect.left) / rect.width;
+        if (xRatio < 0.35) {
+          seekBy(-10);
+          return;
+        }
+        if (xRatio > 0.65) {
+          seekBy(10);
+          return;
+        }
+      }
+    }
+    void togglePlay();
+  };
   const contextMenu = (event: Event) => event.preventDefault();
   const keyboard = (event: KeyboardEvent) => {
     if (locked.value || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
@@ -148,6 +191,20 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault();
       seekBy(event.key === 'ArrowRight' ? 10 : -10);
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const current = video.muted ? 0 : video.volume;
+      const step = event.key === 'ArrowUp' ? 0.1 : -0.1;
+      const next = Math.max(0, Math.min(1, Math.round((current + step) * 10) / 10));
+      video.volume = next;
+      video.muted = next === 0;
+      volume.value = next;
+      muted.value = next === 0;
+      seekNotice.value = `音量 ${Math.round(next * 100)}%`;
+      clearTimeout(seekNoticeTimer);
+      seekNoticeTimer = setTimeout(() => { seekNotice.value = ''; }, 1200);
+      reveal();
     }
     if (event.key === 'f') emit('fullscreen');
     if (event.key === 'm') toggleMute();
@@ -170,7 +227,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   video.addEventListener('contextmenu', contextMenu);
   stage.addEventListener('keydown', keyboard as EventListener);
   stage.addEventListener('pointermove', hover);
-  const events = ['timeupdate', 'durationchange', 'loadedmetadata', 'volumechange', 'seeked'];
+  const events = ['timeupdate', 'durationchange', 'loadedmetadata', 'volumechange', 'seeked', 'progress'];
   events.forEach(event => video.addEventListener(event, sync));
   ['play', 'pause', 'ended'].forEach(event => video.addEventListener(event, playback));
   ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.addEventListener(event, syncTracks));
@@ -209,7 +266,7 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
     <div v-if="seekNotice && !boosted" class="speed-notice" role="status">{{ seekNotice }}</div>
     <div class="control-tools">
-      <span class="desktop-shortcuts">空格 暂停 / 继续 · ← → 快进退 · F 全屏 · M 静音</span>
+      <span class="desktop-shortcuts">空格 暂停 / 继续 · ← → 快进退 · ↑ ↓ 音量 · F 全屏 · M 静音</span>
       <button v-if="expanded && !desktop" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
       <template v-if="!locked">
         <div class="seek-actions" role="group" aria-label="快进和快退">
@@ -223,7 +280,7 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
     <div v-show="!locked" class="transport">
       <button type="button" :aria-label="paused ? '播放' : '暂停'" @click="togglePlay"><Play v-if="paused" /><Pause v-else /></button>
       <span class="time">{{ clock(time) }}</span>
-      <input class="seek-slider" type="range" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; reveal()" />
+      <input class="seek-slider" type="range" :style="seekSliderStyle" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; seekNotice = ''; reveal()" />
       <span class="time">{{ clock(duration) }}</span>
       <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
       <input class="volume-slider" type="range" aria-label="音量" min="0" max="1" step="0.05" :value="muted ? 0 : volume" @input="changeVolume" />

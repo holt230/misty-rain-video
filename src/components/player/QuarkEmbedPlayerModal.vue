@@ -217,6 +217,16 @@ const visibleEpisodeEntries = computed(() => {
     ...entry, isLatest: entry.index === latestEpisodeIndex.value
   }));
 });
+const episodeBadgeLabel = (episode: { episodeNumber?: number; episodeTitle?: string; fileName?: string }, index: number) => {
+  if (episode.episodeNumber && episode.episodeNumber > 0) return String(episode.episodeNumber);
+  const title = (episode.episodeTitle || episode.fileName || '').trim();
+  const specialMatch = title.match(/(?:特别篇|番外篇?|预告片?|剧场版|彩蛋|花絮|前传|后传|上[集篇册]?|中[集篇册]?|下[集篇册]?|SP\d*|OVA\d*)/i);
+  if (specialMatch) return specialMatch[0].slice(0, 3);
+  const numMatch = title.match(/\d{1,4}/);
+  if (numMatch) return numMatch[0];
+  if (episodes.value.length === 1) return '正片';
+  return String(index + 1);
+};
 const sources = computed(() => playback.value?.sources || []);
 const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) || sources.value[0]);
 const sourceAllowsSoundEffects = computed(() => soundEffectAvailable.value && selectedSource.value?.delivery !== 'direct');
@@ -1606,7 +1616,7 @@ defineExpose({ retry, dismissLayer });
               @click="selectEpisode(entry.index)"
             >
               <span class="episode-number">
-                <span>{{ entry.episode.episodeNumber > 0 ? entry.episode.episodeNumber : '•' }}</span>
+                <span>{{ episodeBadgeLabel(entry.episode, entry.index) }}</span>
                 <small v-if="entry.isLatest" class="episode-latest">新</small>
                 <i v-if="currentEpisodeIndex === entry.index" class="episode-current-dot" aria-hidden="true"></i>
               </span>
@@ -1773,7 +1783,8 @@ defineExpose({ retry, dismissLayer });
   .episode-heading { padding: 19px 16px 15px; }
   .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; overflow: visible; padding: 7px 14px 20px; }
   .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid transparent; border-radius: 10px; background: var(--surface-1); box-shadow: none; }
-  .episode-number { width: 100%; height: 100%; min-height: 52px; border: 0; border-radius: inherit; background: transparent; font-size: .9rem; }
+  .episode-number { width: 100%; height: 100%; min-height: 52px; padding: 0 4px; border: 0; border-radius: inherit; background: transparent; font-size: .84rem; }
+  .episode-number > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .episode-item.active { border-color: rgb(255 255 255 / .35); box-shadow: none; }
   .episode-item.active .episode-number { background: var(--glass-bg-active); color: var(--text-primary);  box-shadow: none;  border-color: rgb(var(--accent-rgb) / .2); }
   .episode-latest { top: -5px; right: -4px;  color: var(--accent-ink); }

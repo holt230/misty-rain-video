@@ -106,11 +106,20 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 .more-trigger::before { display: none; }
 .more-trigger:hover { color: var(--text-primary); background: var(--glass-bg); }
 .more-trigger svg { position: relative; width: 19px; height: 19px; }
-.category-trigger, .hover-actions { display: none; }
+.category-trigger { display: none; }
+.hover-actions { position: absolute; top: 8px; right: 8px; z-index: 2; display: none; align-items: center; gap: 6px; }
+.card-action { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 10px; border: 1px solid var(--divider); border-radius: 14px; color: #fff; background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(8px); font-size: 0.7rem; font-weight: 550; transition: background .2s, border-color .2s; }
+.card-action:hover { background: var(--liquid-accent); color: var(--accent-ink); }
+.card-action.danger:hover { background: var(--danger); color: #fff; }
+.card-action svg { width: 14px; height: 14px; }
 .hover-play { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .2s; }
 .play-disk { display: grid; width: 54px; height: 54px; place-items: center; border: 1px solid var(--divider); border-radius: 50%; color: #fff; background: var(--glass-bg); backdrop-filter: blur(10px); }
 .play-disk svg { width: 22px; height: 22px; margin-left: 2px; }
-@media (hover: hover) { .card-play-target:hover .poster-image { transform: scale(1.035); } .card-play-target:hover .hover-play { opacity: 1; } }
+@media (hover: hover) and (pointer: fine) {
+  .card-play-target:hover .poster-image { transform: scale(1.035); }
+  .card-play-target:hover .hover-play { opacity: 1; }
+  .media-card:hover .hover-actions { display: flex; }
+}
 .card-play-target:focus-visible .hover-play { opacity: 1; }
 @media (max-width: 640px) { .media-title { font-size: .87rem; } .card-play-target { gap: 12px; } }
 </style>
