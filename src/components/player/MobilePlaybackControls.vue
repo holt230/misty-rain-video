@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Expand, Shrink, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
 
 const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; desktop?: boolean; hls?: Hls | null; username?: string }>();
 const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
@@ -206,8 +206,19 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
       seekNoticeTimer = setTimeout(() => { seekNotice.value = ''; }, 1200);
       reveal();
     }
-    if (event.key === 'f') emit('fullscreen');
-    if (event.key === 'm') toggleMute();
+    if (event.key === 'f' || event.key === 'F') {
+      event.preventDefault();
+      if (props.desktop && supportsNativeFullscreen) {
+        void toggleNativeFullscreen();
+      } else {
+        emit('fullscreen');
+      }
+    }
+    if (event.key === 'w' || event.key === 'W') {
+      event.preventDefault();
+      emit('fullscreen');
+    }
+    if (event.key === 'm' || event.key === 'M') toggleMute();
   };
   const stage = video.closest('.video-stage') || video;
   const hover = (event: Event) => { if ((event as PointerEvent).pointerType === 'mouse') reveal(); };
@@ -256,8 +267,41 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     clearTimeout(seekNoticeTimer);
   };
 }, { immediate: true });
+const isNativeFullscreen = ref(typeof document !== 'undefined' && Boolean(document.fullscreenElement));
+const supportsNativeFullscreen = typeof document !== 'undefined' && Boolean(document.fullscreenEnabled);
+
+const updateNativeFullscreenState = () => {
+  isNativeFullscreen.value = typeof document !== 'undefined' && Boolean(document.fullscreenElement);
+};
+
+const toggleNativeFullscreen = async () => {
+  if (typeof document === 'undefined') return;
+  const target = props.video.closest('.video-stage') || props.video.closest('.player-window') || props.video;
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else if (target && 'requestFullscreen' in target) {
+      await (target as HTMLElement).requestFullscreen();
+    }
+  } catch {
+    emit('fullscreen');
+  }
+};
+
+onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('fullscreenchange', updateNativeFullscreenState);
+  }
+});
+
 watch(() => props.expanded, value => { if (!value) locked.value = false; reveal(); });
-onBeforeUnmount(() => { release(); emit('lock-change', false); });
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('fullscreenchange', updateNativeFullscreenState);
+  }
+  release();
+  emit('lock-change', false);
+});
 </script>
 
 <template>
@@ -266,7 +310,7 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
     <div v-if="seekNotice && !boosted" class="speed-notice" role="status">{{ seekNotice }}</div>
     <div class="control-tools">
-      <span class="desktop-shortcuts">空格 暂停 / 继续 · ← → 快进退 · ↑ ↓ 音量 · F 全屏 · M 静音</span>
+      <span class="desktop-shortcuts">空格 播放/暂停 · ← → 快退进 · ↑ ↓ 音量 · F 全屏 · W 网页全屏 · M 静音</span>
       <button v-if="expanded && !desktop" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
       <template v-if="!locked">
         <div class="seek-actions" role="group" aria-label="快进和快退">
@@ -286,7 +330,25 @@ onBeforeUnmount(() => { release(); emit('lock-change', false); });
       <input class="volume-slider" type="range" aria-label="音量" min="0" max="1" step="0.05" :value="muted ? 0 : volume" @input="changeVolume" />
       <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
       <select aria-label="播放倍速" :value="speed" @change="changeSpeed"><option v-for="rate in rates" :key="rate" :value="rate">{{ rate }}×</option></select>
-      <button type="button" :aria-label="desktop ? (expanded ? '退出网页全屏' : '网页全屏播放') : (expanded ? '退出横屏' : '横屏播放')" @click="emit('fullscreen')"><Minimize v-if="expanded" /><Maximize v-else /></button>
+      <button
+        v-if="desktop && supportsNativeFullscreen"
+        type="button"
+        :aria-label="isNativeFullscreen ? '退出系统全屏 (F)' : '系统全屏 (F)'"
+        :title="isNativeFullscreen ? '退出系统全屏 (F)' : '系统全屏 (F)'"
+        @click="toggleNativeFullscreen"
+      >
+        <Shrink v-if="isNativeFullscreen" />
+        <Expand v-else />
+      </button>
+      <button
+        type="button"
+        :aria-label="desktop ? (expanded ? '退出网页全屏 (W)' : '网页全屏 (W)') : (expanded ? '退出横屏' : '横屏播放')"
+        :title="desktop ? (expanded ? '退出网页全屏 (W)' : '网页全屏 (W)') : (expanded ? '退出横屏' : '横屏播放')"
+        @click="emit('fullscreen')"
+      >
+        <Minimize v-if="expanded" />
+        <Maximize v-else />
+      </button>
     </div>
   </div>
 </template>

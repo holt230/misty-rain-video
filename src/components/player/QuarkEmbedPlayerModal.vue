@@ -1209,8 +1209,15 @@ const close = () => {
 
 const openEpisodeSheet = () => {
   episodeGroupIndex.value = groupForEpisode(currentEpisodeIndex.value);
-  if (!immersive.value && window.matchMedia('(min-width: 1024px)').matches) {
-    void nextTick(() => episodePanelRef.value?.querySelector<HTMLElement>('.episode-item.active')?.focus({ preventScroll: false }));
+  if (!immersive.value) {
+    void nextTick(() => {
+      const el = episodePanelRef.value;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const active = el.querySelector<HTMLElement>('.episode-item.active');
+        active?.focus({ preventScroll: true });
+      }
+    });
     return;
   }
   episodeSheetOpen.value = true;
@@ -1772,10 +1779,12 @@ defineExpose({ retry, dismissLayer });
   .stage-poster { display: none; }
   .stage-play-icon { width: 58px; height: 58px; }
   .stage-play-button small { font-size: .65rem; }
-  .player-toolbar { gap: 7px; padding: 12px 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .player-toolbar button { min-height: 62px; gap: 7px; padding: 9px 10px; border-radius: 12px; background: var(--surface-1); }
-  .player-toolbar strong { font-size: .77rem; }
-  .player-toolbar small { font-size: .62rem; }
+  .player-toolbar { gap: 8px; padding: 10px 0 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .player-toolbar button { min-height: 48px; gap: 8px; padding: 8px 12px; border-radius: 12px; background: var(--surface-1); transition: background .2s, transform .15s; }
+  .player-toolbar button:active { transform: scale(.98); }
+  .player-toolbar button > svg { width: 18px; height: 18px; }
+  .player-toolbar strong { font-size: .78rem; }
+  .player-toolbar small { font-size: .65rem; }
   .player-toolbar .toolbar-chevron { display: none; }
   .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 16px; }
   .setting-heading { flex-wrap: wrap; gap: 4px 10px; }

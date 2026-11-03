@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
-import { Download, Eye, EyeOff } from '@lucide/vue';
+import { CircleAlert, Download, Eye, EyeOff } from '@lucide/vue';
 import { apiUrl } from '../../services/appUrl';
 import BrandMark from '../common/BrandMark.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
@@ -107,7 +107,10 @@ const submit = () => {
           </label>
         </div>
 
-        <p v-if="errorMessage" class="login-error" role="alert">{{ errorMessage }}</p>
+        <p v-if="errorMessage" class="login-error" role="alert">
+          <CircleAlert class="error-icon" aria-hidden="true" />
+          <span>{{ errorMessage }}</span>
+        </p>
 
         <button type="submit" class="login-button" :disabled="submitting || !username.trim() || !password">
           <span v-if="submitting" class="button-spinner" aria-hidden="true"></span>
@@ -128,7 +131,7 @@ const submit = () => {
 
 <style scoped>
 .login-theme-switch { position: absolute; top: calc(20px + var(--safe-area-top)); right: calc(20px + var(--safe-area-right)); z-index: 2; }
-.login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); }
+.login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); overflow-y: auto; scroll-behavior: smooth; }
 .login-card { position: relative; width: min(420px, 100%); padding: 40px 24px 26px; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 54px; height: 54px; flex-shrink: 0; }
@@ -141,17 +144,21 @@ const submit = () => {
 .login-heading h1 { margin: 8px 0 14px; color: var(--text-primary); font-size: 2.65rem; font-weight: 650; letter-spacing: -.04em; line-height: 1.15; }
 .login-heading p { color: var(--text-secondary); font-size: .87rem; line-height: 1.7; }
 .credential-group { padding: 0 16px; border: 1px solid var(--divider); border-radius: 14px; background: var(--surface-1); }
-.input-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 74px; align-content: center; gap: 3px; padding: 10px 0; border-bottom: 1px solid rgb(100 122 161 / .12); }
+.input-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 74px; align-content: center; gap: 3px; padding: 10px 0; border-bottom: 1px solid rgb(100 122 161 / .12); transition: border-color .2s; }
 .input-shell:last-child { border-bottom: 0; }
-.field-name { grid-column: 1; font-size: .73rem; color: var(--text-tertiary); }
+.field-name { grid-column: 1; font-size: .73rem; color: var(--text-tertiary); transition: color .2s; }
 .input-shell input { width: 100%; min-width: 0; min-height: 30px; grid-column: 1; grid-row: 2; padding: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; font-size: 17px; }
 .input-shell input::placeholder { color: var(--text-quaternary); }
+.input-shell:focus-within { border-bottom-color: var(--liquid-accent); }
 .input-shell:focus-within .field-name { color: var(--liquid-accent); }
 .password-toggle { display: grid; width: 44px; height: 44px; grid-column: 2; grid-row: 1 / span 2; align-self: center; place-items: center; margin-right: -6px; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .password-toggle svg { width: 20px; height: 20px; }
-.login-error { margin: 12px 0 0; padding: 11px 13px; border-radius: 13px; color: var(--danger); background: var(--danger-surface); font-size: .83rem; }
-.login-button { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; gap: 9px; margin-top: 20px; border: 0; border-radius: 12px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .92rem; font-weight: 650; transition: filter .2s; }
+.login-error { display: flex; align-items: center; gap: 8px; margin: 14px 0 0; padding: 12px 14px; border-radius: 13px; color: var(--danger); background: var(--danger-surface); font-size: .83rem; line-height: 1.4; animation: error-shake .35s ease-in-out; }
+.login-error .error-icon { width: 16px; height: 16px; flex-shrink: 0; }
+@keyframes error-shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+.login-button { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; gap: 9px; margin-top: 20px; border: 0; border-radius: 12px; color: var(--accent-ink); background: var(--liquid-accent); font-size: .92rem; font-weight: 650; transition: filter .2s, transform .15s; }
 .login-button:hover:not(:disabled) { filter: brightness(1.07); }
+.login-button:active:not(:disabled) { transform: scale(.98); }
 .login-footer { margin-top: 27px; text-align: center; }
 .ios-install-link { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; color: var(--text-secondary); font-size: .78rem; text-decoration: none; }
 .ios-install-link svg { width: 16px; height: 16px; }

@@ -28,6 +28,32 @@ watch(summaryText, node => {
 }, { flush: 'post' });
 onBeforeUnmount(() => summaryObserver?.disconnect());
 let personTrigger: HTMLElement | null = null;
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+const onTouchStart = (e: TouchEvent) => {
+  if (e.touches.length !== 1) return;
+  const touch = e.touches[0];
+  if (touch.clientX < 45) {
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchStartTime = Date.now();
+  } else {
+    touchStartX = 0;
+  }
+};
+const onTouchEnd = (e: TouchEvent) => {
+  if (!touchStartX || e.changedTouches.length !== 1) return;
+  const touch = e.changedTouches[0];
+  const deltaX = touch.clientX - touchStartX;
+  const deltaY = Math.abs(touch.clientY - touchStartY);
+  const elapsed = Date.now() - touchStartTime;
+  touchStartX = 0;
+  if (deltaX > 60 && deltaY < 50 && elapsed < 500) {
+    if (selectedPerson.value) void closePerson();
+    else emit('close');
+  }
+};
 const { data: details, loading, error, refresh } = useCatalogDetails<CatalogWorkDetails>(
   () => '/api/catalog/works/' + props.item.catalogId.replace(/^douban:/, '') + '?category=' + props.item.category,
   value => ({ ...value, directors: value.directors.map(catalogAvatar), actors: value.actors.map(catalogAvatar) })
@@ -63,7 +89,7 @@ watch(() => props.item.catalogId, () => { selectedPerson.value = null; expandedS
 useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson(); else emit('close'); });
 </script>
 <template>
-  <section ref="root" class="catalog-detail screen-dialog" role="dialog" aria-modal="true" aria-labelledby="catalog-detail-title" @click.self="emit('close')">
+  <section ref="root" class="catalog-detail screen-dialog" role="dialog" aria-modal="true" aria-labelledby="catalog-detail-title" @click.self="emit('close')" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">
     <div class="detail-window">
     <header class="screen-header"><button type="button" class="icon-control detail-back" aria-label="返回浏览" @click="emit('close')"><ArrowLeft /></button><span>影片详情</span><button type="button" class="icon-control detail-close" aria-label="关闭影片详情" @click="emit('close')"><X /></button></header>
     <div class="detail-stage">
@@ -126,12 +152,16 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
 .credits-heading h2 { margin: 0; }
 .credits-heading > span { color: var(--text-tertiary); font-size: 12px; }
 .credit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 24px 16px; }
-.credit-card { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 8px 4px; border: 0; border-radius: 14px; background: transparent; color: var(--text-primary); text-align: center; }
+.credit-card { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 8px 4px; border: 0; border-radius: 14px; background: transparent; color: var(--text-primary); text-align: center; animation: fadeInCard .22s ease-out; transition: background .2s, transform .15s; }
 .credit-card:hover, .credit-card.selected { background: var(--glass-bg-hover); }
+.credit-card:active:not(:disabled) { transform: scale(.96); }
 .credit-card:disabled { opacity: 1; cursor: default; }
 .credit-card strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .credit-card small { font-size: 11px; color: var(--text-tertiary); line-height: 1.7; overflow-wrap: anywhere; }
-.credits-toggle { display: flex; width: 100%; margin-top: 20px; color: var(--liquid-accent); }
+.credits-toggle { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 42px; margin-top: 20px; border-radius: 12px; background: var(--surface-1); color: var(--liquid-accent); font-size: 13px; font-weight: 550; transition: background .2s, transform .15s; }
+.credits-toggle:hover { background: var(--liquid-accent-subtle); }
+.credits-toggle:active { transform: scale(.98); }
+@keyframes fadeInCard { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .detail-provenance { font-size: 11px; line-height: 1.8; color: var(--text-tertiary); }
 @media (min-width: 1024px) { .detail-extras { max-width: none; padding: 0 32px 32px; } }
 @media (max-width: 767px) { .detail-extras { padding-left: 20px; padding-right: 20px; } .detail-information { padding: 20px; } .credit-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 10px; } .credit-card :deep(.person-avatar) { width: 64px; height: 64px; } .detail-facts > div { grid-template-columns: 70px minmax(0, 1fr); } }

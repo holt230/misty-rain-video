@@ -464,9 +464,9 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
   .dialog-title { max-width: calc(100% - 40px); font-size: 1.08rem; line-height: 1.8; }
   .dialog-meta-info { gap: 9px; }
   .dialog-top-actions { position: absolute; top: 17px; right: 15px; }
-  .cat-selector-row { display: block; }
-  .cat-pill-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-left: -43px; }
-  .cat-select-pill { padding: 0 5px; }
+  .cat-selector-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; }
+  .cat-pill-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; margin-left: 0; margin-top: 4px; }
+  .cat-select-pill { min-height: 38px; padding: 0 6px; font-size: .78rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--surface-1); }
   .result-search { margin: 0 16px; }
   .result-summary { padding: 14px 20px 2px; }
   .result-filters { padding: 4px 16px 10px; gap: 2px; }

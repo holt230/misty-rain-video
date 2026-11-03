@@ -46,6 +46,7 @@ function removeHistory(term: string) {
 }
 function submit() {
   if (props.busy || !query.value.trim() || parsed.value.kind === 'invalid') return;
+  input.value?.blur();
   if (parsed.value.kind === 'share') {
     emit('save', { id: 'import-' + Date.now(), title: '待识别片名', category: category.value, poster: '', tag: '', quarkShareUrl: parsed.value.url, quarkPasscode: parsed.value.passcode });
   } else { remember(); emit('search', query.value.trim(), category.value); }

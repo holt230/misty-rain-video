@@ -46,8 +46,9 @@
 .cinema-tabbar button.active svg { fill: var(--liquid-accent-subtle); stroke-width: 2.2; }
 .discovery-page, .search-page, #app .library-page.page-container, #app .account-page { position: relative; z-index: 1; width: 100%; padding: var(--page-top) var(--page-right) var(--mobile-content-bottom) var(--page-left); max-width: 1600px; margin: 0 auto; }
 .discovery-page { padding-top: 0; }
-.channel-nav { display: flex; align-items: center; gap: 28px; padding: 8px 0 16px; overflow-x: auto; scrollbar-width: none; }
-.channel-nav button { position: relative; min-height: 48px; border: 0; background: transparent; color: var(--text-tertiary); white-space: nowrap; font-size: 16px; font-weight: 550; }
+.channel-nav { display: flex; align-items: center; gap: 28px; padding: 8px 0 16px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.channel-nav button { position: relative; min-height: 48px; border: 0; background: transparent; color: var(--text-tertiary); white-space: nowrap; font-size: 16px; font-weight: 550; transition: color .2s, transform .15s; }
+.channel-nav button:active { transform: scale(.94); }
 .channel-nav button.active { color: var(--text-primary); font-size: 20px; font-weight: 750; }
 .channel-nav button.active::after { content: ''; position: absolute; bottom: 1px; left: 25%; right: 25%; height: 3px; border-radius: 4px; background: var(--liquid-accent); }
 .feature-film { position: relative; isolation: isolate; display: flex; align-items: end; min-height: 340px; height: clamp(340px, 37vw, 500px); overflow: hidden; border: 1px solid rgb(255 255 255 / .07); border-radius: var(--cinema-radius-hero); background: #20232c; color: #fff; }
@@ -244,7 +245,7 @@
   .header-search span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .header-search svg { width: 16px; height: 16px; }
   .cinema-header > .header-history { width: 36px; flex-basis: 36px; padding: 8px; }
-  .channel-nav { gap: 25px; padding-top: 2px; padding-bottom: 10px; }
+  .channel-nav { gap: 24px; padding-top: 2px; padding-bottom: 10px; mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%); -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%); }
   .channel-nav button { font-size: 14px; }
   .channel-nav button.active { font-size: 19px; }
   .feature-film { height: 340px; min-height: 340px; }

@@ -72,5 +72,9 @@ useDialog(dialogRef, () => props.open, () => { if (!props.deleting) emit('cancel
 .delete-button { color: #fff; background: #bb3c4d; box-shadow: none; }
 .button-spinner { display: inline-block; width: 14px; height: 14px; margin-right: 5px; border: 1px solid var(--divider); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 640px) { .confirm-backdrop { align-items: flex-end; padding: 0; } .confirm-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 24px; border-radius: 10px; } }
+@media (max-width: 640px) {
+  .confirm-backdrop { align-items: flex-end; padding: 0; }
+  .confirm-sheet { width: 100%; border-radius: 28px 28px 0 0; padding: 12px 24px calc(24px + var(--safe-area-bottom)); }
+  .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 20px; border-radius: 10px; }
+}
 </style>

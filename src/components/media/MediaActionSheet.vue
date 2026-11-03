@@ -133,5 +133,10 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 .danger .action-icon { color: var(--danger); background: var(--danger-surface); }
 .danger strong { color: var(--danger); }
 .cancel-button { width: 100%; min-height: 50px; margin-top: 16px; border: 1px solid; border-radius: 26px; color: var(--text-secondary); font-size: .92rem; font-weight: 600; }
-@media (max-width: 640px) { .action-backdrop { align-items: flex-end; padding: 0; } .action-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 22px; border-radius: 10px; } .action-item { min-height: 74px; } }
+@media (max-width: 640px) {
+  .action-backdrop { align-items: flex-end; padding: 0; }
+  .action-sheet { width: 100%; border-radius: 28px 28px 0 0; padding: 12px 20px calc(20px + var(--safe-area-bottom)); }
+  .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 20px; border-radius: 10px; }
+  .action-item { min-height: 70px; }
+}
 </style>

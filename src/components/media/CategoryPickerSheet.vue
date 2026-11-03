@@ -95,5 +95,9 @@ useDialog(dialogRef, () => props.open, () => { if (!props.saving) emit('cancel')
 .option-copy strong { font-size: .94rem; font-weight: 650; }
 .option-copy small { color: var(--text-tertiary); font-size: .75rem; }
 .current-badge { color: var(--liquid-accent); font-size: .73rem; }
-@media (max-width: 640px) { .picker-backdrop { align-items: flex-end; padding: 0; } .picker-sheet { padding-top: 10px; } .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 22px; border-radius: 10px; } }
+@media (max-width: 640px) {
+  .picker-backdrop { align-items: flex-end; padding: 0; }
+  .picker-sheet { width: 100%; border-radius: 28px 28px 0 0; padding: 12px 20px calc(24px + var(--safe-area-bottom)); }
+  .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 20px; border-radius: 10px; }
+}
 </style>

@@ -42,6 +42,33 @@ watch(section, value => emit('section-change', value));
 const restoreSection = (value: string) => { section.value = Object.prototype.hasOwnProperty.call(titles, value) ? value as keyof typeof titles : 'overview'; };
 const showHistory = () => { section.value = 'history'; historyExpanded.value = true; window.scrollTo({ top: 0 }); };
 const back = () => { if (section.value === 'overview') emit('back'); else section.value = 'overview'; };
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+
+const onTouchStart = (e: TouchEvent) => {
+  if (section.value === 'overview' || e.touches.length !== 1) return;
+  const touch = e.touches[0];
+  if (touch.clientX < 50) {
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchStartTime = Date.now();
+  } else {
+    touchStartX = 0;
+  }
+};
+
+const onTouchEnd = (e: TouchEvent) => {
+  if (!touchStartX || e.changedTouches.length !== 1) return;
+  const touch = e.changedTouches[0];
+  const deltaX = touch.clientX - touchStartX;
+  const deltaY = Math.abs(touch.clientY - touchStartY);
+  const elapsed = Date.now() - touchStartTime;
+  touchStartX = 0;
+  if (deltaX > 60 && deltaY < 50 && elapsed < 500) {
+    back();
+  }
+};
 const authSection = ref<HTMLElement | null>(null);
 const continueHistory = computed(() => props.history
   .filter(entry => !entry.completed && entry.position >= 5 && entry.duration > 0)
@@ -119,7 +146,7 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 </script>
 
 <template>
-  <main class="account-page">
+  <main class="account-page" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">
     <div class="account-content">
     <header class="page-heading">
       <div class="heading-copy">
