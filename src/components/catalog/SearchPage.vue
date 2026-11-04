@@ -56,7 +56,7 @@ defineExpose({ focus: () => input.value?.focus(), search: (keyword: string) => {
 <template>
   <main class="search-page">
     <div class="search-intro"><span class="eyebrow">每一个好故事，都值得被找到</span><h1>想看什么？</h1></div>
-    <form class="discovery-search" role="search" @submit.prevent="submit">
+    <form class="discovery-search cinema-search-field" role="search" @submit.prevent="submit">
       <Search /><input ref="input" v-model="query" type="search" placeholder="搜索片名，或粘贴分享链接" aria-label="搜索片名或分享链接" enterkeyhint="search" :disabled="busy" @keydown.enter="($event.isComposing || $event.keyCode === 229) && $event.preventDefault()" />
       <button v-if="query" type="button" class="icon-control" aria-label="清空搜索" :disabled="busy" @click="query = ''; input?.focus()"><X /></button>
       <button type="submit" :disabled="busy || !query.trim()" class="search-submit">{{ busy ? '添加中' : parsed.kind === 'share' ? '添加' : '搜索' }}</button>

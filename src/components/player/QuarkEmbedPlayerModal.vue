@@ -1452,6 +1452,7 @@ defineExpose({ retry, dismissLayer });
               <strong>播放设置</strong>
               <button class="icon-button" type="button" aria-label="收起播放设置" @click="collapseSettings"><X aria-hidden="true" /></button>
             </div>
+            <div class="settings-panel-body">
             <div class="setting-group">
               <div class="setting-heading"><span>画面比例</span><small>默认完整显示，不拉伸</small></div>
               <div class="option-scroll" role="group" aria-label="画面显示方式">
@@ -1535,6 +1536,7 @@ defineExpose({ retry, dismissLayer });
                 <small>{{ playbackAutomationSummary }}</small>
               </div>
               <div class="automation-list">
+                <div class="automation-card">
                 <div class="automation-row">
                   <span class="automation-copy">
                     <strong>跳过片头片尾</strong>
@@ -1560,6 +1562,8 @@ defineExpose({ retry, dismissLayer });
                   <p v-if="preferencesError" role="alert" class="preferences-error">{{ preferencesError }}</p>
                   <p v-else-if="savingPreferences || preferencesSaved" role="status">{{ savingPreferences ? '正在保存…' : '播放偏好已保存' }}</p>
                 </div>
+                </div>
+                <div class="automation-card">
                 <div class="automation-row">
                   <span class="automation-copy">
                     <strong>连续播放</strong>
@@ -1577,7 +1581,9 @@ defineExpose({ retry, dismissLayer });
                     <span aria-hidden="true"></span>
                   </button>
                 </div>
+                </div>
               </div>
+            </div>
             </div>
           </div>
         </main>
@@ -1642,10 +1648,10 @@ defineExpose({ retry, dismissLayer });
 </template>
 
 <style scoped>
-.skip-durations { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 12px 0; }
-.skip-durations label { display: grid; gap: 7px; color: var(--text-secondary); font-size: .75rem; }
-.skip-durations input { width: 100%; min-height: 42px; padding: 8px 12px; border: var(--glass-border); border-radius: 8px; color: var(--text-primary); background: var(--surface-2); }
-.skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; }
+.skip-durations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 16px 18px; }
+.skip-durations label { display: grid; min-width: 0; gap: 8px; color: var(--text-secondary); font-size: .75rem; }
+.skip-durations input { width: 100%; min-width: 0; height: 48px; padding: 10px 12px; border: 1px solid var(--divider); border-radius: 12px; color: var(--text-primary); background: var(--surface-1); font-size: 16px; }
+.skip-durations p { grid-column: 1 / -1; color: var(--text-tertiary); font-size: .72rem; line-height: 1.7; }
 .skip-durations .preferences-error { color: var(--danger); }
 
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
@@ -1709,9 +1715,10 @@ defineExpose({ retry, dismissLayer });
 .player-toolbar small { overflow: hidden; color: var(--text-tertiary); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .player-toolbar .toolbar-chevron { width: 15px; height: 15px; transition: transform .2s; }
 .player-toolbar [aria-expanded='true'] .toolbar-chevron { transform: rotate(180deg); }
-.playback-settings { display: grid; flex-shrink: 0; gap: 22px; margin-bottom: 8px; padding: 20px; border: 0; border-radius: 16px; background: var(--surface-1); }
+.playback-settings { display: flex; flex-direction: column; flex-shrink: 0; margin-bottom: 8px; padding: 0; border: 0; border-radius: 24px; background: var(--surface-1); }
+.settings-panel-body { display: grid; align-content: start; gap: 24px; min-height: 0; padding: 24px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .settings-panel-heading, .setting-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.settings-panel-heading { margin-top: -6px; margin-bottom: -7px; }
+.settings-panel-heading { flex-shrink: 0; padding: 16px 24px 12px; border-bottom: 1px solid var(--divider); }
 .settings-panel-heading > strong { font-size: .97rem; font-weight: 700; }
 .settings-panel-heading .icon-button { box-shadow: none; background: var(--glass-bg); }
 .setting-group { min-width: 0; }
@@ -1722,8 +1729,9 @@ defineExpose({ retry, dismissLayer });
 .option-chip svg { width: 14px; height: 14px; }
 .option-chip.active { color: var(--liquid-accent-strong); border-color: rgb(var(--accent-rgb) / .23); background: var(--glass-lens); box-shadow: none; font-weight: 650; }
 .option-chip:disabled { opacity: 1; cursor: default; }
-.automation-list { display: grid; border: var(--glass-border); border-radius: 20px; background: var(--glass-bg); }
-.automation-row { display: flex; min-width: 0; min-height: 70px; align-items: center; gap: 12px; padding: 12px 14px; }
+.automation-list { display: grid; gap: 12px; }
+.automation-card { min-width: 0; border: 1px solid var(--divider); border-radius: 18px; background: var(--surface-2); }
+.automation-row { display: flex; min-width: 0; min-height: 76px; align-items: center; gap: 16px; padding: 16px; }
 .automation-row + .automation-row { border-top: 1px solid rgb(60 84 122 / .1); }
 .automation-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .automation-copy strong { font-size: .8rem; font-weight: 600; }
@@ -1786,7 +1794,9 @@ defineExpose({ retry, dismissLayer });
   .player-toolbar strong { font-size: .78rem; }
   .player-toolbar small { font-size: .65rem; }
   .player-toolbar .toolbar-chevron { display: none; }
-  .playback-settings { gap: 17px; padding: 17px; margin-bottom: 14px; border-radius: 16px; }
+  .playback-settings { margin-bottom: 14px; border-radius: 24px; }
+  .settings-panel-heading { padding: 14px 20px 12px; }
+  .settings-panel-body { padding: 20px; }
   .setting-heading { flex-wrap: wrap; gap: 4px 10px; }
   .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 0; overflow: visible; scroll-margin-top: 10px; }
   .episode-heading { padding: 19px 16px 15px; }
@@ -1828,7 +1838,7 @@ defineExpose({ retry, dismissLayer });
 .episode-heading-actions .text-action { padding: 0 10px; font-size: 12px; }
 .episode-item.active .episode-number { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
 .player-sheet-shade { position: absolute; inset: 0; z-index: 15; background: rgb(0 0 0 / .5); }
-.playback-settings { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(560px, calc(100% - 48px)); max-height: 80%; overflow-y: auto; overscroll-behavior: contain; margin: 0; background: var(--surface-1); border: 1px solid var(--divider); }
+.playback-settings { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(560px, calc(100% - 48px)); max-height: 80%; overflow: hidden; margin: 0; background: var(--surface-1); border: 1px solid var(--divider); }
 .episode-panel.sheet-open { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(420px, calc(100% - 48px)); height: min(75%, 700px); overflow: hidden; margin: 0; border-radius: 16px; border: 1px solid var(--divider); background: var(--surface-1); }
 .episode-panel.sheet-open .episode-list { overflow-y: auto; }
 @media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(100dvh - 200px); } }
@@ -1848,15 +1858,17 @@ defineExpose({ retry, dismissLayer });
   .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: 16 / 9; min-height: 210px; max-height: 55dvh; }
   .video-column > :deep(.danmaku-controls) { margin: 0 16px; }
   .player-toolbar { margin: 0 16px; }
-  .episode-panel { margin: 0 8px calc(24px + var(--safe-area-bottom)); }
-  .playback-settings { inset: auto 0 0; width: 100%; max-height: 76%; border-radius: 18px 18px 0 0; padding-bottom: calc(24px + var(--safe-area-bottom)); }
-  .episode-panel.sheet-open { inset: auto 0 0; width: 100%; height: 65%; border-radius: 18px 18px 0 0; padding-bottom: var(--safe-area-bottom); }
+  .episode-panel { margin: 8px 16px calc(24px + var(--safe-area-bottom)); }
+  .playback-settings { inset: auto max(12px, var(--safe-area-right)) max(12px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); width: auto; max-height: calc(84% - var(--safe-area-bottom)); border-radius: 24px; }
+  .episode-panel.sheet-open { inset: auto max(12px, var(--safe-area-right)) max(12px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); width: auto; height: 65%; border-radius: 24px; padding-bottom: 12px; }
   .episode-panel.sheet-open .episode-list { flex: 1; min-height: 0; overflow-y: auto; }
 }
 .landscape-inline .player-header { left: 0; right: auto; display: block; }
 .landscape-inline .title-block { display: flex; }
 .landscape-inline .title-copy, .landscape-inline .header-actions { display: none; }
 .landscape-inline .video-stage { position: relative; max-height: none; min-height: 0; height: 100%; }
-.landscape-inline .playback-settings { display: grid; inset: 0 0 0 auto; width: min(350px, 65%); max-height: 100%; border-radius: 0; padding: 16px; }
+.landscape-inline .playback-settings { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); max-height: 100%; border-radius: 0; }
+.landscape-inline .settings-panel-heading { padding: 12px 16px; }
+.landscape-inline .settings-panel-body { padding: 16px; }
 .landscape-inline .episode-panel.sheet-open { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); height: 100%; border-radius: 0; }
 </style>

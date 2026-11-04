@@ -5,6 +5,7 @@ import MediaPoster from '../common/MediaPoster.vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
+import { isNonVideoResource } from '../../services/resourceFiltering';
 import SkeletonCard from '../common/SkeletonCard.vue';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { useDialog } from '../../composables/useDialog';
@@ -87,9 +88,7 @@ const episodeNumber = (title: string) => {
  */
 const isExcludedResource = (resource: ResourceItem) => {
   const title = cleanTitle(resource.title);
-  return /有声(?:小说|书)?|播讲|演播|朗读|听书|音频|原声带|广播剧|相声|评书|电子书|小说|漫画|kindle/i.test(title)
-    || /(?:^|[.\s_\-\[\]()（）])(?:mp3|flac|aac|m4a|wav|ape|ogg|epub|mobi|azw3|pdf|txt|docx?)(?:$|[.\s_\-\]\]()（）])/i.test(title)
-    || /沙雕版|解说(?:版|视频)|混剪(?:版|视频)/i.test(title)
+  return isNonVideoResource(title, props.searchKeyword || props.media?.title)
     || (targetCategory.value === 'anime' && /(?:^|[\s.·|【\[])(?:微)?短剧(?:$|[\s.·|:：】\]])/u.test(title));
 };
 
@@ -253,7 +252,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         </div>
       </div>
 
-      <form v-if="!detailResource" class="result-search" role="search" @submit.prevent="submitSearch">
+      <form v-if="!detailResource" class="result-search cinema-search-field" role="search" @submit.prevent="submitSearch">
         <Search class="result-search-icon" aria-hidden="true" />
         <input
           v-model="searchQuery"
@@ -415,7 +414,6 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .result-search { display: flex; align-items: center; gap: 8px; margin: 0 24px; min-height: 56px; padding: 6px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); flex-shrink: 0; }
 .result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }
 .result-search input { width: 100%; min-width: 0; flex: 1; min-height: 44px; padding: 6px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
-.result-search:focus-within { box-shadow: 0 0 0 3px var(--liquid-accent-subtle); }
 .result-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
 .clear-search-button { display: grid; width: 44px; height: 44px; place-items: center; flex-shrink: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .clear-search-button svg { width: 17px; height: 17px; }

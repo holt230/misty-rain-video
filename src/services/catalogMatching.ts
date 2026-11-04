@@ -2,6 +2,7 @@ import type { CatalogItem } from '../types/catalog';
 import type { MediaItem } from '../types/media';
 import type { ResourceItem } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
+import { isNonVideoResource } from './resourceFiltering';
 
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 const escape = (value: string) => value.replace(/[.*+?^\x24{}()|[\]\\]/g, '\\$&');
@@ -27,7 +28,7 @@ export function findCatalogMedia(item: CatalogItem, library: MediaItem[]) {
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 export function matchesCatalogTitle(item: CatalogItem, title: string, requireYear = true) {
-  if (!item.title.trim() || /解说|混剪|沙雕|有声|合集|全季|多季/.test(title)) return false;
+  if (!item.title.trim() || isNonVideoResource(title, item.title) || /解说|混剪|沙雕|有声|合集|全季|多季/.test(title)) return false;
   if (requireYear && (!item.year || year(title) !== item.year)) return false;
   if (!requireYear && year(title) && item.year && year(title) !== item.year) return false;
   if (season(item.title) !== season(title)) return false;

@@ -25,6 +25,10 @@ test('library identity respects editions and stable catalog links', () => {
   assert.equal(findCatalogMedia(work, [base, { ...base, quarkFid: 'two' }]), undefined);
   assert.equal(findCatalogMedia(work, [{ ...base, title: '自定义名字', catalogId: 'douban:1' }]).quarkFid, 'one');
 });
+test('automatic source selection never imports image or audio resources with a matching film title and year', () => {
+  const titles = ['九门 2026 4K 壁纸', '九门 2026 高清海报', '九门 2026 原声带', '九门 2026.jpg', '九门 2026 1080P'];
+  assert.deepEqual(automaticCatalogCandidates(work, titles.map(candidate)).map(item => item.title), titles.slice(4));
+});
 test('share verification rejects empty content and explicit conflicting seasons in files or directories', () => {
   const share = { title: '九门', videoCount: 1, entries: [{ name: '第01集.mkv', isVideo: true }] };
   assert.equal(validatesCatalogShare(work, share), true);

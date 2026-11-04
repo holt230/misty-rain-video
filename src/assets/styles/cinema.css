@@ -193,10 +193,8 @@
   .cinema-header .cinema-brand, .cinema-header .header-search { display: none; }
   .desktop-page-title { display: block; flex-shrink: 0; font-size: 17px; font-weight: 650; }
   .desktop-search { display: flex; align-items: center; gap: 10px; width: min(480px, 60%); min-width: 200px; margin-left: auto; padding: 4px 6px 4px 16px; border: 1px solid var(--divider); border-radius: 24px; background: var(--surface-1); }
-  .desktop-search:focus-within { border-color: var(--liquid-accent); }
   .desktop-search > svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--text-tertiary); }
   .desktop-search input { width: 100%; min-width: 0; min-height: 34px; border: 0; background: transparent; color: var(--text-primary); font-size: 13px; }
-  .desktop-search input:focus-visible { outline-offset: 0; }
   .desktop-search button { align-self: stretch; flex-shrink: 0; padding: 0 16px; border: 0; border-radius: 20px; color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-size: 13px; }
   .header-history span { display: inline; font-size: 12px; }
   .discovery-page, .search-page, #app .library-page.page-container, #app .account-page { width: calc(100% - var(--desktop-sidebar-width)); margin-left: var(--desktop-sidebar-width); max-width: none; padding-bottom: 64px; }

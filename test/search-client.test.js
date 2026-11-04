@@ -11,6 +11,25 @@ const transferCompiled = await build({ entryPoints: ['src/composables/useQuarkTr
 const { useQuarkTransfer } = await import(`data:text/javascript;base64,${Buffer.from(transferCompiled.outputFiles[0].text).toString('base64')}`);
 const data = (extra = {}, note = '测试剧 4K') => ({ total: 1, merged_by_type: { quark: [{ url: 'https://pan.quark.cn/s/abc', note }] }, ...extra });
 
+test('首批、缓存补齐和公共补充一致剔除4K壁纸、图片和音频，保留正片及改编说明', async t => {
+  const titles = ['斗破苍穹-云韵4K精美壁纸', '斗破苍穹-美杜莎4K精美壁纸', '斗破苍穹 4K wallpaper',
+    '斗破苍穹 高清写真图集', '斗破苍穹.jpg', '斗破苍穹 有声小说', '斗破苍穹 原声带 FLAC',
+    '斗破苍穹 2026 4K 更新至120集', '斗破苍穹 1080P 小说改编', '斗破苍穹 第五季 国语中字'];
+  const rows = titles.map((note, index) => ({ note, url: `https://pan.quark.cn/s/item${index}` }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { merged_by_type: { quark: rows } } }));
+  const service = new SilentSearchEngine();
+  for (const result of [await service.search('斗破苍穹'), await service.readCached('斗破苍穹'), await service.supplement('斗破苍穹')]) {
+    assert.equal(result.total, 3);
+    assert.deepEqual(result.items.map(item => item.title), titles.slice(7));
+    assert.deepEqual(result.quarkItems, result.items);
+  }
+});
+
+test('资源分类不把影片本身的名字当作周边类型', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: data({}, '小说家的电影 2022 1080P') }));
+  assert.equal((await new SilentSearchEngine().search('小说家的电影')).items.length, 1);
+});
+
 test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑仙逆世并保留年番与剧场版', async t => {
   const titles = [
     '剑仙归来：谁让这剑仙逆世重修的？ 第七季（89集）',

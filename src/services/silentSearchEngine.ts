@@ -2,6 +2,7 @@ import type { ResourceItem, SearchResult } from '../types/search';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
+import { isNonVideoResource } from './resourceFiltering';
 
 const SEARCH_THROTTLE_MS = 300;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -177,7 +178,8 @@ export class SilentSearchEngine {
     const list = Array.isArray(data?.merged_by_type?.quark) ? data.merged_by_type.quark : [];
     list.forEach((raw: any) => {
       const item = this.parseSingleItem(raw);
-      if (!item || !titlePattern?.test(item.title.normalize('NFKC').replace(/\p{Cf}/gu, '')) || seen.has(item.url)) return;
+      if (!item || isNonVideoResource(item.title, keyword)
+        || !titlePattern?.test(item.title.normalize('NFKC').replace(/\p{Cf}/gu, '')) || seen.has(item.url)) return;
       seen.add(item.url);
       items.push(item);
     });

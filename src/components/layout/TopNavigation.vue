@@ -13,7 +13,7 @@ const titles = { home: '发现好故事', search: '找一部喜欢的影片', li
     <button type="button" class="cinema-brand" @click="emit('home')"><BrandMark /><span>烟雨影视</span></button>
     <span class="desktop-page-title">{{ titles[activePage] }}</span>
     <button type="button" class="header-search" :disabled="disabled" @click="emit('search')"><Search /><span>找一部喜欢的影片</span></button>
-    <form class="desktop-search" role="search" aria-label="全站找片" @submit.prevent="query.trim() && !disabled && emit('submit', query.trim())">
+    <form class="desktop-search cinema-search-field" role="search" aria-label="全站找片" @submit.prevent="query.trim() && !disabled && emit('submit', query.trim())">
       <Search aria-hidden="true" /><input v-model="query" type="search" aria-label="搜索影片" placeholder="搜索片名或粘贴分享链接" :disabled="disabled" @keydown.enter="($event.isComposing || $event.keyCode === 229) && $event.preventDefault()" />
       <button type="submit" :disabled="disabled || !query.trim()">搜索</button>
     </form>

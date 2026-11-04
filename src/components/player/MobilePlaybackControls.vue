@@ -305,28 +305,27 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mobile-controls" :class="{ concealed: !visible, locked }" @pointerdown="reveal" @focusin="reveal">
-    <p v-if="notice" role="status">{{ notice }}</p>
+  <div class="mobile-controls" :class="{ concealed: !visible, locked, desktop }" @pointerdown="reveal" @focusin="reveal">
+    <p v-if="notice" class="control-notice" role="status">{{ notice }}</p>
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
     <div v-if="seekNotice && !boosted" class="speed-notice" role="status">{{ seekNotice }}</div>
-    <div class="control-tools">
-      <span class="desktop-shortcuts">空格 播放/暂停 · ← → 快退进 · ↑ ↓ 音量 · F 全屏 · W 网页全屏 · M 静音</span>
-      <button v-if="expanded && !desktop" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
-      <template v-if="!locked">
-        <div class="seek-actions" role="group" aria-label="快进和快退">
-          <button type="button" class="seek-step" aria-label="快退10秒" title="快退10秒" :disabled="!duration" @click="seekBy(-10)"><span class="seek-symbol"><RotateCcw /><span>10</span></span></button>
-          <button type="button" class="seek-step" aria-label="快进10秒" title="快进10秒" :disabled="!duration" @click="seekBy(10)"><span class="seek-symbol"><RotateCw /><span>10</span></span></button>
-        </div>
-        <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
-        <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
-      </template>
+    <button v-if="expanded && !desktop" class="lock-control" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
+    <div v-if="!locked" class="control-tools">
+      <span class="desktop-shortcuts">空格 播放/暂停 · ← → 快退/快进</span>
+      <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
+      <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
+    </div>
+    <div v-if="!locked" class="playback-actions" role="group" aria-label="播放控制">
+      <button type="button" class="seek-step" aria-label="快退10秒" title="快退10秒" :disabled="!duration" @click="seekBy(-10)"><span class="seek-symbol"><RotateCcw /><span>10</span></span></button>
+      <button type="button" class="play-toggle" :aria-label="paused ? '播放' : '暂停'" @click="togglePlay"><Play v-if="paused" /><Pause v-else /></button>
+      <button type="button" class="seek-step" aria-label="快进10秒" title="快进10秒" :disabled="!duration" @click="seekBy(10)"><span class="seek-symbol"><RotateCw /><span>10</span></span></button>
     </div>
     <div v-show="!locked" class="transport">
-      <button type="button" :aria-label="paused ? '播放' : '暂停'" @click="togglePlay"><Play v-if="paused" /><Pause v-else /></button>
       <span class="time">{{ clock(time) }}</span>
       <input class="seek-slider" type="range" :style="seekSliderStyle" aria-label="播放进度" :aria-valuetext="`${clock(time)} / ${clock(duration)}`" min="0" :max="duration || 1" step="0.1" :value="time" :disabled="!duration" @input="preview" @change="seek" @pointercancel="scrubbing = false; time = video.currentTime; seekNotice = ''; reveal()" />
       <span class="time">{{ clock(duration) }}</span>
-      <button type="button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
+      <div class="secondary-controls">
+      <button type="button" class="mute-button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
       <input class="volume-slider" type="range" aria-label="音量" min="0" max="1" step="0.05" :value="muted ? 0 : volume" @input="changeVolume" />
       <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
       <select aria-label="播放倍速" :value="speed" @change="changeSpeed"><option v-for="rate in rates" :key="rate" :value="rate">{{ rate }}×</option></select>
@@ -349,51 +348,50 @@ onBeforeUnmount(() => {
         <Minimize v-if="expanded" />
         <Maximize v-else />
       </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.mobile-controls { position: absolute; z-index: 3; inset: auto 0 0; padding: 24px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); color: #fff; background: linear-gradient(transparent, rgb(0 0 0 / .72)); transition: opacity .2s; }
+.mobile-controls { position: absolute; z-index: 3; inset: 0; color: #fff; pointer-events: none; background: linear-gradient(rgb(0 0 0 / .35), transparent 30%, transparent 48%, rgb(0 0 0 / .75)); transition: opacity .2s; }
 .mobile-controls.concealed:not(:has(:focus-visible)) { opacity: 0; pointer-events: none; }
-.transport { display: flex; align-items: center; gap: 4px; }
-button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 0; background: transparent; color: inherit; }
+.mobile-controls.concealed:not(:has(:focus-visible)) :is(button, input, select) { pointer-events: none; }
+button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 50%; background: transparent; color: inherit; pointer-events: auto; transition: background .18s; }
 button svg { width: 21px; height: 21px; }
-input { flex: 1; min-width: 24px; height: 44px; margin: 0 5px; accent-color: #fff; touch-action: none; }
+input { min-width: 0; height: 44px; margin: 0; accent-color: #fff; touch-action: none; pointer-events: auto; }
 .time { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-select { max-width: 80px; min-height: 44px; border: 0; color: #fff; background: #17191f; font-size: 12px; }
-p { margin: 0 12px; font-size: 12px; }
+select { max-width: 95px; min-width: 0; height: 44px; padding: 0 8px; border: 0; border-radius: 12px; color: #fff; background: rgb(0 0 0 / .4); font-size: 12px; pointer-events: auto; }
+.control-notice { position: absolute; top: 56px; left: 12px; right: 12px; text-align: center; font-size: 12px; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .mobile-controls { transition: none; } }
 
-.control-tools { display: flex; align-items: center; justify-content: end; gap: 6px; margin-bottom: 2px; }
-.control-tools button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; width: auto; min-width: 44px; flex-basis: auto; padding: 8px 12px; border-radius: 6px; background: rgb(0 0 0 / .25); font-size: 12px; }
+.control-tools { position: absolute; inset: 8px max(12px, var(--safe-area-right)) auto max(12px, var(--safe-area-left)); display: flex; align-items: center; justify-content: end; gap: 8px; }
+.control-tools button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; width: auto; min-width: 44px; flex-basis: auto; padding: 8px 12px; border-radius: 14px; background: rgb(0 0 0 / .32); font-size: 12px; }
 .control-tools svg { width: 18px; height: 18px; }
-.seek-actions { display: flex; align-items: center; gap: 8px; margin-right: auto; }
-.control-tools .seek-step { width: 44px; height: 44px; min-width: 44px; padding: 10px; border-radius: 10px; }
+.playback-actions { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(20px, 4vw, 36px); }
+.playback-actions button { background: rgb(0 0 0 / .24); }
+.playback-actions .play-toggle { width: 52px; height: 52px; flex-basis: 52px; background: rgb(255 255 255 / .18); }
+.play-toggle svg { width: 28px; height: 28px; fill: currentColor; }
 .seek-symbol { position: relative; display: block; width: 24px; height: 24px; }
 .seek-symbol svg { width: 24px; height: 24px; }
 .seek-symbol > span { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 2px; font-size: 9px; font-weight: 700; line-height: 1; }
+.lock-control { position: absolute; top: 50%; left: max(12px, var(--safe-area-left)); transform: translateY(-50%); background: rgb(0 0 0 / .4); }
 .mobile-controls.locked { background: transparent; }
-.speed-notice { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 8px; padding: 8px 14px; background: rgb(0 0 0 / .7); color: #fff; border-radius: 8px; font-size: 12px; white-space: nowrap; }
-.transport { flex-wrap: wrap; }
-.transport input { order: -1; flex: 1 0 calc(100% - 112px); }
-.transport .time { order: -1; width: 42px; text-align: center; }
-.transport select { margin-left: auto; border-radius: 5px; padding: 0 5px; max-width: 95px; }
-.mobile-controls { padding-top: 12px; }
-@media (min-width: 821px) { .transport { flex-wrap: nowrap; } .transport input { order: 0; flex: 1; } .transport .time { order: 0; } }
+.speed-notice { position: absolute; top: 10px; left: 50%; z-index: 1; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 14px; background: rgb(0 0 0 / .8); color: #fff; border-radius: 12px; font-size: 12px; white-space: nowrap; }
+.transport { position: absolute; inset: auto max(12px, var(--safe-area-right)) max(4px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; column-gap: 8px; }
+.transport .time { text-align: center; }
+.seek-slider { width: 100%; }
+.secondary-controls { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.secondary-controls .mute-button { margin-right: auto; }
 .volume-slider, .desktop-shortcuts { display: none; }
 @media (min-width: 1024px) and (pointer: fine) {
-  .mobile-controls { padding: 28px 16px 8px; }
-  .transport { gap: 8px; flex-wrap: wrap; }
-  .transport .seek-slider { order: -2; flex: 1 0 100%; width: 100%; height: 24px; margin: 0; }
-  .transport .volume-slider { display: block; order: 0; flex: 0 1 72px; width: 72px; min-width: 40px; }
-  .transport .time { width: auto; }
-  .transport .time + .seek-slider + .time::before { content: '/'; padding-right: 8px; color: #c5c5ca; }
-  .transport select { min-width: 60px; margin-left: 0; }
-  .transport select:first-of-type { margin-left: auto; }
+  .playback-actions { top: 46%; }
+  .playback-actions .play-toggle { width: 64px; height: 64px; flex-basis: 64px; }
+  .playback-actions .seek-step { width: 48px; height: 48px; flex-basis: 48px; }
+  .secondary-controls .mute-button { margin-right: 0; }
+  .volume-slider { display: block; flex: 0 1 80px; width: 80px; margin-right: auto; }
   .desktop-shortcuts { display: block; margin-right: auto; color: #dedee3; font-size: 11px; }
-  .seek-actions { order: -1; margin-right: 4px; }
-  button:hover { background: rgb(255 255 255 / .15); border-radius: 6px; }
+  button:hover { background: rgb(255 255 255 / .2); }
 }
 </style>

@@ -48,6 +48,12 @@ button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation
 button { cursor: pointer; }
 button:disabled { cursor: wait; opacity: .5; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--liquid-accent); outline-offset: 3px; }
+/* Search is one composite field: focus belongs to the surface, not a rectangle around its text. */
+.cinema-search-field { transition: background .18s; }
+.cinema-search-field[role='search']:focus-within { background: var(--surface-2); }
+.cinema-search-field:focus-within > svg { color: var(--liquid-accent); }
+.cinema-search-field input[type='search']:focus { outline: none; box-shadow: none; }
+.cinema-search-field input[type='search'] { appearance: none; -webkit-appearance: none; }
 [role='dialog'][tabindex='-1']:focus { outline: none; }
 ::selection { color: #fff; background: #376dd4; }
 ::-webkit-scrollbar { width: 5px; height: 5px; }
