@@ -7,6 +7,7 @@
   --glass-material: #1a1c22; --glass-sheet-material: #1d2027; --glass-floating-material: #1a1c22;
   --glass-blur: none; --glass-blur-heavy: none; --glass-shadow-sm: none;
   --nav-background: rgb(16 17 20 / .97); --mobile-gutter: 18px;
+  --cinema-nav-rgb: 16 17 20; --cinema-nav-surface: var(--liquid-canvas); --cinema-nav-filter: none;
   --mobile-content-bottom: calc(108px + var(--safe-area-bottom));
   --mobile-header-top-space: 18px;
   --desktop-sidebar-width: 216px;
@@ -22,8 +23,17 @@
   --liquid-accent: #b7460c; --liquid-accent-strong: #a73c07; --liquid-accent-hover: #963507;
   --accent-rgb: 183 70 12; --accent-ink: #fff; --liquid-accent-subtle: rgb(183 70 12 / .08); --liquid-accent-muted: rgb(183 70 12 / .13);
   --glass-material: #fff; --glass-sheet-material: #fff; --glass-floating-material: #fff; --nav-background: rgb(248 249 251 / .97);
+  --cinema-nav-rgb: 248 249 251;
 }
-.cinema-header { position: sticky; top: 0; z-index: 300; display: flex; gap: 20px; align-items: center; min-height: calc(76px + var(--safe-area-top)); padding: calc(12px + var(--safe-area-top)) 32px 12px; background: var(--nav-background); border-bottom: 1px solid var(--divider); }
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --cinema-nav-surface: rgb(var(--cinema-nav-rgb) / .9); --cinema-nav-filter: blur(18px) saturate(140%); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root { --cinema-nav-surface: var(--liquid-canvas); --cinema-nav-filter: none; }
+}
+/* A continuous surface prevents posters from leaking through a faded navigation edge. */
+.cinema-header, .channel-nav { background: var(--cinema-nav-surface); backdrop-filter: var(--cinema-nav-filter); -webkit-backdrop-filter: var(--cinema-nav-filter); }
+.cinema-header { position: sticky; top: 0; z-index: 300; display: flex; gap: 20px; align-items: center; min-height: calc(76px + var(--safe-area-top)); padding: calc(12px + var(--safe-area-top)) 32px 12px; border-bottom: 1px solid var(--divider); }
 .cinema-brand { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; color: var(--text-primary); text-align: left; font-size: 18px; font-weight: 750; white-space: nowrap; }
 .cinema-brand > :first-child { width: 32px; height: 32px; flex-shrink: 0; }
 .cinema-brand small { display: block; color: var(--text-tertiary); font-size: 10px; letter-spacing: .2em; margin-top: 4px; }
@@ -243,7 +253,7 @@
   .header-search span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .header-search svg { width: 16px; height: 16px; }
   .cinema-header > .header-history { width: 36px; flex-basis: 36px; padding: 8px; }
-  .channel-nav { gap: 24px; padding-top: 2px; padding-bottom: 10px; mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%); -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%); }
+  .channel-nav { gap: 24px; padding-top: 2px; padding-bottom: 10px; }
   .channel-nav button { font-size: 14px; }
   .channel-nav button.active { font-size: 19px; }
   .feature-film { height: 340px; min-height: 340px; }

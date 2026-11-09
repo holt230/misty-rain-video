@@ -130,7 +130,7 @@ onBeforeUnmount(() => { navigation++; });
   </main>
 </template>
 <style scoped>
-.channel-nav { position: sticky; z-index: 25; top: calc(76px + var(--safe-area-top)); background: var(--liquid-canvas); border-bottom: 1px solid var(--divider); }
+.channel-nav { position: sticky; z-index: 25; top: calc(76px + var(--safe-area-top)); border-bottom: 1px solid var(--divider); }
 .feature-carousel { margin-top: 24px; }
 .catalog-page-footer { margin-top: 28px; text-align: center; }
 .catalog-page-footer > .more-films { margin-top: 12px; }
