@@ -10,6 +10,7 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_SEARCH_CACHE_ENTRIES = 40;
 const PUBLIC_SEARCH_URL = 'https://so.252035.xyz/api/search';
 const PUBLIC_TIMEOUT_MS = 10_000;
+const normalizeKeyword = (keyword: string) => keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim();
 
 // Match a title rather than characters embedded in another title or subtitle
 // (e.g. 搜“仙逆”不能命中“剑仙逆世”). Keep common season and edition suffixes.
@@ -33,13 +34,42 @@ export class SilentSearchEngine {
   private publicInFlight = new Map<string, Promise<SearchResult>>();
   private publicCache = new Map<string, { expiresAt: number; data: SearchResult }>();
   private publicRetryAfter = 0;
+  private controllers = new Set<AbortController>();
+  private generation = 0;
+
+  cancelPending() {
+    this.generation++;
+    for (const controller of this.controllers) controller.abort();
+    this.controllers.clear();
+    this.inFlight.clear();
+    this.publicInFlight.clear();
+  }
+
+  cachedResult(keyword: string): SearchResult | null {
+    const key = normalizeKeyword(keyword).toLocaleLowerCase('zh-CN');
+    const cached = this.cache.get(key);
+    const primary = cached && Date.now() - cached.createdAt <= SEARCH_CACHE_TTL_MS ? cached.data : null;
+    const supplement = this.publicCache.get(key);
+    const extra = supplement && supplement.expiresAt > Date.now() && supplement.data.success ? supplement.data : null;
+    const base = primary || extra;
+    if (!base) return null;
+    const items = [...new Map([...(primary?.items || []), ...(extra?.items || [])].map(item => [item.url, item])).values()];
+    return items.length ? { ...base, items, quarkItems: items, total: items.length, fromCache: true } : null;
+  }
+
+  private rememberResult(key: string, result: SearchResult) {
+    this.cache.delete(key);
+    if (!result.items.length) return;
+    this.cache.set(key, { createdAt: Date.now(), data: result });
+    while (this.cache.size > MAX_SEARCH_CACHE_ENTRIES) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.cache.delete(oldestKey);
+    }
+  }
 
   async search(keyword: string, options: { force?: boolean } = {}): Promise<SearchResult> {
-    const cleanKw = keyword
-      .normalize('NFKC')
-      .replace(/[《》()（）]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const cleanKw = normalizeKeyword(keyword);
     if (!cleanKw) {
       return { success: false, total: 0, items: [], quarkItems: [], source: 'error' };
     }
@@ -57,37 +87,34 @@ export class SilentSearchEngine {
 
     // Register the promise before the throttle waits, so concurrent requests
     // cannot pass the in-flight check and send duplicate upstream searches.
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.controllers.add(controller);
     const task = (async () => {
       const remaining = SEARCH_THROTTLE_MS - (Date.now() - this.lastRequestTime);
       if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+      if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
       this.lastRequestTime = Date.now();
-      return this.executeBackendFetch(cleanKw, Boolean(options.force));
+      return this.executeBackendFetch(cleanKw, Boolean(options.force), controller);
     })();
     this.inFlight.set(requestKey, task);
 
     try {
       const result = await task;
-      if (result.success && result.items.length > 0) {
-        this.cache.delete(cacheKey);
-        this.cache.set(cacheKey, { createdAt: Date.now(), data: result });
-        while (this.cache.size > MAX_SEARCH_CACHE_ENTRIES) {
-          const oldestKey = this.cache.keys().next().value;
-          if (oldestKey === undefined) break;
-          this.cache.delete(oldestKey);
-        }
-      }
+      if (generation === this.generation && result.success) this.rememberResult(cacheKey, result);
       return result;
     } catch (error) {
       return this.failedSearch(error);
     } finally {
-      this.inFlight.delete(requestKey);
+      this.controllers.delete(controller);
+      if (this.inFlight.get(requestKey) === task) this.inFlight.delete(requestKey);
     }
   }
 
   // The browser and server use different network exits. Restore the pre-Oct-13
   // public fallback without blocking candidates already returned by the server.
   async supplement(keyword: string, { force = false } = {}): Promise<SearchResult> {
-    const clean = keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim();
+    const clean = normalizeKeyword(keyword);
     if (!clean) return this.getEmptyResult();
     const key = clean.toLocaleLowerCase('zh-CN');
     const cached = this.publicCache.get(key);
@@ -95,8 +122,10 @@ export class SilentSearchEngine {
     const pending = this.publicInFlight.get(key);
     if (pending) return pending;
     if (this.publicRetryAfter > Date.now()) return this.getEmptyResult('备用来源暂不可用，已保留当前候选');
+    const generation = this.generation;
     const task = (async () => {
       const controller = new AbortController();
+      this.controllers.add(controller);
       const timer = setTimeout(() => controller.abort(), PUBLIC_TIMEOUT_MS);
       let result: SearchResult;
       try {
@@ -106,46 +135,51 @@ export class SilentSearchEngine {
           headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error('备用来源暂不可用');
         const payload = await response.json();
+        if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
         if (Number(payload.code) !== 0 || !payload.data || (!payload.data.merged_by_type && payload.data.total !== 0)) throw new Error('备用来源响应异常');
         result = this.normalizeResponse(payload.data, 'cors_proxy', clean);
       } catch {
         result = this.getEmptyResult('备用来源暂不可用，已保留当前候选');
-        this.publicRetryAfter = Date.now() + 30_000;
-      } finally { clearTimeout(timer); }
+        if (generation === this.generation) this.publicRetryAfter = Date.now() + 30_000;
+      } finally { clearTimeout(timer); this.controllers.delete(controller); }
+      if (generation !== this.generation) return result;
       this.publicCache.delete(key);
       this.publicCache.set(key, { expiresAt: Date.now() + (result.items.length ? SEARCH_CACHE_TTL_MS : 30_000), data: result });
       while (this.publicCache.size > MAX_SEARCH_CACHE_ENTRIES) this.publicCache.delete(this.publicCache.keys().next().value!);
       return result;
-    })().finally(() => this.publicInFlight.delete(key));
+    })().finally(() => { if (this.publicInFlight.get(key) === task) this.publicInFlight.delete(key); });
     this.publicInFlight.set(key, task);
     return task;
   }
 
   private failedSearch(error: unknown): SearchResult {
+    const requiresAuth = Boolean(error && typeof error === 'object' && 'requiresAuth' in error && error.requiresAuth);
+    if (requiresAuth) { this.cache.clear(); this.publicCache.clear(); }
     return { ...this.getEmptyResult(error instanceof Error ? error.message : '资源检索失败，请稍后重试'),
-      allowPublicFallback: !(error && typeof error === 'object' && 'requiresAuth' in error && error.requiresAuth) };
+      allowPublicFallback: !requiresAuth };
   }
 
   async readCached(keyword: string): Promise<SearchResult | null> {
     const params = new URLSearchParams({ kw: keyword, cached: '1' });
     const controller = new AbortController();
+    this.controllers.add(controller);
     const timer = setTimeout(() => controller.abort(), 4_000);
     try {
       const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { cache: 'no-store', signal: controller.signal });
       const payload = await response.json();
+      if (controller.signal.aborted) return null;
       if (!response.ok || payload.code !== 0 || !payload.data) return null;
       const result = this.normalizeResponse(payload.data, 'direct', keyword);
-      // Do not let an earlier partial client cache hide the completed server result.
-      this.cache.delete(keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim().toLocaleLowerCase('zh-CN'));
+      // Keep the completed snapshot available when returning to this search.
+      this.rememberResult(normalizeKeyword(keyword).toLocaleLowerCase('zh-CN'), result);
       return result;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); this.controllers.delete(controller); }
   }
 
-  private async executeBackendFetch(keyword: string, force: boolean): Promise<SearchResult> {
+  private async executeBackendFetch(keyword: string, force: boolean, controller: AbortController): Promise<SearchResult> {
     const params = new URLSearchParams({ kw: keyword });
     if (force) params.set('refresh', '1');
     const targetUrl = `${apiUrl('/api/resource-search')}?${params.toString()}`;
-    const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const resp = await authFetch(targetUrl, {
@@ -155,6 +189,7 @@ export class SilentSearchEngine {
         signal: controller.signal
       });
       const json = await resp.json().catch(() => ({}));
+      if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
       if (!resp.ok || json.code !== 0 || !json.data) {
         throw Object.assign(new Error(json.message || '资源检索服务暂时不可用'), {
           requiresAuth: resp.status === 401 || resp.status === 403 || json.code === 'APP_AUTH_REQUIRED'

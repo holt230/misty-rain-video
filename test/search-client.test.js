@@ -84,7 +84,7 @@ test('节流等待期间重复点击和刷新复用请求，所有调用收到�
   assert.deepEqual(first, second);
 });
 
-test('缓存/补充状态传给页面，补充查询只读取服务端缓存并解除旧的客户端结果缓存', async t => {
+test('缓存补齐更新客户端快照，返回该关键词时立即使用最新结果', async t => {
   const calls = [];
   let complete = false;
   t.mock.method(globalThis, 'fetch', async url => {
@@ -101,8 +101,10 @@ test('缓存/补充状态传给页面，补充查询只读取服务端缓存并�
   const latest = await service.readCached('测试剧');
   assert.equal(latest.refreshing, false);
   assert.match(calls[1], /cached=1/);
-  await service.search('测试剧');
-  assert.equal(calls.length, 3);
+  const revisited = await service.search('测试剧');
+  assert.equal(revisited.fromCache, true);
+  assert.equal(revisited.refreshing, false);
+  assert.equal(calls.length, 2);
 });
 
 test('登录失效直接返回，不绕过本站认证发起公共检索', async t => {
@@ -239,4 +241,111 @@ test('页面等待真正后台完成，超过旧的 8 秒轮询窗口仍接收�
   assert.equal(view.searchPending.value, false);
   t.mock.timers.tick(10_000); await new Promise(resolve => setImmediate(resolve));
   assert.equal(polls, 12);
+});
+
+test('连续换词立即切换当前搜索并取消旧请求，晚到的旧结果不能覆盖新结果', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 5_000_000 });
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => new Promise(resolve => {
+    requests.push({ keyword: new URL(String(url), 'http://localhost').searchParams.get('kw'), signal: options.signal, resolve });
+  }));
+  const view = useQuarkTransfer();
+  const first = view.openTransferModal({ id: 'search-race', title: '首次搜索测试', category: 'tv' });
+  assert.equal(view.searchPending.value, true);
+  const second = view.refreshResources('后续搜索测试');
+  assert.equal(view.searchKeyword.value, '后续搜索测试');
+  assert.equal(view.currentMedia.value.title, '后续搜索测试');
+  assert.equal(view.isAnalyzing.value, true);
+  assert.equal(requests[0].signal.aborted, true);
+  t.mock.timers.tick(300); await new Promise(resolve => setImmediate(resolve));
+  requests[1].resolve(Response.json({ code: 0, data: data({}, '后续搜索测试 4K') }));
+  await second;
+  requests[0].resolve(Response.json({ code: 0, data: data({}, '首次搜索测试 4K') }));
+  await first;
+  assert.deepEqual(view.quarkResources.value.map(item => item.title), ['后续搜索测试 4K']);
+  assert.equal(view.searchPending.value, false);
+  view.closeTransferModal();
+});
+
+test('取消后立刻重搜相同关键词，旧请求结束不会清掉新请求或污染缓存', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 6_000_000 });
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', (url, options) => new Promise(resolve => requests.push({ signal: options.signal, resolve })));
+  const engine = new SilentSearchEngine();
+  const old = engine.search('重入测试');
+  engine.cancelPending();
+  const current = engine.search('重入测试', { force: true });
+  t.mock.timers.tick(300); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[0].signal.aborted, true);
+  requests[0].resolve(Response.json({ code: 0, data: data({}, '重入测试 旧版') }));
+  await old;
+  assert.equal(engine.cachedResult('重入测试'), null);
+  const duplicate = engine.search('重入测试', { force: true });
+  assert.equal(requests.length, 2);
+  requests[1].resolve(Response.json({ code: 0, data: data({}, '重入测试 新版') }));
+  await Promise.all([current, duplicate]);
+  assert.equal(engine.cachedResult('重入测试').items[0].title, '重入测试 新版');
+});
+
+test('切换搜索取消备用请求，不把主动取消当作来源故障而限制下一次补查', async t => {
+  let calls = 0, firstSignal;
+  t.mock.method(globalThis, 'fetch', (url, options) => {
+    calls++;
+    if (calls === 1) {
+      firstSignal = options.signal;
+      return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }));
+    }
+    return Promise.resolve(Response.json({ code: 0, data: data({}, '补查后续测试 4K') }));
+  });
+  const engine = new SilentSearchEngine();
+  const cancelled = engine.supplement('补查前次测试');
+  engine.cancelPending();
+  await cancelled;
+  const latest = await engine.supplement('补查后续测试');
+  assert.equal(firstSignal.aborted, true);
+  assert.equal(engine.cachedResult('补查前次测试'), null);
+  assert.equal(latest.success, true);
+  assert.equal(calls, 2);
+});
+
+test('重复搜索先展示最近结果再刷新，认证失效后清除预览并停止检索', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 7_000_000 });
+  let mode = 'initial', complete;
+  t.mock.method(globalThis, 'fetch', () => {
+    if (mode === 'initial') return Promise.resolve(Response.json({ code: 0, data: data({}, '缓存预览测试 旧版') }));
+    if (mode === 'auth') return Promise.resolve(Response.json({ code: 'APP_AUTH_REQUIRED', message: '请先登录' }, { status: 401 }));
+    return new Promise(resolve => { complete = resolve; });
+  });
+  const view = useQuarkTransfer();
+  await view.openTransferModal({ id: 'search-preview', title: '缓存预览测试', category: 'tv' });
+  mode = 'refresh';
+  const refreshing = view.refreshResources('缓存预览测试');
+  assert.equal(view.isAnalyzing.value, false);
+  assert.equal(view.searchPending.value, true);
+  assert.match(view.searchNotice.value, /最近/);
+  assert.equal(view.quarkResources.value[0].title, '缓存预览测试 旧版');
+  t.mock.timers.tick(300); await new Promise(resolve => setImmediate(resolve));
+  complete(Response.json({ code: 0, data: data({}, '缓存预览测试 新版') }));
+  await refreshing;
+  assert.deepEqual(view.quarkResources.value.map(item => item.title), ['缓存预览测试 新版']);
+  mode = 'auth';
+  const forbidden = view.refreshResources('缓存预览测试');
+  t.mock.timers.tick(300); await forbidden;
+  assert.equal(view.quarkResources.value.length, 0);
+  assert.equal(view.searchPending.value, false);
+  assert.equal(view.searchError.value, '请先登录');
+  view.closeTransferModal();
+});
+
+test('成功刷新为空时清除旧候选缓存，避免下一次再次显示旧资源', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 8_000_000 });
+  let empty = false;
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: empty ? { total: 0, merged_by_type: { quark: [] } } : data({}, '清空缓存测试 4K') }));
+  const engine = new SilentSearchEngine();
+  await engine.search('清空缓存测试');
+  assert.equal(engine.cachedResult('清空缓存测试').items.length, 1);
+  empty = true;
+  const refreshed = engine.search('清空缓存测试', { force: true });
+  t.mock.timers.tick(300); await refreshed;
+  assert.equal(engine.cachedResult('清空缓存测试'), null);
 });

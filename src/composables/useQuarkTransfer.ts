@@ -1,13 +1,12 @@
-import { ref } from 'vue';
+import { getCurrentScope, onScopeDispose, ref } from 'vue';
 import type { MediaItem } from '../types/media';
 import type { ResourceItem } from '../types/search';
 import { SilentSearchEngine } from '../services/silentSearchEngine';
 import { useToast } from './useToast';
 
-const engine = new SilentSearchEngine();
-
 export function useQuarkTransfer() {
   const toast = useToast();
+  const engine = new SilentSearchEngine();
 
   const isOpen = ref(false);
   const isAnalyzing = ref(false);
@@ -82,13 +81,18 @@ export function useQuarkTransfer() {
     const normalizedKeyword = keyword.trim();
     if (!currentMedia.value || !normalizedKeyword) return;
     const sequence = ++searchSequence;
+    engine.cancelPending();
+    const cached = engine.cachedResult(normalizedKeyword);
+    if (currentMedia.value.id?.startsWith('search-') && !currentMedia.value.quarkFid && !currentMedia.value.catalogId) {
+      currentMedia.value = { ...currentMedia.value, title: normalizedKeyword };
+    }
     searchKeyword.value = normalizedKeyword;
     isOpen.value = true;
-    isAnalyzing.value = true;
+    isAnalyzing.value = !cached;
     searchError.value = '';
-    searchNotice.value = '';
-    searchPending.value = false;
-    quarkResources.value = [];
+    searchNotice.value = cached ? '已显示最近的搜索结果，正在更新…' : '';
+    searchPending.value = true;
+    quarkResources.value = cached?.quarkItems || [];
 
     try {
       const res = await engine.search(normalizedKeyword, { force });
@@ -100,7 +104,8 @@ export function useQuarkTransfer() {
         notice: res.message || '',
         error: res.success ? '' : res.message || '资源检索服务暂时不可用，请稍后重试'
       };
-      if (res.success) append(res.quarkItems.length ? res.quarkItems : res.items.filter(i => i.driveType === 'quark'));
+      if (res.success) quarkResources.value = res.quarkItems.length ? res.quarkItems : res.items.filter(i => i.driveType === 'quark');
+      else if (res.allowPublicFallback === false) quarkResources.value = [];
       showProgress(progress);
       if (progress.server) void followSearch(normalizedKeyword, sequence, progress);
       if (progress.public) void supplementSearch(normalizedKeyword, sequence, progress, force);
@@ -108,6 +113,7 @@ export function useQuarkTransfer() {
     } catch (error) {
       if (sequence !== searchSequence || !isOpen.value) return;
       searchError.value = error instanceof Error ? error.message : '资源检索失败，请稍后重试';
+      searchPending.value = false;
       toast.show(searchError.value, '!', 3800);
     } finally {
       if (sequence === searchSequence) isAnalyzing.value = false;
@@ -124,6 +130,7 @@ export function useQuarkTransfer() {
 
   const closeTransferModal = () => {
     searchSequence += 1;
+    engine.cancelPending();
     isOpen.value = false;
     isAnalyzing.value = false;
     searchError.value = '';
@@ -139,6 +146,7 @@ export function useQuarkTransfer() {
   };
 
   const refreshResources = (keyword: string) => searchResources(keyword, true);
+  if (getCurrentScope()) onScopeDispose(closeTransferModal);
 
   return {
     isOpen,

@@ -51,6 +51,10 @@ const replacingSource = computed(() => Boolean(props.media?.quarkFid));
 type ResultFilter = 'recommended' | 'latest' | '4k' | 'complete';
 const resultFilter = ref<ResultFilter>('recommended');
 const searchQuery = ref('');
+const searchInput = ref<HTMLInputElement | null>(null);
+const resultsBody = ref<HTMLElement | null>(null);
+const searchingCurrentQuery = computed(() => Boolean(props.isAnalyzing || props.searchPending)
+  && searchQuery.value.trim() === (props.searchKeyword || props.media?.title || '').trim());
 const visibleCount = ref(20);
 const batchSize = 20;
 
@@ -162,7 +166,12 @@ watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
 
 watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword], () => { detailResource.value = null; });
 
-watch([() => props.isOpen, () => props.media?.id, resultFilter], () => {
+watch(() => props.searchKeyword, () => {
+  resultFilter.value = 'recommended';
+  if (resultsBody.value) resultsBody.value.scrollTop = 0;
+});
+
+watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword, resultFilter], () => {
   visibleCount.value = batchSize;
 });
 
@@ -173,7 +182,8 @@ const loadMore = () => {
 
 const submitSearch = () => {
   const keyword = searchQuery.value.trim();
-  if (!keyword || props.isAnalyzing || props.isSaving) return;
+  if (!keyword || props.isSaving || searchingCurrentQuery.value) return;
+  searchInput.value?.blur();
   emit('search', keyword);
 };
 
@@ -255,6 +265,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
       <form v-if="!detailResource" class="result-search cinema-search-field" role="search" @submit.prevent="submitSearch">
         <Search class="result-search-icon" aria-hidden="true" />
         <input
+          ref="searchInput"
           v-model="searchQuery"
           type="search"
           inputmode="search"
@@ -262,14 +273,15 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           autocomplete="off"
           aria-label="重新输入片名搜索资源"
           placeholder="修改片名重新搜索"
-          :disabled="isAnalyzing || isSaving"
+          :disabled="isSaving"
+          @keydown.enter="($event.isComposing || $event.keyCode === 229) && $event.preventDefault()"
         />
         <button
           v-if="searchQuery"
           type="button"
           class="clear-search-button"
           aria-label="清空搜索内容"
-          :disabled="isAnalyzing || isSaving"
+          :disabled="isSaving"
           @click="searchQuery = ''"
         >
           <X aria-hidden="true" />
@@ -277,9 +289,9 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         <button
           type="submit"
           class="submit-search-button"
-          :disabled="isAnalyzing || isSaving || !searchQuery.trim()"
+          :disabled="searchingCurrentQuery || isSaving || !searchQuery.trim()"
         >
-          {{ isAnalyzing ? '检索中' : '搜索' }}
+          {{ searchingCurrentQuery ? '检索中' : '搜索' }}
         </button>
       </form>
 
@@ -308,7 +320,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
       </div>
 
       <!-- 列表内容 -->
-      <div class="dialog-body" :class="{ 'showing-details': detailResource }" @scroll.passive="handleBodyScroll">
+      <div ref="resultsBody" class="dialog-body" :class="{ 'showing-details': detailResource }" :aria-busy="isAnalyzing || searchPending" @scroll.passive="handleBodyScroll">
         <QuarkResourceDetails v-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
           :save-error="failedResourceId === detailResource.id ? saveError : null" :play-after-save="playAfterSave"

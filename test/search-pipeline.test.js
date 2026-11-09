@@ -17,7 +17,7 @@ const rows = [
   { note: '《仙逆剧场版 神临之战》夸克网盘下载链接', url: 'https://pan.quark.cn/s/movie2', source: 'plugin:quark4k' }
 ];
 const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/' });
-for (const key of ['window', 'document', 'Element', 'HTMLElement', 'SVGElement', 'Node', 'CustomEvent']) globalThis[key] = dom.window[key];
+for (const key of ['window', 'document', 'Document', 'Element', 'HTMLElement', 'SVGElement', 'Node', 'CustomEvent']) globalThis[key] = dom.window[key];
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 const { createApp, nextTick, reactive, h } = await import('vue');
 fs.mkdirSync('.local-runtime/tests', { recursive: true });
@@ -91,5 +91,44 @@ test('动漫结果在推荐、最新、4K 和完整列表均不混入壁纸、�
       assert.doesNotMatch(document.querySelector('.resource-rows').textContent, /壁纸|写真|原声带|短剧|沙雕|解说|混剪|剑仙归来/);
       assert.equal(document.querySelector('.result-summary strong').textContent, '2');
     }
+  } finally { app.unmount(); }
+});
+
+test('检索中可以编辑并提交新关键词，同词重复提交和保存中操作会被阻止', async () => {
+  document.body.innerHTML = '<div id="app"></div>';
+  const searched = [];
+  const props = reactive({ isOpen: true, isAnalyzing: true, searchPending: true, currentCategory: 'tv', searchKeyword: '旧搜索',
+    media: { id: 'search-form-test', title: '旧搜索', category: 'tv', poster: '' }, quarkResources: [], isSaving: false });
+  const app = createApp({ render: () => h(Modal, { ...props, onSearch: keyword => searched.push(keyword) }) });
+  app.mount('#app');
+  try {
+    await nextTick();
+    const input = document.querySelector('.result-search input'), submit = document.querySelector('.submit-search-button');
+    assert.equal(input.disabled, false); assert.equal(submit.disabled, true);
+    input.value = '新搜索'; input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); await nextTick();
+    assert.equal(submit.disabled, false); assert.equal(submit.textContent, '搜索');
+    submit.click(); await nextTick(); assert.deepEqual(searched, ['新搜索']);
+    props.isSaving = true; await nextTick();
+    assert.equal(input.disabled, true); assert.equal(submit.disabled, true);
+  } finally { app.unmount(); }
+});
+
+test('新搜索重置筛选和滚动位置，避免沿用4K筛选而把新结果藏起来', async () => {
+  document.body.innerHTML = '<div id="app"></div>';
+  const resource = { id: 'old', title: '旧搜索 4K', url: 'https://pan.quark.cn/s/old', is4k: true, quality: '4K', datetime: '2026-11-09' };
+  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'tv', searchKeyword: '旧搜索',
+    media: { id: 'search-reset-test', title: '旧搜索', category: 'tv', poster: '' }, quarkResources: [resource] });
+  const app = createApp({ render: () => h(Modal, props) }); app.mount('#app');
+  try {
+    await nextTick();
+    [...document.querySelectorAll('[role="radio"]')].find(button => button.textContent === '4K').click(); await nextTick();
+    document.querySelector('.dialog-body').scrollTop = 600;
+    props.searchKeyword = '新搜索';
+    props.quarkResources = [{ ...resource, id: 'new', title: '新搜索 1080P', url: 'https://pan.quark.cn/s/new', is4k: false, quality: '1080P' }];
+    await nextTick();
+    assert.equal(document.querySelector('[role="radio"][aria-checked="true"]').textContent, '推荐');
+    assert.equal(document.querySelector('.dialog-body').scrollTop, 0);
+    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
+    assert.match(document.querySelector('.row-title').textContent, /新搜索/);
   } finally { app.unmount(); }
 });

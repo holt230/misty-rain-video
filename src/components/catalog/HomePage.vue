@@ -131,10 +131,14 @@ onBeforeUnmount(() => { navigation++; });
 </template>
 <style scoped>
 .channel-nav { position: sticky; z-index: 25; top: calc(76px + var(--safe-area-top)); background: var(--liquid-canvas); border-bottom: 1px solid var(--divider); }
+.feature-carousel { margin-top: 24px; }
 .catalog-page-footer { margin-top: 28px; text-align: center; }
 .catalog-page-footer > .more-films { margin-top: 12px; }
 .catalog-page-footer > small { display: block; margin-top: 14px; color: var(--text-tertiary); font-size: 11px; }
 .catalog-page-note { color: var(--text-secondary); font-size: 12px; line-height: 1.8; padding: 8px 0; }
 .catalog-update-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; text-align: left; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); color: var(--text-secondary); font-size: 12px; }
-@media (max-width: 767px) { .channel-nav { top: calc(75px + var(--safe-area-top)); } }
+@media (max-width: 767px) {
+  .channel-nav { top: calc(75px + var(--safe-area-top)); }
+  .feature-carousel { margin-top: 20px; }
+}
 </style>
