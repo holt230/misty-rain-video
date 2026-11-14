@@ -167,7 +167,7 @@ test('portrait-locked landscape swaps dimensions, follows resize, exits without 
   try {
     assert.equal(layout.immersive.value, false);
     layout.toggleWebFullscreen(); assert.equal(layout.rotated.value, true);
-    assert.deepEqual(layout.immersiveStyle.value, { '--player-width': '402px', '--player-height': '874px' });
+    assert.deepEqual(layout.immersiveStyle.value, { '--player-width': '402px', '--player-height': '874px', '--player-inset-top': '0px', '--player-inset-right': '0px', '--player-inset-bottom': '0px', '--player-inset-left': '0px' });
     resize(874, 402); assert.equal(layout.rotated.value, false); assert.equal(layout.immersive.value, true);
     layout.toggleWebFullscreen(); resize(874, 380); assert.equal(layout.immersive.value, false);
     resize(402, 874); resize(874, 402); assert.equal(layout.immersive.value, true);

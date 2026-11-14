@@ -47,6 +47,7 @@ body { -webkit-tap-highlight-color: transparent; }
 button, input, textarea, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 button { cursor: pointer; }
+button { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 button:disabled { cursor: wait; opacity: .5; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--liquid-accent); outline-offset: 3px; }
 /* Search is one composite field: focus belongs to the surface, not a rectangle around its text. */

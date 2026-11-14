@@ -29,6 +29,11 @@ test('automatic source selection never imports image or audio resources with a m
   const titles = ['九门 2026 4K 壁纸', '九门 2026 高清海报', '九门 2026 原声带', '九门 2026.jpg', '九门 2026 1080P'];
   assert.deepEqual(automaticCatalogCandidates(work, titles.map(candidate)).map(item => item.title), titles.slice(4));
 });
+test('automatic source selection rejects a title found only in synopsis and a conflicting live-action edition', () => {
+  const anime = { ...work, category: 'anime' };
+  assert.equal(automaticCatalogCandidates(anime, [candidate('别的动画 2026 ·简介：九门 2026 的相关故事')]).length, 0);
+  assert.equal(automaticCatalogCandidates(anime, [candidate('九门 2026 真人版 全40集')]).length, 0);
+});
 test('share verification rejects empty content and explicit conflicting seasons in files or directories', () => {
   const share = { title: '九门', videoCount: 1, entries: [{ name: '第01集.mkv', isVideo: true }] };
   assert.equal(validatesCatalogShare(work, share), true);

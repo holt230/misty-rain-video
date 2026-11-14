@@ -542,7 +542,7 @@ watch([isAnalyzing, searchPending, quarkResources], async () => {
   if (result.status === 'manual') automaticNotice.value = result.message || '';
   if (result.status === 'failed') automaticNotice.value = '自动添加未完成，请查看失败原因后重试，或选择其他片源。';
 });
-const searchTransferResources = (keyword: string) => { cancelAutomatic(); return refreshResources(keyword); };
+const searchTransferResources = (keyword: string, category?: CategoryType) => { cancelAutomatic(); return refreshResources(keyword, category); };
 const retryTransferSearch = () => { cancelAutomatic(); retrySearch(); };
 </script>
 

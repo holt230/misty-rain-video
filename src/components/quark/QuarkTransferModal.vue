@@ -5,7 +5,8 @@ import MediaPoster from '../common/MediaPoster.vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
-import { isNonVideoResource } from '../../services/resourceFiltering';
+import { rankResourceCandidates } from '../../services/resourceMatching';
+import { resourceHeading } from '../../services/resourceTitles';
 import SkeletonCard from '../common/SkeletonCard.vue';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { useDialog } from '../../composables/useDialog';
@@ -34,7 +35,7 @@ const emit = defineEmits<{
   (e: 'cancel-automatic'): void;
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
-  (e: 'search', keyword: string): void;
+  (e: 'search', keyword: string, category: CategoryType): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
 }>();
 
@@ -50,6 +51,7 @@ const targetCategoryName = computed(() => categories.find(category => category.v
 const replacingSource = computed(() => Boolean(props.media?.quarkFid));
 type ResultFilter = 'recommended' | 'latest' | '4k' | 'complete';
 const resultFilter = ref<ResultFilter>('recommended');
+const showOtherVersions = ref(false);
 const searchQuery = ref('');
 const searchInput = ref<HTMLInputElement | null>(null);
 const resultsBody = ref<HTMLElement | null>(null);
@@ -65,82 +67,13 @@ const filterOptions: Array<{ value: ResultFilter; label: string }> = [
   { value: 'complete', label: '完整' }
 ];
 
-const cleanTitle = (title: string) => title
-  .replace(/^[\s🗄📁💾💿🔍📜⬇️·|#]+/u, '')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-const titleKey = (title: string) => cleanTitle(title)
-  .toLocaleLowerCase('zh-CN')
-  .replace(/[\s\p{P}\p{S}]+/gu, '');
-
-const canonicalShareUrl = (url: string) => {
-  const match = url.match(/^https:\/\/pan\.quark\.cn\/s\/([a-zA-Z0-9]+)/i);
-  return match ? `https://pan.quark.cn/s/${match[1]}` : '';
-};
-
-const episodeNumber = (title: string) => {
-  const numbers = [...title.matchAll(/(?:更(?:新)?至?|第|e(?:p)?)[\s_-]*0*(\d{1,4})/ig)]
-    .map(match => Number(match[1]))
-    .filter(Number.isFinite);
-  return numbers.length ? Math.max(...numbers) : 0;
-};
-
-/**
- * 聚合结果没有稳定的文件 MIME 信息，不能仅凭清晰度给资源排序。剔除
- * 非视频、解说混剪以及与保存分类明确不符的内容，避免误选为正片来源。
- */
-const isExcludedResource = (resource: ResourceItem) => {
-  const title = cleanTitle(resource.title);
-  return isNonVideoResource(title, props.searchKeyword || props.media?.title)
-    || (targetCategory.value === 'anime' && /(?:^|[\s.·|【\[])(?:微)?短剧(?:$|[\s.·|:：】\]])/u.test(title));
-};
-
-const resourceScore = (resource: ResourceItem) => {
-  const title = cleanTitle(resource.title);
-  const keyword = props.searchKeyword?.trim() || props.media?.title.trim() || '';
-  const normalizedTitle = titleKey(title);
-  const normalizedKeyword = titleKey(keyword);
-  let score = 0;
-  if (normalizedTitle === normalizedKeyword) score += 120;
-  else if (normalizedTitle.startsWith(normalizedKeyword)) score += 90;
-  else if (normalizedTitle.includes(normalizedKeyword)) score += 65;
-  else score -= 80;
-  if (resource.is4k || /4k/i.test(title)) score += 30;
-  if (/hdr|dv|杜比视界/i.test(title)) score += 10;
-  if (/60\s*(?:fps|帧)/i.test(title)) score += 8;
-  if (/dts|杜比|5\.1/i.test(title)) score += 5;
-  if (/全集|完结|全\s*\d+\s*集/i.test(title)) score += 14;
-  if (/flac|mp3|片尾曲|原声带|音乐/i.test(title)) score -= 160;
-  const timestamp = Date.parse(resource.datetime);
-  if (Number.isFinite(timestamp)) {
-    const year = new Date(timestamp).getFullYear();
-    if (year <= 2001) score -= 90;
-    else if (year >= new Date().getFullYear() - 1) score += 24;
-  }
-  score += Math.min(episodeNumber(title), 100) / 2;
-  return score;
-};
-
-const rankAndDedupe = (resources: ResourceItem[]) => {
-  const sorted = resources.filter(resource => !isExcludedResource(resource)).sort((left, right) => {
-    const scoreDelta = resourceScore(right) - resourceScore(left);
-    if (scoreDelta) return scoreDelta;
-    return Date.parse(right.datetime) - Date.parse(left.datetime);
-  });
-  const seen = new Set<string>();
-  return sorted.filter(resource => {
-    const key = canonicalShareUrl(resource.url);
-    if (!key) return false;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
-const rankedQuarkResources = computed(() => rankAndDedupe(
-  props.quarkResources.filter(resource => /pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(resource.url))
+const cleanTitle = resourceHeading;
+const candidates = computed(() => rankResourceCandidates(
+  props.quarkResources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/i.test(resource.url)),
+  props.searchKeyword || props.media?.title || '', targetCategory.value
 ));
+const otherVersionCount = computed(() => candidates.value.filter(item => item.match.otherVersion).length);
+const rankedQuarkResources = computed(() => candidates.value.filter(item => showOtherVersions.value || !item.match.otherVersion).map(item => item.resource));
 const filteredResources = computed(() => {
   const resources = rankedQuarkResources.value.filter(resource => {
     const title = cleanTitle(resource.title);
@@ -153,7 +86,7 @@ const filteredResources = computed(() => {
 });
 const visibleResources = computed(() => filteredResources.value.slice(0, visibleCount.value));
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
-const bestQuarkResource = computed(() => rankedQuarkResources.value[0]);
+const bestQuarkResource = computed(() => candidates.value.find(item => !item.match.otherVersion && (item.match.episodic || item.match.inferred === targetCategory.value))?.resource);
 
 watch([() => props.media?.id, () => props.currentCategory], () => {
   targetCategory.value = props.media?.category || props.currentCategory;
@@ -166,12 +99,13 @@ watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
 
 watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword], () => { detailResource.value = null; });
 
-watch(() => props.searchKeyword, () => {
+watch([() => props.searchKeyword, targetCategory], () => {
   resultFilter.value = 'recommended';
+  showOtherVersions.value = false;
   if (resultsBody.value) resultsBody.value.scrollTop = 0;
 });
 
-watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword, resultFilter], () => {
+watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword, resultFilter, showOtherVersions], () => {
   visibleCount.value = batchSize;
 });
 
@@ -184,7 +118,7 @@ const submitSearch = () => {
   const keyword = searchQuery.value.trim();
   if (!keyword || props.isSaving || searchingCurrentQuery.value) return;
   searchInput.value?.blur();
-  emit('search', keyword);
+  emit('search', keyword, targetCategory.value);
 };
 
 const handleBodyScroll = (event: Event) => {
@@ -301,6 +235,10 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         <span>条候选资源 · 添加时验证链接</span>
       </div>
       <p v-if="!detailResource && !isAnalyzing && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
+      <div v-if="!detailResource && !isAnalyzing && otherVersionCount" class="result-versions">
+        <span>{{ showOtherVersions ? '已包含其他类型与特别篇' : '已优先展示当前分类的正篇候选' }}</span>
+        <button type="button" :disabled="isSaving" :aria-expanded="showOtherVersions" @click="showOtherVersions = !showOtherVersions">{{ showOtherVersions ? '收起其他版本' : `其他版本 · ${otherVersionCount}` }}</button>
+      </div>
 
       <div v-if="!detailResource && !isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
         <SlidersHorizontal aria-hidden="true" />
@@ -353,7 +291,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                 <div class="row-info">
                   <div class="row-title" :title="cleanTitle(res.title)">
                     <span v-if="res.id === bestQuarkResource?.id" class="recommended-badge">
-                      <Check aria-hidden="true" />推荐
+                      <Check aria-hidden="true" />正篇候选
                     </span>
                     {{ cleanTitle(res.title) }}
                   </div>
@@ -390,7 +328,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           </div>
 
           <div v-else class="empty-notice" role="status">
-            <span>{{ searchError || (searchPending ? '仍在搜索其他来源，找到结果后会自动显示。' : resultFilter === 'recommended' ? '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
+            <span>{{ searchError || (searchPending ? '仍在搜索其他来源，找到结果后会自动显示。' : resultFilter === 'recommended' ? otherVersionCount ? '当前分类未找到正篇候选，可展开其他版本或切换分类。' : '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
             <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
               重新检索
@@ -431,6 +369,8 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .clear-search-button svg { width: 17px; height: 17px; }
 .submit-search-button { min-height: 44px; padding: 0 19px; border: 0; border-radius: var(--cinema-radius-control); flex-shrink: 0; color: var(--accent-ink); background: var(--liquid-accent); font-size: .84rem; font-weight: 650; }
 .result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; flex-shrink: 0; padding: 16px 26px 3px; color: var(--text-tertiary); font-size: .75rem; }
+.result-versions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; flex-shrink: 0; margin: 8px 24px 0; color: var(--text-tertiary); font-size: 12px; }
+.result-versions button { min-height: 44px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); color: var(--liquid-accent); }
 .result-summary strong { color: var(--text-primary); font-size: .92rem; }
 .result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
 .result-filters > svg { width: 18px; height: 18px; margin-right: 4px; color: var(--text-tertiary); flex-shrink: 0; }
@@ -517,6 +457,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 }
 @media (max-width: 640px) { .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border-radius: 0; } .dialog-header { padding-top: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)); } }
 @media (max-width: 767px) {
+  .result-versions { margin-left: var(--page-left); margin-right: var(--page-right); }
   .dialog-header, .result-filters, .dialog-body { padding-left: var(--page-left); padding-right: var(--page-right); }
   .dialog-top-actions { right: var(--page-right); }
   .result-summary { padding-left: var(--page-left); padding-right: var(--page-right); }

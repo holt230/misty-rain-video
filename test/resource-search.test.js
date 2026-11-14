@@ -17,6 +17,20 @@ const gate = () => {
 const create = options => new ResourceSearchService({ urls: ['http://127.0.0.1:8888/api/search'], timeoutMs: 300,
   aggregationMs: 0, followUpDelaysMs: [], completionTimeoutMs: options?.timeoutMs || 300, ...options });
 
+test('较早来源超过100条时仍保留后续来源正篇，并限制总候选数量', async () => {
+  const pending = gate();
+  const crowded = Array.from({ length: 600 }, (_, i) => ({ url: 'https://pan.quark.cn/s/old' + i, note: '斗破苍穹 特别篇 ' + i }));
+  const service = create({ source: 'plugin', urls: ['http://127.0.0.1:8888/api/search', 'https://public.example/api/search'],
+    fetchImpl: async url => url.hostname === 'public.example' ? pending.promise : Response.json({ code: 0, data: { merged_by_type: { quark: crowded } } }) });
+  const first = await service.search('斗破苍穹');
+  assert.equal(first.total, 500);
+  pending.resolve(Response.json({ code: 0, data: { merged_by_type: { quark: [{ url: 'https://pan.quark.cn/s/mainseries', note: '斗破苍穹 年番 更新176集' }] } } }));
+  await flush();
+  const complete = service.peek('斗破苍穹');
+  assert.equal(complete.total, 500);
+  assert.equal(complete.merged_by_type.quark[1].url, 'https://pan.quark.cn/s/mainseries');
+});
+
 test('快速通道先返回，慢通道继续补缓存；刷新与普通搜索合并为一份任务', async () => {
   const slow = gate();
   const seen = [];

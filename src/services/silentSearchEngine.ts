@@ -3,6 +3,7 @@ import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
 import { isNonVideoResource } from './resourceFiltering';
+import { matchesResourceTitle, resourceHeading } from './resourceTitles';
 
 const SEARCH_THROTTLE_MS = 300;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -11,16 +12,6 @@ const MAX_SEARCH_CACHE_ENTRIES = 40;
 const PUBLIC_SEARCH_URL = 'https://so.252035.xyz/api/search';
 const PUBLIC_TIMEOUT_MS = 10_000;
 const normalizeKeyword = (keyword: string) => keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim();
-
-// Match a title rather than characters embedded in another title or subtitle
-// (e.g. 搜“仙逆”不能命中“剑仙逆世”). Keep common season and edition suffixes.
-const searchTitlePattern = (keyword: string): RegExp | null => {
-  const key = keyword.normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[\s\p{P}\p{S}\p{Cf}]+/gu, '');
-  if (!key) return null;
-  const name = [...key].join('[\\s\\p{P}\\p{S}\\p{Cf}]*');
-  const edition = '年番|剧场版|特别篇|番外|外传|合集|全集|完结|更新|更(?:新|至|第|[0-9])|全[0-9一二三四五六七八九十百]+集|第[0-9一二三四五六七八九十百]+[季集部]|s[0-9]+|国语|中字|高清|超清|蓝光|臻彩|杜比';
-  return new RegExp(`(?:^|[^\\p{L}])${name}(?=$|[^\\p{L}]|${edition})`, 'iu');
-};
 
 /**
  * =========================================================================
@@ -68,13 +59,14 @@ export class SilentSearchEngine {
     }
   }
 
-  async search(keyword: string, options: { force?: boolean } = {}): Promise<SearchResult> {
+  async search(keyword: string, options: { force?: boolean; query?: string } = {}): Promise<SearchResult> {
     const cleanKw = normalizeKeyword(keyword);
+    const query = normalizeKeyword(options.query || cleanKw);
     if (!cleanKw) {
       return { success: false, total: 0, items: [], quarkItems: [], source: 'error' };
     }
 
-    const cacheKey = cleanKw.toLocaleLowerCase('zh-CN');
+    const cacheKey = (query === cleanKw ? cleanKw : `${cleanKw}\n${query}`).toLocaleLowerCase('zh-CN');
     const cached = this.cache.get(cacheKey);
     if (!options.force && cached && Date.now() - cached.createdAt <= (cached.data.partial || cached.data.stale ? 5_000 : SEARCH_CACHE_TTL_MS)) {
       return { ...cached.data, fromCache: true };
@@ -95,7 +87,7 @@ export class SilentSearchEngine {
       if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
       if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
       this.lastRequestTime = Date.now();
-      return this.executeBackendFetch(cleanKw, Boolean(options.force), controller);
+      return this.executeBackendFetch(cleanKw, Boolean(options.force), controller, query);
     })();
     this.inFlight.set(requestKey, task);
 
@@ -159,8 +151,10 @@ export class SilentSearchEngine {
       allowPublicFallback: !requiresAuth };
   }
 
-  async readCached(keyword: string): Promise<SearchResult | null> {
-    const params = new URLSearchParams({ kw: keyword, cached: '1' });
+  async readCached(keyword: string, options: { query?: string } = {}): Promise<SearchResult | null> {
+    const query = normalizeKeyword(options.query || keyword);
+    const cleanKw = normalizeKeyword(keyword);
+    const params = new URLSearchParams({ kw: query, cached: '1' });
     const controller = new AbortController();
     this.controllers.add(controller);
     const timer = setTimeout(() => controller.abort(), 4_000);
@@ -171,13 +165,13 @@ export class SilentSearchEngine {
       if (!response.ok || payload.code !== 0 || !payload.data) return null;
       const result = this.normalizeResponse(payload.data, 'direct', keyword);
       // Keep the completed snapshot available when returning to this search.
-      this.rememberResult(normalizeKeyword(keyword).toLocaleLowerCase('zh-CN'), result);
+      this.rememberResult((query === cleanKw ? cleanKw : `${cleanKw}\n${query}`).toLocaleLowerCase('zh-CN'), result);
       return result;
     } finally { clearTimeout(timer); this.controllers.delete(controller); }
   }
 
-  private async executeBackendFetch(keyword: string, force: boolean, controller: AbortController): Promise<SearchResult> {
-    const params = new URLSearchParams({ kw: keyword });
+  private async executeBackendFetch(keyword: string, force: boolean, controller: AbortController, query = keyword): Promise<SearchResult> {
+    const params = new URLSearchParams({ kw: query });
     if (force) params.set('refresh', '1');
     const targetUrl = `${apiUrl('/api/resource-search')}?${params.toString()}`;
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -209,12 +203,11 @@ export class SilentSearchEngine {
   private normalizeResponse(data: any, sourceMode: 'direct' | 'cors_proxy', keyword: string): SearchResult {
     const items: ResourceItem[] = [];
     const seen = new Set<string>();
-    const titlePattern = searchTitlePattern(keyword);
     const list = Array.isArray(data?.merged_by_type?.quark) ? data.merged_by_type.quark : [];
     list.forEach((raw: any) => {
       const item = this.parseSingleItem(raw);
       if (!item || isNonVideoResource(item.title, keyword)
-        || !titlePattern?.test(item.title.normalize('NFKC').replace(/\p{Cf}/gu, '')) || seen.has(item.url)) return;
+        || !matchesResourceTitle(keyword, item.title) || seen.has(item.url)) return;
       seen.add(item.url);
       items.push(item);
     });
@@ -249,7 +242,7 @@ export class SilentSearchEngine {
 
     return {
       id: `quark-${canonicalUrl.split('/').pop()}`,
-      title: note,
+      title: resourceHeading(note),
       url: canonicalUrl,
       password: raw.password || share.passcode,
       driveType: 'quark',

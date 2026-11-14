@@ -49,7 +49,7 @@ test('首批、缓存补齐和公共补充均按片名边界匹配，剔除剑�
   const service = new SilentSearchEngine();
   for (const result of [await service.search('《仙逆》'), await service.readCached('仙逆'), await service.supplement('仙逆')]) {
     assert.equal(result.total, 6);
-    assert.deepEqual(result.items.map(item => item.title), titles.slice(5));
+    assert.deepEqual(result.items.map(item => item.title), titles.slice(5).map(title => title.replace(/\p{Cf}/gu, '')));
     assert.deepEqual(result.quarkItems, result.items);
   }
 });
@@ -348,4 +348,32 @@ test('成功刷新为空时清除旧候选缓存，避免下一次再次显示�
   const refreshed = engine.search('清空缓存测试', { force: true });
   t.mock.timers.tick(300); await refreshed;
   assert.equal(engine.cachedResult('清空缓存测试'), null);
+});
+
+test('首批只有电影和特别篇时，按动漫补查并使用原片名匹配补查结果', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 9_000_000 });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input), 'http://localhost'); calls.push(url.searchParams.get('kw'));
+    return Response.json({ code: 0, data: data({}, url.searchParams.get('kw') === '斗破苍穹 动漫'
+      ? '斗破苍穹 年番 更新176集 1080P' : '斗破苍穹3：除恶 (2024) 4K') });
+  });
+  const view = useQuarkTransfer();
+  await view.openTransferModal({ id: 'search-doupo', title: '斗破苍穹', category: 'anime' });
+  assert.equal(view.searchPending.value, true);
+  t.mock.timers.tick(300); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ['斗破苍穹', '斗破苍穹 动漫']);
+  assert.ok(view.quarkResources.value.some(item => item.title.includes('更新176集')));
+  assert.equal(view.searchKeyword.value, '斗破苍穹');
+  assert.equal(view.searchPending.value, false);
+  view.closeTransferModal();
+});
+
+test('剧情里出现小说和其他片名不误删正片，也不接受仅简介包含搜索词的影片', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { merged_by_type: { quark: [
+    { url: 'https://pan.quark.cn/s/main', note: '斗破苍穹年番 1080P 更新176集 ·📜介绍：改编自天蚕土豆的同名小说。' },
+    { url: 'https://pan.quark.cn/s/other', note: '其他动画 4K ·简介：斗破苍穹的特别故事' }
+  ] } } }));
+  const result = await new SilentSearchEngine().search('斗破苍穹');
+  assert.deepEqual(result.items.map(item => item.title), ['斗破苍穹年番 1080P 更新176集']);
 });

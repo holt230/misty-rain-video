@@ -38,7 +38,7 @@ const clientCode = await build({ entryPoints: ['src/services/silentSearchEngine.
   format: 'esm', platform: 'node', define: { 'import.meta.env.BASE_URL': '"/"' }, logLevel: 'silent' });
 const { SilentSearchEngine } = await import(`data:text/javascript;base64,${Buffer.from(clientCode.outputFiles[0].text).toString('base64')}`);
 
-test('生产四条原始结果经服务端、客户端、实际 Vue 列表后保留三条，并显示正篇', async t => {
+test('生产结果保留全部候选，动漫默认展示正篇，剧场版可展开查看', async t => {
   const gateway = new ResourceSearchService({ urls: ['https://fixture.invalid/search'], source: 'plugin',
     fetchImpl: async () => Response.json({ code: 0, data: { merged_by_type: { quark: rows } } }) });
   const normalized = await gateway.search('仙逆');
@@ -53,12 +53,14 @@ test('生产四条原始结果经服务端、客户端、实际 Vue 列表后保
   app.mount('#app');
   try {
     await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
+    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 0);
     props.quarkResources = client.items;
     await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 3);
+    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
     assert.match(document.querySelector('.resource-rows').textContent, /更新第89集/);
-    assert.equal(document.querySelector('.result-summary strong').textContent, '3');
+    assert.equal(document.querySelector('.result-summary strong').textContent, '1');
+    document.querySelector('.result-versions button').click(); await nextTick();
+    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 3);
   } finally { app.unmount(); }
 });
 
@@ -130,5 +132,26 @@ test('新搜索重置筛选和滚动位置，避免沿用4K筛选而把新结果
     assert.equal(document.querySelector('.dialog-body').scrollTop, 0);
     assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
     assert.match(document.querySelector('.row-title').textContent, /新搜索/);
+  } finally { app.unmount(); }
+});
+
+test('动漫搜索默认展示年番正篇，同名电影与特别篇在展开后出现且不被推荐', async () => {
+  document.body.innerHTML = '<div id="app"></div>';
+  const notes = ['斗破苍穹3：除恶 (2024)[4K][剧情 动作 奇幻][附前2部]', '斗破苍穹 三年之约.2160p.q',
+    '斗破苍穹 特别篇1.2160p.q', '斗破苍穹年番 1080P 更新176集'];
+  const resources = notes.map((title, i) => ({ id: String(i), title, url: 'https://pan.quark.cn/s/doupo' + i, datetime: '2026-11-14', quality: '高清', is4k: i !== 3 }));
+  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'anime', searchKeyword: '斗破苍穹',
+    media: { id: 'search-doupo-ui', title: '斗破苍穹', category: 'anime', poster: '' }, quarkResources: resources });
+  const app = createApp({ render: () => h(Modal, props) }); app.mount('#app');
+  try {
+    await nextTick(); assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
+    assert.match(document.querySelector('.row-title').textContent, /年番/);
+    document.querySelector('.result-versions button').click(); await nextTick();
+    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 4);
+    assert.match(document.querySelector('.row-title').textContent, /年番/);
+    for (const row of [...document.querySelectorAll('.liquid-resource-row')].slice(1)) assert.equal(row.querySelector('.recommended-badge'), null);
+    document.querySelector('.category-picker-trigger').click(); await nextTick();
+    [...document.querySelectorAll('.cat-select-pill')].find(button => button.textContent === '电影').click(); await nextTick();
+    assert.match(document.querySelector('.row-title').textContent, /除恶/);
   } finally { app.unmount(); }
 });

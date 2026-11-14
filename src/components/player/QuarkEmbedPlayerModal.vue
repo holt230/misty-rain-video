@@ -1815,7 +1815,7 @@ defineExpose({ retry, dismissLayer });
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
 .player-backdrop.landscape-inline { height: var(--player-height, 100dvh); padding: 0; background: #000; }
-.landscape-inline .player-window { position: absolute; top: var(--safe-area-top); left: var(--safe-area-left); width: calc(100% - var(--safe-area-left) - var(--safe-area-right)); height: calc(100% - var(--safe-area-top) - var(--safe-area-bottom)); border: 0; border-radius: 0; background: #000; box-shadow: none; }
+.landscape-inline .player-window { position: absolute; top: var(--player-inset-top, 0px); left: var(--player-inset-left, 0px); width: calc(100% - var(--player-inset-left, 0px) - var(--player-inset-right, 0px)); height: calc(100% - var(--player-inset-top, 0px) - var(--player-inset-bottom, 0px)); border: 0; border-radius: 0; background: #000; box-shadow: none; }
 .landscape-inline .player-header { position: absolute; z-index: 8; top: 0; right: 0; min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
 .landscape-inline .title-block, .landscape-inline .text-action { display: none; }
 .landscape-inline .header-actions { pointer-events: auto; }
@@ -1828,7 +1828,7 @@ defineExpose({ retry, dismissLayer });
 .landscape-inline .player-toolbar,
 .landscape-inline .playback-settings,
 .landscape-inline .episode-panel { display: none; }
-.rotated-player .player-window { position: absolute; top: calc(50% + (var(--safe-area-top) - var(--safe-area-bottom)) / 2); left: calc(50% + (var(--safe-area-left) - var(--safe-area-right)) / 2); width: calc(var(--player-height) - var(--safe-area-top) - var(--safe-area-bottom)); height: calc(var(--player-width) - var(--safe-area-left) - var(--safe-area-right)); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
+.rotated-player .player-window { position: absolute; top: calc(50% + (var(--player-inset-top, 0px) - var(--player-inset-bottom, 0px)) / 2); left: calc(50% + (var(--player-inset-left, 0px) - var(--player-inset-right, 0px)) / 2); width: calc(var(--player-height) - var(--player-inset-top, 0px) - var(--player-inset-bottom, 0px)); height: calc(var(--player-width) - var(--player-inset-left, 0px) - var(--player-inset-right, 0px)); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
 .rotated-player .player-header { top: 0; right: 0; }
 
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }

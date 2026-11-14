@@ -16,8 +16,8 @@ const EMPTY_CACHE_TTL_MS = 10 * 1000;
 const ENDPOINT_FAILURE_BASE_COOLDOWN_MS = 8 * 1000;
 const ENDPOINT_FAILURE_MAX_COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 120;
-const MAX_RESULTS = 100;
-const SEARCH_CACHE_REVISION = 4;
+const MAX_RESULTS = 500;
+const SEARCH_CACHE_REVISION = 5;
 const COMPLETION_TIMEOUT_MS = 30_000;
 const FOLLOW_UP_DELAYS_MS = [5_000, 15_000];
 
@@ -107,8 +107,13 @@ const normalizePayload = payload => {
 
 const mergePayloads = payloads => {
   const merged = new Map();
-  for (const payload of payloads) {
-    for (const item of payload?.merged_by_type?.quark || []) {
+  const lists = payloads.map(payload => payload?.merged_by_type?.quark || []);
+  const longest = Math.max(0, ...lists.map(items => items.length));
+  // Interleave sources so a fast channel full of old editions cannot crowd out a late series.
+  for (let index = 0; index < longest; index++) {
+    for (const list of lists) {
+      const item = list[index];
+      if (!item) continue;
       const existing = merged.get(item.url);
       if (!existing) {
         merged.set(item.url, item);

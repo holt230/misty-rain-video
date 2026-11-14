@@ -61,7 +61,7 @@ defineExpose({ focus: () => input.value?.focus(), search: (keyword: string) => {
       <button v-if="query" type="button" class="icon-control" aria-label="清空搜索" :disabled="busy" @click="query = ''; input?.focus()"><X /></button>
       <button type="submit" :disabled="busy || !query.trim()" class="search-submit">{{ busy ? '添加中' : parsed.kind === 'share' ? '添加' : '搜索' }}</button>
     </form>
-    <label class="search-category">保存分类<select v-model="category" :disabled="busy" aria-label="影片保存分类"><option value="tv">电视剧</option><option value="movie">电影</option><option value="anime">动漫</option><option value="variety">综艺</option></select></label>
+    <label class="search-category">影视分类<select v-model="category" :disabled="busy" aria-label="搜索与保存分类"><option value="tv">电视剧</option><option value="movie">电影</option><option value="anime">动漫</option><option value="variety">综艺</option></select></label>
     <p v-if="parsed.kind === 'share'" class="feed-notice"><Link />已识别分享链接，添加时读取真实片名并验证资源。</p>
     <p v-if="parsed.kind === 'invalid'" role="alert" class="feed-notice">链接格式不正确，请输入完整的夸克分享链接。</p>
     <div v-if="error" class="inline-feedback" role="alert"><strong>{{ error.title }}</strong><p>{{ error.message }}</p><button v-if="error.needsAuth" type="button" @click="emit('auth')">前往认证设置</button></div>

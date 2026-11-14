@@ -3,6 +3,7 @@ import type { MediaItem } from '../types/media';
 import type { ResourceItem } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
+import { matchResource } from './resourceMatching';
 
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 const escape = (value: string) => value.replace(/[.*+?^\x24{}()|[\]\\]/g, '\\$&');
@@ -38,6 +39,8 @@ export function matchesCatalogTitle(item: CatalogItem, title: string, requireYea
 export function automaticCatalogCandidates(item: CatalogItem, resources: ResourceItem[]) {
   return resources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/.test(resource.url)
     && matchesCatalogTitle(item, resource.title)
+    && matchResource(item.title, resource.title, item.category).matches
+    && !matchResource(item.title, resource.title, item.category).conflict
     && !(item.category === 'anime' && /短剧|真人/.test(resource.title)));
 }
 
