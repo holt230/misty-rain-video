@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { Check, ChevronDown, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
+import { ChevronDown, LoaderCircle, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem } from '../../types/search';
-import { rankResourceCandidates } from '../../services/resourceMatching';
+import { rankResourceCandidates, resourceEpisode } from '../../services/resourceMatching';
 import { resourceHeading } from '../../services/resourceTitles';
 import SkeletonCard from '../common/SkeletonCard.vue';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
@@ -49,31 +49,30 @@ const categories: Array<{ value: CategoryType; label: string }> = [
 ];
 const targetCategoryName = computed(() => categories.find(category => category.value === targetCategory.value)?.label || '电视剧');
 const replacingSource = computed(() => Boolean(props.media?.quarkFid));
-type ResultFilter = 'recommended' | 'latest' | '4k' | 'complete';
-const resultFilter = ref<ResultFilter>('recommended');
-const showOtherVersions = ref(false);
+type ResultFilter = 'all' | 'episodes' | '4k' | 'complete';
+const resultFilter = ref<ResultFilter>('all');
 const searchQuery = ref('');
 const searchInput = ref<HTMLInputElement | null>(null);
 const resultsBody = ref<HTMLElement | null>(null);
-const searchingCurrentQuery = computed(() => Boolean(props.isAnalyzing || props.searchPending)
+const searchBusy = computed(() => Boolean(props.isAnalyzing || props.searchPending));
+const searchingCurrentQuery = computed(() => searchBusy.value
   && searchQuery.value.trim() === (props.searchKeyword || props.media?.title || '').trim());
 const visibleCount = ref(20);
 const batchSize = 20;
 
 const filterOptions: Array<{ value: ResultFilter; label: string }> = [
-  { value: 'recommended', label: '推荐' },
-  { value: 'latest', label: '最新' },
+  { value: 'all', label: '全部' },
+  { value: 'episodes', label: '更新集数' },
   { value: '4k', label: '4K' },
   { value: 'complete', label: '完整' }
 ];
 
 const cleanTitle = resourceHeading;
-const candidates = computed(() => rankResourceCandidates(
+const matchedResources = computed(() => rankResourceCandidates(
   props.quarkResources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/i.test(resource.url)),
   props.searchKeyword || props.media?.title || '', targetCategory.value
 ));
-const otherVersionCount = computed(() => candidates.value.filter(item => item.match.otherVersion).length);
-const rankedQuarkResources = computed(() => candidates.value.filter(item => showOtherVersions.value || !item.match.otherVersion).map(item => item.resource));
+const rankedQuarkResources = computed(() => matchedResources.value.filter(item => !item.match.conflict).map(item => item.resource));
 const filteredResources = computed(() => {
   const resources = rankedQuarkResources.value.filter(resource => {
     const title = cleanTitle(resource.title);
@@ -81,12 +80,11 @@ const filteredResources = computed(() => {
     if (resultFilter.value === 'complete') return /全集|完结|全\s*\d+\s*集/i.test(title);
     return true;
   });
-  if (resultFilter.value !== 'latest') return resources;
-  return [...resources].sort((left, right) => Date.parse(right.datetime) - Date.parse(left.datetime));
+  if (resultFilter.value !== 'episodes') return resources;
+  return [...resources].sort((left, right) => resourceEpisode(right.title) - resourceEpisode(left.title));
 });
 const visibleResources = computed(() => filteredResources.value.slice(0, visibleCount.value));
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
-const bestQuarkResource = computed(() => candidates.value.find(item => !item.match.otherVersion && (item.match.episodic || item.match.inferred === targetCategory.value))?.resource);
 
 watch([() => props.media?.id, () => props.currentCategory], () => {
   targetCategory.value = props.media?.category || props.currentCategory;
@@ -100,12 +98,11 @@ watch([() => props.isOpen, () => props.searchKeyword], ([isOpen, keyword]) => {
 watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword], () => { detailResource.value = null; });
 
 watch([() => props.searchKeyword, targetCategory], () => {
-  resultFilter.value = 'recommended';
-  showOtherVersions.value = false;
+  resultFilter.value = 'all';
   if (resultsBody.value) resultsBody.value.scrollTop = 0;
 });
 
-watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword, resultFilter, showOtherVersions], () => {
+watch([() => props.isOpen, () => props.media?.id, () => props.searchKeyword, resultFilter], () => {
   visibleCount.value = batchSize;
 });
 
@@ -156,7 +153,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
     @keydown.esc.stop="requestBack"
     @click.self="requestClose"
   >
-    <div class="liquid-dialog glass-rim" v-if="media" :aria-busy="isSaving || isAnalyzing">
+    <div class="liquid-dialog glass-rim" v-if="media" :aria-busy="isSaving || searchBusy">
       <!-- 弹窗顶栏 -->
       <div class="dialog-header">
         <div class="media-meta-row">
@@ -225,22 +222,23 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           class="submit-search-button"
           :disabled="searchingCurrentQuery || isSaving || !searchQuery.trim()"
         >
-          {{ searchingCurrentQuery ? '检索中' : '搜索' }}
+          <LoaderCircle v-if="searchingCurrentQuery" class="search-spinner" aria-hidden="true" />
+          {{ searchingCurrentQuery ? '搜索中…' : '搜索' }}
         </button>
       </form>
 
-      <div v-if="!detailResource && !isAnalyzing && !searchError" class="result-summary" aria-live="polite">
+      <div v-if="!detailResource && searchBusy" class="search-status" role="status" aria-live="polite">
+        <LoaderCircle class="search-spinner" aria-hidden="true" />
+        <div><strong>{{ automaticStatus || `正在搜索《${searchKeyword || media.title}》` }}</strong><p>{{ automaticStatus ? '正在核对资源，请稍候。' : '搜索请求进行中，请稍候。' }}</p></div>
+      </div>
+      <div v-if="!detailResource && !searchBusy && !searchError && rankedQuarkResources.length" class="result-summary" aria-live="polite">
         <span>找到</span>
         <strong>{{ rankedQuarkResources.length }}</strong>
-        <span>条候选资源 · 添加时验证链接</span>
+        <span>条搜索结果</span>
       </div>
-      <p v-if="!detailResource && !isAnalyzing && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
-      <div v-if="!detailResource && !isAnalyzing && otherVersionCount" class="result-versions">
-        <span>{{ showOtherVersions ? '已包含其他类型与特别篇' : '已优先展示当前分类的正篇候选' }}</span>
-        <button type="button" :disabled="isSaving" :aria-expanded="showOtherVersions" @click="showOtherVersions = !showOtherVersions">{{ showOtherVersions ? '收起其他版本' : `其他版本 · ${otherVersionCount}` }}</button>
-      </div>
+      <p v-if="!detailResource && !searchBusy && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
 
-      <div v-if="!detailResource && !isAnalyzing" class="result-filters" role="radiogroup" aria-label="资源筛选">
+      <div v-if="!detailResource && !searchBusy && !searchError && rankedQuarkResources.length" class="result-filters" role="radiogroup" aria-label="资源筛选">
         <SlidersHorizontal aria-hidden="true" />
         <button
           v-for="option in filterOptions"
@@ -258,19 +256,15 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
       </div>
 
       <!-- 列表内容 -->
-      <div ref="resultsBody" class="dialog-body" :class="{ 'showing-details': detailResource }" :aria-busy="isAnalyzing || searchPending" @scroll.passive="handleBodyScroll">
+      <div ref="resultsBody" class="dialog-body" :class="{ 'showing-details': detailResource }" :aria-busy="searchBusy" @scroll.passive="handleBodyScroll">
         <QuarkResourceDetails v-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
           :save-error="failedResourceId === detailResource.id ? saveError : null" :play-after-save="playAfterSave"
           @back="detailResource = null" @open-auth-settings="emit('open-auth-settings')"
           @save="saveDetails"
         />
-        <template v-else-if="isAnalyzing">
+        <template v-else-if="searchBusy">
           <div class="resource-loading">
-          <div class="loading-bar">
-            <div class="mini-spinner"></div>
-            <span role="status">{{ automaticStatus || `正在检索《${searchKeyword || media.title}》网盘资源…` }}</span>
-          </div>
           <div class="resource-placeholders" aria-hidden="true">
           <SkeletonCard v-for="i in 3" :key="i" />
           </div>
@@ -290,9 +284,6 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
               <div class="row-left">
                 <div class="row-info">
                   <div class="row-title" :title="cleanTitle(res.title)">
-                    <span v-if="res.id === bestQuarkResource?.id" class="recommended-badge">
-                      <Check aria-hidden="true" />正篇候选
-                    </span>
                     {{ cleanTitle(res.title) }}
                   </div>
                   <div v-if="saveError && failedResourceId === res.id" class="inline-feedback resource-save-error" role="alert">
@@ -327,13 +318,13 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
             </button>
           </div>
 
-          <div v-else class="empty-notice" role="status">
-            <span>{{ searchError || (searchPending ? '仍在搜索其他来源，找到结果后会自动显示。' : resultFilter === 'recommended' ? otherVersionCount ? '当前分类未找到正篇候选，可展开其他版本或切换分类。' : '暂时没有可用资源，可以修改上方片名重新搜索。' : '当前筛选下没有结果，试试“推荐”。') }}</span>
+          <div v-else class="empty-notice" :role="searchError ? 'alert' : 'status'">
+            <span>{{ searchError || (resultFilter === 'all' ? `未找到《${searchKeyword || media.title}》的相关资源。` : '当前筛选没有结果。') }}</span>
             <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
-              重新检索
+              重新搜索
             </button>
-            <button v-else-if="resultFilter !== 'recommended'" type="button" class="retry-search-button" @click="resultFilter = 'recommended'">查看全部候选资源</button>
+            <button v-else-if="resultFilter !== 'all'" type="button" class="retry-search-button" @click="resultFilter = 'all'">查看全部结果</button>
           </div>
         </template>
       </div>
@@ -369,8 +360,12 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .clear-search-button svg { width: 17px; height: 17px; }
 .submit-search-button { min-height: 44px; padding: 0 19px; border: 0; border-radius: var(--cinema-radius-control); flex-shrink: 0; color: var(--accent-ink); background: var(--liquid-accent); font-size: .84rem; font-weight: 650; }
 .result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; flex-shrink: 0; padding: 16px 26px 3px; color: var(--text-tertiary); font-size: .75rem; }
-.result-versions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; flex-shrink: 0; margin: 8px 24px 0; color: var(--text-tertiary); font-size: 12px; }
-.result-versions button { min-height: 44px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); color: var(--liquid-accent); }
+.search-status { display: flex; align-items: center; gap: 12px; margin: 16px 24px; padding: 16px; flex-shrink: 0; border-radius: var(--cinema-radius-card); background: var(--surface-1); color: var(--text-primary); }
+.search-status strong { display: block; font-size: 14px; }
+.search-status p { margin-top: 4px; font-size: 12px; color: var(--text-secondary); }
+.search-spinner { width: 20px; height: 20px; flex-shrink: 0; animation: spin .9s linear infinite; }
+.submit-search-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.submit-search-button .search-spinner { width: 16px; height: 16px; }
 .result-summary strong { color: var(--text-primary); font-size: .92rem; }
 .result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
 .result-filters > svg { width: 18px; height: 18px; margin-right: 4px; color: var(--text-tertiary); flex-shrink: 0; }
@@ -383,8 +378,6 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .row-left { min-width: 0; flex: 1; }
 .row-info { min-width: 0; }
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
-.recommended-badge { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; padding: 2px 6px; border-radius: 6px; color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-size: .66rem; vertical-align: 1px; }
-.recommended-badge svg { width: 12px; height: 12px; }
 .row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
 .tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
 .row-right { display: flex; gap: 8px; flex-shrink: 0; }
@@ -457,7 +450,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 }
 @media (max-width: 640px) { .liquid-dialog { width: 100%; height: var(--app-viewport-height); max-height: none; border-radius: 0; } .dialog-header { padding-top: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)); } }
 @media (max-width: 767px) {
-  .result-versions { margin-left: var(--page-left); margin-right: var(--page-right); }
+  .search-status { margin-left: var(--page-left); margin-right: var(--page-right); }
   .dialog-header, .result-filters, .dialog-body { padding-left: var(--page-left); padding-right: var(--page-right); }
   .dialog-top-actions { right: var(--page-right); }
   .result-summary { padding-left: var(--page-left); padding-right: var(--page-right); }

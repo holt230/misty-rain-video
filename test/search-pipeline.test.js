@@ -38,120 +38,55 @@ const clientCode = await build({ entryPoints: ['src/services/silentSearchEngine.
   format: 'esm', platform: 'node', define: { 'import.meta.env.BASE_URL': '"/"' }, logLevel: 'silent' });
 const { SilentSearchEngine } = await import(`data:text/javascript;base64,${Buffer.from(clientCode.outputFiles[0].text).toString('base64')}`);
 
-test('生产结果保留全部候选，动漫默认展示正篇，剧场版可展开查看', async t => {
-  const gateway = new ResourceSearchService({ urls: ['https://fixture.invalid/search'], source: 'plugin',
-    fetchImpl: async () => Response.json({ code: 0, data: { merged_by_type: { quark: rows } } }) });
-  const normalized = await gateway.search('仙逆');
-  assert.equal(normalized.total, 3);
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: normalized }));
-  const client = await new SilentSearchEngine().search('仙逆');
-  assert.equal(client.items.length, 3);
-  document.body.innerHTML = '<div id="app"></div>';
-  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'anime', searchKeyword: '仙逆',
-    media: { id: 'test', title: '仙逆', category: 'anime', poster: '' }, quarkResources: [client.items[2]] });
-  const app = createApp({ render: () => h(Modal, props) });
-  app.mount('#app');
-  try {
-    await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 0);
-    props.quarkResources = client.items;
-    await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
-    assert.match(document.querySelector('.resource-rows').textContent, /更新第89集/);
-    assert.equal(document.querySelector('.result-summary strong').textContent, '1');
-    document.querySelector('.result-versions button').click(); await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 3);
-  } finally { app.unmount(); }
+function mount(props, handlers={}) {
+  document.body.innerHTML='<div id="app"></div>';
+  const state=reactive({isOpen:true,isAnalyzing:false,searchPending:false,currentCategory:'anime',searchKeyword:'斗破苍穹',media:{id:'search-qa',title:'斗破苍穹',category:'anime',poster:''},quarkResources:[],...props});
+  const app=createApp({render:()=>h(Modal,{...state,...handlers})});app.mount('#app');
+  return {app,state};
+}
+const resource=(title,i)=>({id:String(i),title,url:'https://pan.quark.cn/s/test'+i,datetime:'2026-11-14',quality:'高清',is4k:/4K/.test(title)});
+
+test('服务端、客户端到界面保留本次匹配结果，没有候选标签或补查版本入口',async t=>{
+ const gateway=new ResourceSearchService({urls:['https://fixture.invalid/search'],fetchImpl:async()=>Response.json({code:0,data:{merged_by_type:{quark:rows}}})});
+ const actual=await gateway.search('仙逆');assert.equal(actual.total,3);
+ t.mock.method(globalThis,'fetch',async()=>Response.json({code:0,data:actual}));
+ const client=await new SilentSearchEngine().search('仙逆');
+ const view=mount({searchKeyword:'仙逆',media:{id:'search-xn',title:'仙逆',category:'anime',poster:''},quarkResources:client.items});
+ try{await nextTick();assert.equal(document.querySelectorAll('.liquid-resource-row').length,3);assert.equal(document.querySelector('.result-summary strong').textContent,'3');assert.doesNotMatch(document.body.textContent,/候选|备用来源|正在补充/);assert.equal(document.querySelector('.recommended-badge'),null);assert.equal(document.querySelector('.result-versions'),null);}finally{view.app.unmount();}
 });
 
-test('动漫结果在推荐、最新、4K 和完整列表均不混入壁纸、音频、同名短剧与二创', async t => {
-  const notes = [
-    '仙逆 4K 更新162集',
-    '仙逆 全162集 4K',
-    '【短剧】仙逆（115集）谢蕊伊&王镱深',
-    '【仙逆】更245集，1080P，B站沙雕版 免充电看，奇遇王富贵，小作坊解说视频【40+GB】',
-    '仙逆 4K 混剪视频 全162集',
-    '剑仙归来：谁让这剑仙逆世重修的？ 第七季（89集）',
-    '仙逆-云韵4K精美壁纸 全162集',
-    '仙逆 4K 写真图集',
-    '仙逆 原声带 FLAC'
-  ];
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { merged_by_type: { quark:
-    notes.map((note, index) => ({ note, url: `https://pan.quark.cn/s/content${index}` })) } } }));
-  const client = await new SilentSearchEngine().search('仙逆');
-  assert.equal(client.items.length, 3);
-  document.body.innerHTML = '<div id="app"></div>';
-  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'anime', searchKeyword: '仙逆',
-    media: { id: 'anime-content-test', title: '仙逆', category: 'anime', poster: '' }, quarkResources: client.items });
-  const app = createApp({ render: () => h(Modal, props) });
-  app.mount('#app');
-  try {
-    for (const [label, count] of [['推荐', 2], ['最新', 2], ['4K', 2], ['完整', 1]]) {
-      [...document.querySelectorAll('[role="radio"]')].find(button => button.textContent.trim() === label).click();
-      await nextTick();
-      assert.equal(document.querySelectorAll('.liquid-resource-row').length, count);
-      assert.doesNotMatch(document.querySelector('.resource-rows').textContent, /壁纸|写真|原声带|短剧|沙雕|解说|混剪|剑仙归来/);
-      assert.equal(document.querySelector('.result-summary strong').textContent, '2');
-    }
-  } finally { app.unmount(); }
+test('请求进行中持续显示旋转图标、搜索中和骨架，不把旧结果当成已完成',async()=>{
+ const view=mount({isAnalyzing:false,searchPending:true,quarkResources:[resource('斗破苍穹 更新176集',0)]});
+ try{await nextTick();assert.ok(document.querySelector('.search-status .search-spinner'));assert.match(document.querySelector('.search-status').textContent,/正在搜索《斗破苍穹》/);assert.match(document.querySelector('.submit-search-button').textContent,/搜索中/);assert.equal(document.querySelectorAll('.liquid-resource-row').length,0);assert.equal(document.querySelector('.result-summary'),null);assert.equal(document.querySelector('.empty-notice'),null);
+ view.state.searchPending=false;view.state.quarkResources=[resource('斗破苍穹 更新219集',1)];await nextTick();assert.equal(document.querySelector('.search-status'),null);assert.equal(document.querySelector('.resource-loading'),null);assert.match(document.querySelector('.row-title').textContent,/219/);}finally{view.app.unmount();}
 });
 
-test('检索中可以编辑并提交新关键词，同词重复提交和保存中操作会被阻止', async () => {
-  document.body.innerHTML = '<div id="app"></div>';
-  const searched = [];
-  const props = reactive({ isOpen: true, isAnalyzing: true, searchPending: true, currentCategory: 'tv', searchKeyword: '旧搜索',
-    media: { id: 'search-form-test', title: '旧搜索', category: 'tv', poster: '' }, quarkResources: [], isSaving: false });
-  const app = createApp({ render: () => h(Modal, { ...props, onSearch: keyword => searched.push(keyword) }) });
-  app.mount('#app');
-  try {
-    await nextTick();
-    const input = document.querySelector('.result-search input'), submit = document.querySelector('.submit-search-button');
-    assert.equal(input.disabled, false); assert.equal(submit.disabled, true);
-    input.value = '新搜索'; input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); await nextTick();
-    assert.equal(submit.disabled, false); assert.equal(submit.textContent, '搜索');
-    submit.click(); await nextTick(); assert.deepEqual(searched, ['新搜索']);
-    props.isSaving = true; await nextTick();
-    assert.equal(input.disabled, true); assert.equal(submit.disabled, true);
-  } finally { app.unmount(); }
+test('真实空结果显示未找到，失败显示错误与重新搜索，二者不混用',async()=>{
+ let retries=0;const view=mount({}, {onRetrySearch:()=>retries++});
+ try{await nextTick();assert.match(document.querySelector('.empty-notice').textContent,/未找到《斗破苍穹》/);assert.equal(document.querySelector('.search-status'),null);assert.equal(document.querySelector('.result-summary'),null);
+ view.state.searchError='搜索超时，请重试';await nextTick();assert.equal(document.querySelector('.empty-notice').getAttribute('role'),'alert');assert.doesNotMatch(document.querySelector('.empty-notice').textContent,/未找到/);document.querySelector('.retry-search-button').click();assert.equal(retries,1);
+ view.state.isAnalyzing=true;view.state.searchPending=true;view.state.searchError='';await nextTick();assert.ok(document.querySelector('.search-status'));assert.equal(document.querySelector('.empty-notice'),null);}finally{view.app.unmount();}
 });
 
-test('新搜索重置筛选和滚动位置，避免沿用4K筛选而把新结果藏起来', async () => {
-  document.body.innerHTML = '<div id="app"></div>';
-  const resource = { id: 'old', title: '旧搜索 4K', url: 'https://pan.quark.cn/s/old', is4k: true, quality: '4K', datetime: '2026-11-09' };
-  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'tv', searchKeyword: '旧搜索',
-    media: { id: 'search-reset-test', title: '旧搜索', category: 'tv', poster: '' }, quarkResources: [resource] });
-  const app = createApp({ render: () => h(Modal, props) }); app.mount('#app');
-  try {
-    await nextTick();
-    [...document.querySelectorAll('[role="radio"]')].find(button => button.textContent === '4K').click(); await nextTick();
-    document.querySelector('.dialog-body').scrollTop = 600;
-    props.searchKeyword = '新搜索';
-    props.quarkResources = [{ ...resource, id: 'new', title: '新搜索 1080P', url: 'https://pan.quark.cn/s/new', is4k: false, quality: '1080P' }];
-    await nextTick();
-    assert.equal(document.querySelector('[role="radio"][aria-checked="true"]').textContent, '推荐');
-    assert.equal(document.querySelector('.dialog-body').scrollTop, 0);
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
-    assert.match(document.querySelector('.row-title').textContent, /新搜索/);
-  } finally { app.unmount(); }
+test('搜索中可编辑新片名，同词重复点击和保存时提交被阻止',async()=>{
+ const searched=[];const view=mount({isAnalyzing:true,searchPending:true},{onSearch:(...args)=>searched.push(args)});
+ try{await nextTick();const input=document.querySelector('.result-search input'),button=document.querySelector('.submit-search-button');assert.equal(input.disabled,false);assert.equal(button.disabled,true);input.value='新的片名';input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));await nextTick();assert.equal(button.disabled,false);button.click();assert.deepEqual(searched,[['新的片名','anime']]);view.state.isSaving=true;await nextTick();assert.equal(input.disabled,true);assert.equal(button.disabled,true);}finally{view.app.unmount();}
 });
 
-test('动漫搜索默认展示年番正篇，同名电影与特别篇在展开后出现且不被推荐', async () => {
-  document.body.innerHTML = '<div id="app"></div>';
-  const notes = ['斗破苍穹3：除恶 (2024)[4K][剧情 动作 奇幻][附前2部]', '斗破苍穹 三年之约.2160p.q',
-    '斗破苍穹 特别篇1.2160p.q', '斗破苍穹年番 1080P 更新176集'];
-  const resources = notes.map((title, i) => ({ id: String(i), title, url: 'https://pan.quark.cn/s/doupo' + i, datetime: '2026-11-14', quality: '高清', is4k: i !== 3 }));
-  const props = reactive({ isOpen: true, isAnalyzing: false, currentCategory: 'anime', searchKeyword: '斗破苍穹',
-    media: { id: 'search-doupo-ui', title: '斗破苍穹', category: 'anime', poster: '' }, quarkResources: resources });
-  const app = createApp({ render: () => h(Modal, props) }); app.mount('#app');
-  try {
-    await nextTick(); assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
-    assert.match(document.querySelector('.row-title').textContent, /年番/);
-    document.querySelector('.result-versions button').click(); await nextTick();
-    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 4);
-    assert.match(document.querySelector('.row-title').textContent, /年番/);
-    for (const row of [...document.querySelectorAll('.liquid-resource-row')].slice(1)) assert.equal(row.querySelector('.recommended-badge'), null);
-    document.querySelector('.category-picker-trigger').click(); await nextTick();
-    [...document.querySelectorAll('.cat-select-pill')].find(button => button.textContent === '电影').click(); await nextTick();
-    assert.match(document.querySelector('.row-title').textContent, /除恶/);
-  } finally { app.unmount(); }
+test('219集实际返回时排在176集之前，不用收录日期或4K冒充最新集数',async()=>{
+ const old={...resource('斗破苍穹 年番 更新176集 4K',0),datetime:'2026-11-14'};
+ const latest={...resource('斗破苍穹 更新219集 1080P',1),datetime:'2025-01-01'};
+ const view=mount({quarkResources:[old,latest]});
+ try{await nextTick();assert.match(document.querySelector('.row-title').textContent,/219/);[...document.querySelectorAll('[role="radio"]')].find(x=>x.textContent==='更新集数').click();await nextTick();assert.match(document.querySelector('.row-title').textContent,/219/);assert.doesNotMatch(document.body.textContent,/候选|正篇优先/);}finally{view.app.unmount();}
+});
+
+test('不存在219集时如实展示176，不生成或改写集数，切词重置筛选和滚动',async()=>{
+ const view=mount({quarkResources:[resource('斗破苍穹 更新176集 4K',0)]});
+ try{await nextTick();assert.doesNotMatch(document.body.textContent,/219/);[...document.querySelectorAll('[role="radio"]')].find(x=>x.textContent==='4K').click();await nextTick();document.querySelector('.dialog-body').scrollTop=500;view.state.searchKeyword='新搜索';view.state.quarkResources=[resource('新搜索 更新219集 1080P',1)];await nextTick();assert.equal(document.querySelector('[role="radio"][aria-checked="true"]').textContent,'全部');assert.equal(document.querySelector('.dialog-body').scrollTop,0);assert.equal(document.querySelectorAll('.liquid-resource-row').length,1);}finally{view.app.unmount();}
+});
+
+test('当前真实结果仍过滤明确无关类型和二创，特别篇属于同名结果可查看',async()=>{
+ const titles=['斗破苍穹 年番 更新219集','斗破苍穹3：除恶 (2024)[4K][剧情 动作 奇幻]','斗破苍穹 特别篇1 4K','斗破苍穹 壁纸','斗破苍穹 有声小说','斗破苍穹 沙雕版'];
+ const view=mount({quarkResources:titles.map(resource)});
+ try{await nextTick();assert.equal(document.querySelectorAll('.liquid-resource-row').length,2);assert.doesNotMatch(document.querySelector('.resource-rows').textContent,/除恶|壁纸|有声|沙雕/);assert.match(document.querySelector('.resource-rows').textContent,/特别篇/);}finally{view.app.unmount();}
 });

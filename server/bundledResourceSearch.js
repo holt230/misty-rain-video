@@ -52,7 +52,7 @@ export const probeBundledSearch = async (endpoint, { fetchImpl = globalThis.fetc
 export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888, spawnImpl = spawn, fetchImpl = globalThis.fetch, delay = wait }) => {
   const binaryPath = path.resolve(appDir, 'bin', 'pansou');
   if (!fs.existsSync(binaryPath)) {
-    console.warn('[resource-search] 当前镜像未包含内置检索引擎，将使用远端备用源');
+    console.warn('[resource-search] 当前运行环境未包含内置检索引擎；未显式配置搜索来源时，搜索会报告不可用');
     return null;
   }
 
@@ -78,12 +78,18 @@ export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888,
       CHANNELS: process.env.RESOURCE_SEARCH_CHANNELS || DEFAULT_CHANNELS,
       ENABLED_PLUGINS: enabledPlugins,
       AUTH_ENABLED: 'false',
-      CACHE_ENABLED: 'true',
+      CACHE_ENABLED: 'false',
       CACHE_PATH: cachePath,
       CACHE_MAX_SIZE: process.env.RESOURCE_SEARCH_CACHE_MB || '128',
       CACHE_TTL: process.env.RESOURCE_SEARCH_CACHE_TTL || '120',
       ASYNC_PLUGIN_ENABLED: 'true',
-      ASYNC_RESPONSE_TIMEOUT: '5',
+      // This flag also enables plugin search itself. Keep it on, but wait for
+      // the current bounded batch and disable cache/background backfill.
+      ASYNC_RESPONSE_TIMEOUT: '20',
+      PLUGIN_TIMEOUT: '20',
+      PLUGIN_BATCH_TIMEOUT_SECONDS: '20',
+      PLUGIN_BACKFILL_ENABLED: 'false',
+      TG_BACKFILL_ENABLED: 'false',
       ASYNC_MAX_BACKGROUND_WORKERS: '12',
       ASYNC_MAX_BACKGROUND_TASKS: '60',
       ASYNC_CACHE_TTL_HOURS: '2',
@@ -115,7 +121,7 @@ export const startBundledResourceSearch = async ({ appDir, dataDir, port = 8888,
   }
 
   if (health.ready) console.log(`[resource-search] 内置检索引擎已就绪：${endpoint}；插件：${health.plugins.join(',')}`);
-  else console.warn('[resource-search] 内置检索引擎未能及时就绪，将保留远端备用源');
+  else console.warn('[resource-search] 内置检索引擎未能及时就绪；搜索不会自动改用备用来源');
   if (health.missingPlugins.length) console.error(`[resource-search] 配置的检索插件未加载：${health.missingPlugins.join(',')}，请检查引擎镜像与插件配置`);
 
   return {

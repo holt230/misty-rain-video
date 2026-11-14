@@ -5,262 +5,75 @@ import { parseLibraryInput } from './libraryFeedback';
 import { isNonVideoResource } from './resourceFiltering';
 import { matchesResourceTitle, resourceHeading } from './resourceTitles';
 
-const SEARCH_THROTTLE_MS = 300;
-const REQUEST_TIMEOUT_MS = 12_000;
-const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
-const MAX_SEARCH_CACHE_ENTRIES = 40;
-const PUBLIC_SEARCH_URL = 'https://so.252035.xyz/api/search';
-const PUBLIC_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 35_000;
 const normalizeKeyword = (keyword: string) => keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim();
 
-/**
- * =========================================================================
- * 夸克资源聚合检索引擎 (SilentSearchEngine)
- * =========================================================================
- */
+/** Only query the application once for the submitted title. Results are never cached here. */
 export class SilentSearchEngine {
-  private cache: Map<string, { createdAt: number; data: SearchResult }> = new Map();
-  private inFlight: Map<string, Promise<SearchResult>> = new Map();
-  private lastRequestTime: number = 0;
-  private publicInFlight = new Map<string, Promise<SearchResult>>();
-  private publicCache = new Map<string, { expiresAt: number; data: SearchResult }>();
-  private publicRetryAfter = 0;
+  private inFlight = new Map<string, Promise<SearchResult>>();
   private controllers = new Set<AbortController>();
-  private generation = 0;
 
   cancelPending() {
-    this.generation++;
     for (const controller of this.controllers) controller.abort();
-    this.controllers.clear();
-    this.inFlight.clear();
-    this.publicInFlight.clear();
+    this.controllers.clear(); this.inFlight.clear();
   }
 
-  cachedResult(keyword: string): SearchResult | null {
-    const key = normalizeKeyword(keyword).toLocaleLowerCase('zh-CN');
-    const cached = this.cache.get(key);
-    const primary = cached && Date.now() - cached.createdAt <= SEARCH_CACHE_TTL_MS ? cached.data : null;
-    const supplement = this.publicCache.get(key);
-    const extra = supplement && supplement.expiresAt > Date.now() && supplement.data.success ? supplement.data : null;
-    const base = primary || extra;
-    if (!base) return null;
-    const items = [...new Map([...(primary?.items || []), ...(extra?.items || [])].map(item => [item.url, item])).values()];
-    return items.length ? { ...base, items, quarkItems: items, total: items.length, fromCache: true } : null;
-  }
-
-  private rememberResult(key: string, result: SearchResult) {
-    this.cache.delete(key);
-    if (!result.items.length) return;
-    this.cache.set(key, { createdAt: Date.now(), data: result });
-    while (this.cache.size > MAX_SEARCH_CACHE_ENTRIES) {
-      const oldestKey = this.cache.keys().next().value;
-      if (oldestKey === undefined) break;
-      this.cache.delete(oldestKey);
-    }
-  }
-
-  async search(keyword: string, options: { force?: boolean; query?: string } = {}): Promise<SearchResult> {
-    const cleanKw = normalizeKeyword(keyword);
-    const query = normalizeKeyword(options.query || cleanKw);
-    if (!cleanKw) {
-      return { success: false, total: 0, items: [], quarkItems: [], source: 'error' };
-    }
-
-    const cacheKey = (query === cleanKw ? cleanKw : `${cleanKw}\n${query}`).toLocaleLowerCase('zh-CN');
-    const cached = this.cache.get(cacheKey);
-    if (!options.force && cached && Date.now() - cached.createdAt <= (cached.data.partial || cached.data.stale ? 5_000 : SEARCH_CACHE_TTL_MS)) {
-      return { ...cached.data, fromCache: true };
-    }
-
-    const requestKey = cacheKey;
-    if (this.inFlight.has(requestKey)) {
-      return this.inFlight.get(requestKey)!.catch(error => this.failedSearch(error));
-    }
-
-    // Register the promise before the throttle waits, so concurrent requests
-    // cannot pass the in-flight check and send duplicate upstream searches.
-    const generation = this.generation;
+  async search(keyword: string): Promise<SearchResult> {
+    const clean = normalizeKeyword(keyword);
+    if (!clean) return this.failed('请输入片名');
+    const key = clean.toLocaleLowerCase('zh-CN');
+    const pending = this.inFlight.get(key);
+    if (pending) return pending;
     const controller = new AbortController();
     this.controllers.add(controller);
-    const task = (async () => {
-      const remaining = SEARCH_THROTTLE_MS - (Date.now() - this.lastRequestTime);
-      if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
-      if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
-      this.lastRequestTime = Date.now();
-      return this.executeBackendFetch(cleanKw, Boolean(options.force), controller, query);
-    })();
-    this.inFlight.set(requestKey, task);
-
-    try {
-      const result = await task;
-      if (generation === this.generation && result.success) this.rememberResult(cacheKey, result);
-      return result;
-    } catch (error) {
-      return this.failedSearch(error);
-    } finally {
+    const task = this.request(clean, controller).finally(() => {
       this.controllers.delete(controller);
-      if (this.inFlight.get(requestKey) === task) this.inFlight.delete(requestKey);
-    }
-  }
-
-  // The browser and server use different network exits. Restore the pre-Oct-13
-  // public fallback without blocking candidates already returned by the server.
-  async supplement(keyword: string, { force = false } = {}): Promise<SearchResult> {
-    const clean = normalizeKeyword(keyword);
-    if (!clean) return this.getEmptyResult();
-    const key = clean.toLocaleLowerCase('zh-CN');
-    const cached = this.publicCache.get(key);
-    if (cached && cached.expiresAt > Date.now() && (!force || !cached.data.success)) return cached.data;
-    const pending = this.publicInFlight.get(key);
-    if (pending) return pending;
-    if (this.publicRetryAfter > Date.now()) return this.getEmptyResult('备用来源暂不可用，已保留当前候选');
-    const generation = this.generation;
-    const task = (async () => {
-      const controller = new AbortController();
-      this.controllers.add(controller);
-      const timer = setTimeout(() => controller.abort(), PUBLIC_TIMEOUT_MS);
-      let result: SearchResult;
-      try {
-        const url = new URL(PUBLIC_SEARCH_URL);
-        url.search = new URLSearchParams({ kw: clean, res: 'merge', src: 'all', cloud_types: 'quark' }).toString();
-        const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer',
-          headers: { Accept: 'application/json' } });
-        if (!response.ok) throw new Error('备用来源暂不可用');
-        const payload = await response.json();
-        if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
-        if (Number(payload.code) !== 0 || !payload.data || (!payload.data.merged_by_type && payload.data.total !== 0)) throw new Error('备用来源响应异常');
-        result = this.normalizeResponse(payload.data, 'cors_proxy', clean);
-      } catch {
-        result = this.getEmptyResult('备用来源暂不可用，已保留当前候选');
-        if (generation === this.generation) this.publicRetryAfter = Date.now() + 30_000;
-      } finally { clearTimeout(timer); this.controllers.delete(controller); }
-      if (generation !== this.generation) return result;
-      this.publicCache.delete(key);
-      this.publicCache.set(key, { expiresAt: Date.now() + (result.items.length ? SEARCH_CACHE_TTL_MS : 30_000), data: result });
-      while (this.publicCache.size > MAX_SEARCH_CACHE_ENTRIES) this.publicCache.delete(this.publicCache.keys().next().value!);
-      return result;
-    })().finally(() => { if (this.publicInFlight.get(key) === task) this.publicInFlight.delete(key); });
-    this.publicInFlight.set(key, task);
+      if (this.inFlight.get(key) === task) this.inFlight.delete(key);
+    });
+    this.inFlight.set(key, task);
     return task;
   }
 
-  private failedSearch(error: unknown): SearchResult {
-    const requiresAuth = Boolean(error && typeof error === 'object' && 'requiresAuth' in error && error.requiresAuth);
-    if (requiresAuth) { this.cache.clear(); this.publicCache.clear(); }
-    return { ...this.getEmptyResult(error instanceof Error ? error.message : '资源检索失败，请稍后重试'),
-      allowPublicFallback: !requiresAuth };
-  }
-
-  async readCached(keyword: string, options: { query?: string } = {}): Promise<SearchResult | null> {
-    const query = normalizeKeyword(options.query || keyword);
-    const cleanKw = normalizeKeyword(keyword);
-    const params = new URLSearchParams({ kw: query, cached: '1' });
-    const controller = new AbortController();
-    this.controllers.add(controller);
-    const timer = setTimeout(() => controller.abort(), 4_000);
-    try {
-      const response = await authFetch(`${apiUrl('/api/resource-search')}?${params}`, { cache: 'no-store', signal: controller.signal });
-      const payload = await response.json();
-      if (controller.signal.aborted) return null;
-      if (!response.ok || payload.code !== 0 || !payload.data) return null;
-      const result = this.normalizeResponse(payload.data, 'direct', keyword);
-      // Keep the completed snapshot available when returning to this search.
-      this.rememberResult((query === cleanKw ? cleanKw : `${cleanKw}\n${query}`).toLocaleLowerCase('zh-CN'), result);
-      return result;
-    } finally { clearTimeout(timer); this.controllers.delete(controller); }
-  }
-
-  private async executeBackendFetch(keyword: string, force: boolean, controller: AbortController, query = keyword): Promise<SearchResult> {
-    const params = new URLSearchParams({ kw: query });
-    if (force) params.set('refresh', '1');
-    const targetUrl = `${apiUrl('/api/resource-search')}?${params.toString()}`;
+  private async request(keyword: string, controller: AbortController): Promise<SearchResult> {
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const resp = await authFetch(targetUrl, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-        signal: controller.signal
+      const response = await authFetch(`${apiUrl('/api/resource-search')}?${new URLSearchParams({ kw: keyword })}`, {
+        method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal
       });
-      const json = await resp.json().catch(() => ({}));
-      if (controller.signal.aborted) throw new DOMException('检索已取消', 'AbortError');
-      if (!resp.ok || json.code !== 0 || !json.data) {
-        throw Object.assign(new Error(json.message || '资源检索服务暂时不可用'), {
-          requiresAuth: resp.status === 401 || resp.status === 403 || json.code === 'APP_AUTH_REQUIRED'
-        });
+      const envelope = await response.json();
+      if (controller.signal.aborted) return this.failed('搜索已取消');
+      if (!response.ok || envelope.code !== 0 || !envelope.data) return this.failed(envelope.message || '搜索失败，请重试');
+      const data = envelope.data;
+      if (data.stale || data.refreshing || data.fromCache || data.from_cache) return this.failed('搜索未返回本次完整结果，请重试');
+      if (!(data.total === 0 && data.merged_by_type == null) && (!data.merged_by_type || typeof data.merged_by_type !== 'object' || Array.isArray(data.merged_by_type))) return this.failed('搜索返回了无效数据，请重试');
+      const seen = new Set<string>();
+      const rows = Array.isArray(data.merged_by_type?.quark) ? data.merged_by_type.quark : [];
+      const items: ResourceItem[] = [];
+      for (const raw of rows) {
+        const item = this.parseSingleItem(raw);
+        if (!item || isNonVideoResource(item.title, keyword) || !matchesResourceTitle(keyword, item.title) || seen.has(item.url)) continue;
+        seen.add(item.url); items.push(item);
       }
-      return this.normalizeResponse(json.data, 'direct', keyword);
+      if (data.partial && !items.length) return this.failed('部分搜索来源请求失败，本次没有取得匹配结果，请重试');
+      return { success: true, total: items.length, items, quarkItems: items, source: 'direct', partial: Boolean(data.partial), ...(data.message ? { message: String(data.message) } : {}) };
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new Error('资源检索超时，请稍后重试');
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private normalizeResponse(data: any, sourceMode: 'direct' | 'cors_proxy', keyword: string): SearchResult {
-    const items: ResourceItem[] = [];
-    const seen = new Set<string>();
-    const list = Array.isArray(data?.merged_by_type?.quark) ? data.merged_by_type.quark : [];
-    list.forEach((raw: any) => {
-      const item = this.parseSingleItem(raw);
-      if (!item || isNonVideoResource(item.title, keyword)
-        || !matchesResourceTitle(keyword, item.title) || seen.has(item.url)) return;
-      seen.add(item.url);
-      items.push(item);
-    });
-
-    items.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
-
-    return {
-      success: true,
-      total: items.length,
-      items,
-      quarkItems: items,
-      source: sourceMode,
-      stale: Boolean(data.stale),
-      partial: Boolean(data.partial),
-      refreshing: Boolean(data.refreshing),
-      ...(data.message ? { message: String(data.message) } : {})
-    };
+      return this.failed(error instanceof DOMException && error.name === 'AbortError' ? '搜索超时，请重试' : '搜索失败，请检查网络后重试');
+    } finally { clearTimeout(timer); }
   }
 
   private parseSingleItem(raw: any): ResourceItem | null {
-    const note = String(raw.note || raw.title || '可用影视资源');
+    if (!raw || typeof raw !== 'object') return null;
+    const note = String(raw.note || raw.title || '');
+    const title = resourceHeading(note);
     const share = parseLibraryInput(`${String(raw.url || '')}\n${note}`);
     if (share.kind !== 'share') return null;
-    const canonicalUrl = share.url;
-    const is4k = /4k|2160p|uhd|杜比|hdr/i.test(note);
-    const is1080p = /1080p|fhd|蓝光/i.test(note);
-    const quality = is4k ? '4K 超高清' : (is1080p ? '1080P 超清' : '清晰度待解析');
-    const rawDatetime = String(raw.datetime || '').trim();
-    const parsedDatetime = Date.parse(rawDatetime);
-    const year = Number.isFinite(parsedDatetime) ? new Date(parsedDatetime).getFullYear() : 0;
-    const datetime = year >= 2001 ? rawDatetime.substring(0, 10) : '近期收录';
-
-    return {
-      id: `quark-${canonicalUrl.split('/').pop()}`,
-      title: resourceHeading(note),
-      url: canonicalUrl,
-      password: raw.password || share.passcode,
-      driveType: 'quark',
-      datetime,
-      source: raw.source || 'PanSou 聚合分析',
-      quality,
-      is4k
-    };
+    const is4k = /4k|2160p|uhd|杜比|hdr/i.test(title);
+    const quality = is4k ? '4K 超高清' : /1080p|fhd|蓝光/i.test(title) ? '1080P 超清' : '清晰度待解析';
+    const rawDate = String(raw.datetime || '').trim();
+    const parsed = Date.parse(rawDate);
+    return { id: `quark-${share.url.split('/').pop()}`, title, url: share.url, password: raw.password || share.passcode,
+      driveType: 'quark', datetime: Number.isFinite(parsed) && new Date(parsed).getFullYear() >= 2001 ? rawDate.substring(0, 10) : '日期未知', source: raw.source || '', quality, is4k };
   }
 
-  private getEmptyResult(message = ''): SearchResult {
-    return {
-      success: false,
-      total: 0,
-      items: [],
-      quarkItems: [],
-      source: 'error',
-      ...(message ? { message } : {})
-    };
-  }
+  private failed(message: string): SearchResult { return { success: false, total: 0, items: [], quarkItems: [], source: 'error', message }; }
 }

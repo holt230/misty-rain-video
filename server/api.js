@@ -46,7 +46,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     userContext,
     credentialStore,
     posterService: new PosterService(dataDir),
-    resourceSearch: new ResourceSearchService({ dataDir }),
+    resourceSearch: new ResourceSearchService(),
     catalog: new CatalogService(dataDir),
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
@@ -356,11 +356,9 @@ export const handleApiRequest = async (request, response, context) => {
     if (pathname === '/api/resource-search' && request.method === 'GET') {
       const keyword = url.searchParams.get('kw');
       if (url.searchParams.get('cached') === '1') {
-        sendSuccess(response, context.resourceSearch.peek(keyword));
-        return true;
+        throw Object.assign(new Error('搜索不再读取旧结果，请重新搜索'), { code: 'RESOURCE_SEARCH_CACHE_DISABLED', statusCode: 400 });
       }
-      const force = url.searchParams.get('refresh') === '1';
-      sendSuccess(response, await context.resourceSearch.search(keyword, { force, allowStale: true }));
+      sendSuccess(response, await context.resourceSearch.search(keyword));
       return true;
     }
 

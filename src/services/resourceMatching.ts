@@ -30,18 +30,24 @@ export function matchResource(keyword: string, title: string, category?: Categor
   return { matches, inferred, otherVersion, conflict, episodic, score };
 }
 
+export function resourceEpisode(title: string) {
+  const heading = resourceHeading(title);
+  const patterns = [/(?:更新|更至|更)\s*(?:至|到|第)?\s*0*(\d{1,4})(?:\s*[-~至]\s*0*(\d{1,4}))?(?=\s*(?:集|话)|$|[\s.\[\]【】])/ig,
+    /(?:全|第)\s*0*(\d{1,4})(?:\s*[-~至]\s*0*(\d{1,4}))?\s*(?:集|话)/ig,
+    /(?:^|[^a-z])(?:s\d+)?e(?:p)?\s*0*(\d{1,4})(?=$|[^0-9])/ig];
+  const numbers = patterns.flatMap(pattern => [...heading.matchAll(pattern)].map(match => Number(match[2] || match[1])));
+  return numbers.length ? Math.max(...numbers) : 0;
+}
+
 export function rankResourceCandidates(resources: ResourceItem[], keyword: string, category?: CategoryType) {
   const ranked = resources.map(resource => ({ resource, match: matchResource(keyword, resource.title, category) }))
     .filter(item => item.match.matches)
-    .sort((a, b) => b.match.score - a.match.score || (Date.parse(b.resource.datetime) || 0) - (Date.parse(a.resource.datetime) || 0));
+    .sort((a, b) => (category === 'movie' ? 0 : resourceEpisode(b.resource.title) - resourceEpisode(a.resource.title))
+      || Number(a.match.otherVersion) - Number(b.match.otherVersion)
+      || b.match.score - a.match.score || (Date.parse(b.resource.datetime) || 0) - (Date.parse(a.resource.datetime) || 0));
   const seen = new Set<string>();
   return ranked.filter(({ resource }) => {
     if (seen.has(resource.url)) return false;
     seen.add(resource.url); return true;
   });
-}
-
-export function refinedResourceQuery(keyword: string, category: CategoryType) {
-  const suffix = { anime: '动漫', tv: '全集', movie: '电影', variety: '综艺' }[category];
-  return keyword.includes(suffix) ? '' : `${keyword} ${suffix}`;
 }

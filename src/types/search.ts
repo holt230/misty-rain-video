@@ -18,12 +18,8 @@ export interface SearchResult {
   total: number;
   items: ResourceItem[];
   quarkItems: ResourceItem[];
-  source: 'direct' | 'cors_proxy' | 'cache' | 'error';
-  fromCache?: boolean;
-  stale?: boolean;
+  source: 'direct' | 'error';
   partial?: boolean;
-  refreshing?: boolean;
-  allowPublicFallback?: boolean;
   message?: string;
 }
 

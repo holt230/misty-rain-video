@@ -46,6 +46,11 @@ test('新引擎隔离旧缓存、实际启用新插件、停止时等待子进�
   assert.deepEqual(engine.missingPlugins, []);
   assert.ok(engine.plugins.includes('erxiaopan'));
   assert.equal(launched.env.ENABLE_COMPRESSION, 'false');
+  assert.equal(launched.env.CACHE_ENABLED, 'false');
+  assert.equal(launched.env.PLUGIN_BACKFILL_ENABLED, 'false');
+  assert.equal(launched.env.TG_BACKFILL_ENABLED, 'false');
+  assert.equal(launched.env.ASYNC_RESPONSE_TIMEOUT, '20');
+  assert.equal(launched.env.ASYNC_PLUGIN_ENABLED, 'true');
   assert.equal(launched.env.CACHE_PATH, path.join(dataDir, 'search-cache-v2'));
   assert.equal(fs.readFileSync(path.join(dataDir, 'search-cache', 'old'), 'utf8'), 'preserve');
   await engine.stop();

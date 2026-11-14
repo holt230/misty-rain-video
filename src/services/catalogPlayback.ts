@@ -49,7 +49,7 @@ export async function prepareCatalogPlayback(item: CatalogItem, options: Automat
   return {
     status: 'manual' as const, attempts: checked.size,
     message: checked.size
-      ? '已核对 ' + checked.size + ' 个片源，暂未找到内容可确认的版本；请查看候选详情后选择。'
+      ? '已核对 ' + checked.size + ' 个片源，暂未找到内容可确认的版本；请查看资源详情后选择。'
       : '已自动搜索片名，但年份或版本信息不足；请选择合适的片源。'
   };
 }

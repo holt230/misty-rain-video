@@ -66,21 +66,36 @@ test('选集保存传递并持久化范围，随后全部保存清除旧范围',
   assert.equal(context.saved().quarkSelectionFids, undefined);
 });
 
-test('搜索补充接口只读现有缓存，不触发上游请求；同样需要登录', async () => {
+test('旧搜索缓存接口被拒绝，不能读取旧结果；同样需要登录', async () => {
   const context = makeContext();
   const calls = [];
   context.resourceSearch = {
     search: () => assert.fail('Cached polling must not search upstream'),
-    peek: keyword => { calls.push(keyword); return { total: 1, refreshing: true }; }
+    peek: () => assert.fail('Search must not read old results')
   };
   const request = { method: 'GET', url: '/api/resource-search?kw=仙逆&cached=1', headers: { host: 'localhost' } };
   const response = makeResponse();
   await handleApiRequest(request, response, context);
-  assert.equal(JSON.parse(response.body).data.total, 1);
-  assert.deepEqual(calls, ['仙逆']);
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).code, 'RESOURCE_SEARCH_CACHE_DISABLED');
+  assert.deepEqual(calls, []);
   context.authService.authenticate = () => { throw Object.assign(new Error('login'), { statusCode: 401 }); };
   const denied = makeResponse();
   await handleApiRequest(request, denied, context);
   assert.equal(denied.statusCode, 401);
-  assert.deepEqual(calls, ['仙逆']);
+  assert.deepEqual(calls, []);
+});
+
+test('搜索接口等待本次查询，原样传递关键词，返回本次219集结果', async () => {
+  const context = makeContext(); let finish;
+  context.resourceSearch = { search: keyword => {
+    assert.equal(keyword, '斗破苍穹');
+    return new Promise(resolve => { finish = resolve; });
+  } };
+  const response = makeResponse();
+  const pending = handleApiRequest({ method: 'GET', url: '/api/resource-search?kw=' + encodeURIComponent('斗破苍穹'), headers: { host: 'localhost' } }, response, context);
+  assert.equal(response.body, '');
+  finish({ total: 1, merged_by_type: { quark: [{ note: '斗破苍穹 更新219集', url: 'https://pan.quark.cn/s/test219' }] } });
+  await pending;
+  assert.match(response.body, /219/);
 });
