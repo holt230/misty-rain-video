@@ -20,6 +20,7 @@ import {
 import { useToast } from '../../composables/useToast';
 import { useDialog } from '../../composables/useDialog';
 import { useMobileLandscape } from '../../composables/useMobileLandscape';
+import { usePlaybackChrome } from '../../composables/usePlaybackChrome';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 
 const props = defineProps<{
@@ -151,6 +152,7 @@ const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 const { immersive, rotated, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen);
+usePlaybackChrome(() => props.isOpen && immersive.value);
 
 const soundEffectOptions: SoundEffectOption[] = [
   { value: 'original', label: '原声', hint: '不做处理' },
@@ -1676,7 +1678,9 @@ defineExpose({ retry, dismissLayer });
 .video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
 .video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
+.video-stage, .video-stage :deep(*) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
+.video-element { touch-action: none; }
 .stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
 .loading-state { isolation: isolate; }
 .stage-poster { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
@@ -1811,21 +1815,21 @@ defineExpose({ retry, dismissLayer });
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
 .player-backdrop.landscape-inline { height: var(--player-height, 100dvh); padding: 0; background: #000; }
-.landscape-inline .player-window { position: relative; width: 100%; height: var(--player-height, 100dvh); border: 0; border-radius: 0; background: #000; box-shadow: none; }
-.landscape-inline .player-header { position: absolute; z-index: 4; top: var(--safe-area-top); right: var(--safe-area-right); min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
+.landscape-inline .player-window { position: absolute; top: var(--safe-area-top); left: var(--safe-area-left); width: calc(100% - var(--safe-area-left) - var(--safe-area-right)); height: calc(100% - var(--safe-area-top) - var(--safe-area-bottom)); border: 0; border-radius: 0; background: #000; box-shadow: none; }
+.landscape-inline .player-header { position: absolute; z-index: 8; top: 0; right: 0; min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
 .landscape-inline .title-block, .landscape-inline .text-action { display: none; }
 .landscape-inline .header-actions { pointer-events: auto; }
 .landscape-inline .icon-button { color: #fff; background: rgb(15 17 22 / .58); }
+.landscape-inline .player-back-button { pointer-events: auto; }
 .landscape-inline .player-layout, .landscape-inline .video-column { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .landscape-inline .video-column { padding: 0; background: #000; }
-.landscape-inline .video-stage { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
+.landscape-inline .video-stage { --safe-area-top: 0px; --safe-area-right: 0px; --safe-area-bottom: 0px; --safe-area-left: 0px; width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
 .landscape-inline .video-column > .danmaku-controls,
 .landscape-inline .player-toolbar,
 .landscape-inline .playback-settings,
 .landscape-inline .episode-panel { display: none; }
-.rotated-player .player-window { position: absolute; top: 50%; left: 50%; width: var(--player-height); height: var(--player-width); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
+.rotated-player .player-window { position: absolute; top: calc(50% + (var(--safe-area-top) - var(--safe-area-bottom)) / 2); left: calc(50% + (var(--safe-area-left) - var(--safe-area-right)) / 2); width: calc(var(--player-height) - var(--safe-area-top) - var(--safe-area-bottom)); height: calc(var(--player-width) - var(--safe-area-left) - var(--safe-area-right)); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
 .rotated-player .player-header { top: 0; right: 0; }
-.rotated-player .video-stage { --safe-area-top: 0px; --safe-area-right: 0px; --safe-area-left: 0px; }
 
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 

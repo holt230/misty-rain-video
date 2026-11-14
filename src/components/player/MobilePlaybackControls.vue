@@ -132,21 +132,28 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     subtitles.value = subtitleTrackOptions(video, hls);
     subtitle.value = activeSubtitleTrack(video, hls);
   };
-  const playback = () => { sync(); reveal(); };
+  const playback = () => { if (video.paused) cancelPress(); sync(); reveal(); };
   let pressTimer: ReturnType<typeof setTimeout> | undefined;
   let initialRate = 1;
   let suppressTap = false;
+  let touchTapPending = false;
+  let previousTouchTap: { at: number; x: number; y: number } | undefined;
   let origin = { x: 0, y: 0 };
   const endPress = () => {
     clearTimeout(pressTimer);
     if (boosted.value) { video.playbackRate = initialRate; boosted.value = false; suppressTap = true; }
   };
+  const cancelPress = () => { endPress(); touchTapPending = false; previousTouchTap = undefined; };
   const startPress = (event: PointerEvent) => {
     if (event.pointerType === 'mouse') { video.focus({ preventScroll: true }); reveal(); return; }
-    if (locked.value || video.paused || (event.button !== undefined && event.button !== 0)) return;
+    if (event.cancelable) event.preventDefault();
+    endPress(); touchTapPending = false;
+    suppressTap = false;
+    touchTapPending = true;
     origin = { x: event.clientX, y: event.clientY };
-    clearTimeout(pressTimer);
+    if (locked.value || video.paused || (event.button !== undefined && event.button !== 0)) return;
     pressTimer = setTimeout(() => {
+      if (locked.value || video.paused || !touchTapPending) return;
       initialRate = video.playbackRate || 1;
       video.playbackRate = Math.max(2, initialRate);
       boosted.value = true;
@@ -155,13 +162,40 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   };
   const movePress = (event: PointerEvent) => {
     if (event.pointerType === 'mouse') reveal();
-    if (Math.abs(event.clientX - origin.x) + Math.abs(event.clientY - origin.y) > 12) endPress();
+    if (Math.abs(event.clientX - origin.x) + Math.abs(event.clientY - origin.y) > 12) cancelPress();
   };
   const tap = () => {
     if (locked.value) { reveal(); return; }
     if (suppressTap) { suppressTap = false; return; }
     if (visible.value && !video.paused) visible.value = false; else reveal();
   };
+  const finishPress = (event: PointerEvent) => {
+    const tapped = touchTapPending && event.pointerType !== 'mouse';
+    const held = boosted.value;
+    endPress(); touchTapPending = false;
+    // touchstart is cancelled below, so touch taps need their own control toggle.
+    if (!tapped) return;
+    if (held) { previousTouchTap = undefined; suppressTap = false; return; }
+    const previous = previousTouchTap;
+    const at = Date.now();
+    if (!locked.value && previous && at - previous.at < 280
+      && Math.abs(event.clientX - previous.x) + Math.abs(event.clientY - previous.y) < 24) {
+      previousTouchTap = undefined;
+      doubleTap(event);
+    } else {
+      previousTouchTap = { at, x: event.clientX, y: event.clientY };
+      tap();
+    }
+  };
+  const preventNativeTouch = (event: TouchEvent) => {
+    if (event.cancelable) event.preventDefault();
+    if (event.touches.length !== 1) cancelPress();
+  };
+  const click = (event: MouseEvent) => {
+    const pointerType = (event as PointerEvent).pointerType;
+    if (!pointerType || pointerType === 'mouse') tap();
+  };
+  const stopLockWatch = watch(locked, cancelPress);
   const doubleTap = (event: Event) => {
     if (locked.value) return;
     event.preventDefault();
@@ -231,18 +265,22 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   video.addEventListener('loadedmetadata', restoreSpeed);
   video.addEventListener('pointerdown', startPress);
   video.addEventListener('pointermove', movePress);
-  video.addEventListener('pointerup', endPress);
-  video.addEventListener('pointercancel', endPress);
-  video.addEventListener('pointerleave', endPress);
+  video.addEventListener('pointerup', finishPress);
+  video.addEventListener('pointercancel', cancelPress);
+  video.addEventListener('pointerleave', cancelPress);
+  video.addEventListener('touchstart', preventNativeTouch, { passive: false });
+  video.addEventListener('touchcancel', cancelPress);
   video.addEventListener('dblclick', doubleTap);
-  video.addEventListener('contextmenu', contextMenu);
+  stage.addEventListener('contextmenu', contextMenu);
+  stage.addEventListener('selectstart', contextMenu);
+  video.addEventListener('dragstart', contextMenu);
   stage.addEventListener('keydown', keyboard as EventListener);
   stage.addEventListener('pointermove', hover);
   const events = ['timeupdate', 'durationchange', 'loadedmetadata', 'volumechange', 'seeked', 'progress'];
   events.forEach(event => video.addEventListener(event, sync));
   ['play', 'pause', 'ended'].forEach(event => video.addEventListener(event, playback));
   ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.addEventListener(event, syncTracks));
-  video.addEventListener('click', tap);
+  video.addEventListener('click', click);
   const hlsEvents = hls ? subtitleEvents(hls) : [];
   hlsEvents.forEach(event => hls?.on(event, syncTracks));
   sync(); syncTracks(); reveal();
@@ -250,15 +288,19 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     events.forEach(event => video.removeEventListener(event, sync));
     ['play', 'pause', 'ended'].forEach(event => video.removeEventListener(event, playback));
     ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.removeEventListener(event, syncTracks));
-    endPress();
-    video.removeEventListener('click', tap);
+    cancelPress(); stopLockWatch();
+    video.removeEventListener('click', click);
     video.removeEventListener('pointerdown', startPress);
     video.removeEventListener('pointermove', movePress);
-    video.removeEventListener('pointerup', endPress);
-    video.removeEventListener('pointercancel', endPress);
-    video.removeEventListener('pointerleave', endPress);
+    video.removeEventListener('pointerup', finishPress);
+    video.removeEventListener('pointercancel', cancelPress);
+    video.removeEventListener('pointerleave', cancelPress);
+    video.removeEventListener('touchstart', preventNativeTouch);
+    video.removeEventListener('touchcancel', cancelPress);
     video.removeEventListener('dblclick', doubleTap);
-    video.removeEventListener('contextmenu', contextMenu);
+    stage.removeEventListener('contextmenu', contextMenu);
+    stage.removeEventListener('selectstart', contextMenu);
+    video.removeEventListener('dragstart', contextMenu);
     stage.removeEventListener('keydown', keyboard as EventListener);
     stage.removeEventListener('pointermove', hover);
     video.removeEventListener('loadedmetadata', restoreSpeed);

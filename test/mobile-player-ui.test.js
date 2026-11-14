@@ -21,6 +21,9 @@ const Controls = (await import(pathToFileURL(output))).default;
 const layoutOutput = path.resolve(folder, 'landscape.mjs');
 await build({ entryPoints: ['src/composables/useMobileLandscape.ts'], outfile: layoutOutput, bundle: true, format: 'esm', external: ['vue'], logLevel: 'silent' });
 const { useMobileLandscape } = await import(pathToFileURL(layoutOutput));
+const chromeOutput = path.resolve(folder, 'chrome.mjs');
+await build({ entryPoints: ['src/composables/usePlaybackChrome.ts'], outfile: chromeOutput, bundle: true, format: 'esm', external: ['vue'], logLevel: 'silent' });
+const { usePlaybackChrome } = await import(pathToFileURL(chromeOutput));
 const button = label => document.querySelector(`button[aria-label="${label}"]`);
 const event = name => new dom.window.Event(name);
 
@@ -261,6 +264,109 @@ test('desktop portrait windows expand without applying the phone rotation transf
     layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, true); assert.equal(layout.rotated.value, false);
     layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, false);
   } finally { app.unmount(); }
+});
+
+test('触摸长按阻止浏览器选字菜单，松手保留倍速并继续支持轻触显示控件', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const view = mount();
+  const pointer = (type, extra = {}) => {
+    const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(e, { pointerType: 'touch', clientX: 100, clientY: 100, button: 0, ...extra });
+    return e;
+  };
+  try {
+    await view.media.play(); view.media.playbackRate = 1.5;
+    const down = pointer('pointerdown'); view.media.dispatchEvent(down);
+    const touch = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    Object.assign(touch, { touches: [{}] }); view.media.dispatchEvent(touch);
+    assert.equal(down.defaultPrevented, true); assert.equal(touch.defaultPrevented, true);
+    for (const name of ['selectstart', 'contextmenu', 'dragstart']) {
+      const e = new dom.window.Event(name, { bubbles: true, cancelable: true });
+      view.media.dispatchEvent(e); assert.equal(e.defaultPrevented, true, name);
+    }
+    t.mock.timers.tick(450); await nextTick();
+    assert.equal(view.media.playbackRate, 2);
+    view.media.dispatchEvent(pointer('pointerup')); await nextTick();
+    assert.equal(view.media.playbackRate, 1.5); assert.equal(view.media.paused, false);
+    view.media.dispatchEvent(pointer('pointerdown')); view.media.dispatchEvent(pointer('pointerup')); await nextTick();
+    assert.ok(document.querySelector('.mobile-controls.concealed'));
+    // A pointer-generated compatibility click must not toggle twice.
+    view.media.dispatchEvent(pointer('click')); await nextTick();
+    assert.ok(document.querySelector('.mobile-controls.concealed'));
+    t.mock.timers.tick(300);
+    view.media.dispatchEvent(pointer('pointerdown')); view.media.dispatchEvent(pointer('pointerup')); await nextTick();
+    assert.equal(document.querySelector('.mobile-controls.concealed'), null);
+  } finally { view.app.unmount(); }
+  const releasedTouch = new dom.window.Event('touchstart', { cancelable: true });
+  view.media.dispatchEvent(releasedTouch); assert.equal(releasedTouch.defaultPrevented, false);
+});
+
+test('拦截系统触摸后仍可双击画面左右快退快进，控件按钮不参与手势', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 2_000_000 });
+  const view = mount();
+  t.mock.method(view.media, 'getBoundingClientRect', () => ({ left: 0, width: 320 }));
+  const tapAt = x => {
+    for (const name of ['pointerdown', 'pointerup']) {
+      const e = new dom.window.Event(name, { bubbles: true, cancelable: true });
+      Object.assign(e, { pointerType: 'touch', clientX: x, clientY: 100 });
+      view.media.dispatchEvent(e);
+    }
+  };
+  try {
+    await view.media.play(); view.media.currentTime = 40;
+    tapAt(300); t.mock.timers.tick(150); tapAt(300);
+    assert.equal(view.media.currentTime, 50);
+    t.mock.timers.tick(300); tapAt(20); t.mock.timers.tick(150); tapAt(20);
+    assert.equal(view.media.currentTime, 40); assert.equal(view.media.paused, false);
+    t.mock.timers.tick(300); tapAt(160); t.mock.timers.tick(150); tapAt(160);
+    assert.equal(view.media.paused, true);
+  } finally { view.app.unmount(); }
+});
+
+test('手势取消、滑动、暂停和锁定均停止临时加速，单击设置仍保持正常', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const view = mount();
+  const pointer = (type, extra = {}) => {
+    const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(e, { pointerType: 'touch', clientX: 100, clientY: 100, ...extra });
+    return e;
+  };
+  try {
+    await view.media.play(); view.media.playbackRate = 1.5;
+    for (const type of ['pointercancel', 'pointerleave', 'touchcancel']) {
+      view.media.dispatchEvent(pointer('pointerdown')); t.mock.timers.tick(450);
+      assert.equal(view.media.playbackRate, 2);
+      view.media.dispatchEvent(pointer(type)); assert.equal(view.media.playbackRate, 1.5);
+    }
+    view.media.dispatchEvent(pointer('pointerdown'));
+    view.media.dispatchEvent(pointer('pointermove', { clientX: 140 })); t.mock.timers.tick(450);
+    assert.equal(view.media.playbackRate, 1.5);
+    view.media.dispatchEvent(pointer('pointerdown')); t.mock.timers.tick(450);
+    view.media.pause(); assert.equal(view.media.playbackRate, 1.5);
+    await view.media.play(); view.props.expanded = true; await nextTick();
+    view.media.dispatchEvent(pointer('pointerdown')); t.mock.timers.tick(450);
+    button('锁定播放控制').click(); await nextTick(); assert.equal(view.media.playbackRate, 1.5);
+    view.media.dispatchEvent(pointer('pointerdown')); t.mock.timers.tick(450); assert.equal(view.media.playbackRate, 1.5);
+    button('解锁播放控制').click(); await nextTick();
+    const touch = new dom.window.Event('touchstart', { bubbles: true, cancelable: true });
+    button('打开播放设置').dispatchEvent(touch); assert.equal(touch.defaultPrevented, false);
+  } finally { view.app.unmount(); }
+});
+
+test('进入横屏立即设置黑色浏览器状态，退出、关闭和组件卸载均释放', async () => {
+  document.body.innerHTML = '<div id="mount"></div>';
+  const active = reactive({ value: false });
+  const app = createApp({ setup() { usePlaybackChrome(() => active.value); return () => h('div'); } });
+  app.mount('#mount');
+  try {
+    active.value = true;
+    assert.equal(document.documentElement.classList.contains('immersive-playback'), true);
+    assert.equal(document.documentElement.style.colorScheme, 'dark');
+    active.value = false;
+    assert.equal(document.documentElement.classList.contains('immersive-playback'), false);
+    active.value = true;
+  } finally { app.unmount(); }
+  assert.equal(document.documentElement.classList.contains('immersive-playback'), false);
 });
 
 test.after(() => { dom.window.close(); fs.rmSync(folder, { recursive: true, force: true }); });

@@ -47,3 +47,28 @@ test('默认跟随系统变化，手动选色后不被系统变化覆盖', async
   assert.equal(document.documentElement.dataset.theme, 'dark');
   assert.equal(localStorage.getItem('misty_rain_theme'), 'system');
 });
+
+test('横屏锁定黑色浏览器底色，主题变化和多播放器释放后恢复最新偏好', async t => {
+  const dom = new JSDOM('<html><head><meta name="theme-color"></head></html>', { url: 'http://localhost/' });
+  globalThis.document = dom.window.document;
+  globalThis.localStorage = dom.window.localStorage;
+  t.after(() => { dom.window.close(); delete globalThis.document; delete globalThis.localStorage; });
+  const theme = await import(url + '#playback');
+  theme.setTheme('light');
+  const first = theme.acquirePlaybackChrome();
+  assert.equal(document.documentElement.classList.contains('immersive-playback'), true);
+  assert.equal(document.documentElement.style.colorScheme, 'dark');
+  assert.equal(document.querySelector('meta').content, '#000000');
+  assert.equal(theme.currentTheme.value, 'light');
+  assert.equal(localStorage.getItem('misty_rain_theme'), 'light');
+  const second = theme.acquirePlaybackChrome();
+  first(); first();
+  assert.equal(document.querySelector('meta').content, '#000000');
+  theme.setTheme('dark');
+  theme.setTheme('light');
+  assert.equal(document.documentElement.style.colorScheme, 'dark');
+  second();
+  assert.equal(document.documentElement.classList.contains('immersive-playback'), false);
+  assert.equal(document.documentElement.style.colorScheme, 'light');
+  assert.equal(document.querySelector('meta').content, '#f4f6fa');
+});

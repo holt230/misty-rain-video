@@ -41,6 +41,7 @@
 html, body { width: 100%; min-height: var(--app-viewport-height); color: var(--text-primary); background: var(--liquid-canvas); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif; font-synthesis: none; -webkit-font-smoothing: antialiased; line-height: 1.5; }
 /* The document owns page scrolling; body must not trap wheel input in a second scroll container. */
 html { overflow-x: hidden; overscroll-behavior-y: none; }
+html.immersive-playback, html.immersive-playback body { background: #000; }
 body { -webkit-tap-highlight-color: transparent; }
 #app { min-height: var(--app-viewport-height); }
 button, input, textarea, select { font: inherit; }

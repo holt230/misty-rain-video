@@ -12,11 +12,24 @@ export const themePreference = ref<ThemePreference>(readPreference());
 const resolveTheme = (): AppTheme => themePreference.value === 'system'
   ? mediaQuery?.matches ? 'dark' : 'light' : themePreference.value;
 export const currentTheme = ref<AppTheme>(resolveTheme());
+const playbackChromeOwners = new Set<symbol>();
+const updateBrowserChrome = () => {
+  const immersive = playbackChromeOwners.size > 0;
+  document.documentElement.classList.toggle('immersive-playback', immersive);
+  document.documentElement.style.colorScheme = immersive ? 'dark' : currentTheme.value;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', immersive ? '#000000' : currentTheme.value === 'light' ? '#f4f6fa' : '#0b0b0d');
+};
+/** Keep iOS browser chrome and its safe-area canvas dark until the last player exits. */
+export const acquirePlaybackChrome = () => {
+  const owner = Symbol('playback');
+  playbackChromeOwners.add(owner);
+  updateBrowserChrome();
+  return () => { playbackChromeOwners.delete(owner); updateBrowserChrome(); };
+};
 export const applyTheme = (theme: AppTheme) => {
   currentTheme.value = theme;
   document.documentElement.dataset.theme = theme;
-  document.documentElement.style.colorScheme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f4f6fa' : '#0b0b0d');
+  updateBrowserChrome();
 };
 let initialized = false;
 export const initializeTheme = () => {
