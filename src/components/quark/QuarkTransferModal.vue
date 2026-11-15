@@ -4,7 +4,7 @@ import { ChevronDown, LoaderCircle, RefreshCw, Search, SlidersHorizontal, X } fr
 import MediaPoster from '../common/MediaPoster.vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
-import type { ResourceItem } from '../../types/search';
+import type { ResourceItem, SearchCategory } from '../../types/search';
 import { rankResourceCandidates, resourceEpisode } from '../../services/resourceMatching';
 import { resourceHeading } from '../../services/resourceTitles';
 import SkeletonCard from '../common/SkeletonCard.vue';
@@ -21,6 +21,7 @@ const props = defineProps<{
   searchNotice?: string;
   searchPending?: boolean;
   searchKeyword?: string;
+  searchCategory?: SearchCategory;
   isSaving?: boolean;
   savingResourceId?: string;
   saveError?: LibrarySaveFeedback | null;
@@ -35,15 +36,17 @@ const emit = defineEmits<{
   (e: 'cancel-automatic'): void;
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
-  (e: 'search', keyword: string, category: CategoryType): void;
+  (e: 'search', keyword: string, category: SearchCategory): void;
+  (e: 'prepare-play', media: MediaItem, targetCategory: CategoryType, resources: ResourceItem[]): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
 }>();
 
 const detailResource = ref<ResourceItem | null>(null);
 const detailsRef = ref<InstanceType<typeof QuarkResourceDetails> | null>(null);
-const targetCategory = ref<CategoryType>('tv');
+const targetCategory = ref<SearchCategory>('all');
 const categoryExpanded = ref(false);
-const categories: Array<{ value: CategoryType; label: string }> = [
+const categories: Array<{ value: SearchCategory; label: string }> = [
+  { value: 'all', label: '全部类型' },
   { value: 'tv', label: '电视剧' }, { value: 'movie', label: '电影' },
   { value: 'variety', label: '综艺' }, { value: 'anime', label: '动漫' }
 ];
@@ -68,9 +71,10 @@ const filterOptions: Array<{ value: ResultFilter; label: string }> = [
 ];
 
 const cleanTitle = resourceHeading;
+const saveCategory = (resource: ResourceItem): CategoryType => targetCategory.value === 'all' ? resource.category || props.media?.category || props.currentCategory : targetCategory.value;
 const matchedResources = computed(() => rankResourceCandidates(
   props.quarkResources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/i.test(resource.url)),
-  props.searchKeyword || props.media?.title || '', targetCategory.value
+  props.searchKeyword || props.media?.title || '', targetCategory.value === 'all' ? undefined : targetCategory.value
 ));
 const rankedQuarkResources = computed(() => matchedResources.value.filter(item => !item.match.conflict).map(item => item.resource));
 const filteredResources = computed(() => {
@@ -81,13 +85,13 @@ const filteredResources = computed(() => {
     return true;
   });
   if (resultFilter.value !== 'episodes') return resources;
-  return [...resources].sort((left, right) => resourceEpisode(right.title) - resourceEpisode(left.title));
+  return [...resources].sort((left, right) => (right.latestEpisode ?? resourceEpisode(right.title)) - (left.latestEpisode ?? resourceEpisode(left.title)));
 });
 const visibleResources = computed(() => filteredResources.value.slice(0, visibleCount.value));
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
 
-watch([() => props.media?.id, () => props.currentCategory], () => {
-  targetCategory.value = props.media?.category || props.currentCategory;
+watch([() => props.media?.id, () => props.currentCategory, () => props.searchCategory], () => {
+  targetCategory.value = props.searchCategory || props.media?.category || props.currentCategory;
   categoryExpanded.value = false;
 }, { immediate: true });
 
@@ -136,7 +140,7 @@ const dismissLayer = () => {
 defineExpose({ dismissLayer });
 const requestBack = () => { if (!props.isSaving && !dismissLayer()) emit('close'); };
 const saveDetails = (selectedFids?: string[]) => {
-  if (props.media && detailResource.value) emit('save-to-cards', props.media, targetCategory.value, detailResource.value, selectedFids);
+  if (props.media && detailResource.value) emit('save-to-cards', props.media, saveCategory(detailResource.value), detailResource.value, selectedFids);
 };
 const dialogRef = ref<HTMLElement | null>(null);
 useDialog(dialogRef, () => props.isOpen, requestBack);
@@ -292,10 +296,13 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往认证设置</button>
                   </div>
                   <div class="row-tags">
+                    <span v-if="res.updateText" class="update-badge">来源标注：{{ res.updateText }}</span>
+                    <span v-if="res.category" class="tag-meta">{{ categories.find(category => category.value === res.category)?.label }}</span>
+                    <span v-if="res.year" class="tag-meta">{{ res.year }}</span>
                     <span class="tag-badge">{{ res.quality }}</span>
                     <span v-if="res.size" class="tag-meta">{{ res.size }}</span>
                     <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
-                    <span class="tag-meta">{{ res.datetime }}</span>
+                    <span v-if="res.datetime" class="tag-meta">{{ res.datetime }}</span>
                   </div>
                 </div>
               </div>
@@ -306,9 +313,9 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                   class="btn-action btn-transfer"
                   :class="{ 'is-saving': isSaving && savingResourceId === res.id }"
                   :disabled="isSaving"
-                  @click="emit('save-to-cards', media, targetCategory, res)"
+                  @click="res.workTitle && !replacingSource ? emit('prepare-play', media, saveCategory(res), rankedQuarkResources) : emit('save-to-cards', media, saveCategory(res), res)"
                 >
-                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? (playAfterSave ? '替换并播放' : '全部替换') : playAfterSave ? '添加并播放' : '添加到片库' }}
+                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? (playAfterSave ? '替换并播放' : '全部替换') : res.workTitle ? '自动找齐并播放' : playAfterSave ? '添加并播放' : '添加到片库' }}
                 </button>
               </div>
             </div>
@@ -380,6 +387,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
 .row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
 .tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
+.update-badge { color: var(--liquid-accent); font-size: .78rem; font-weight: 650; }
 .row-right { display: flex; gap: 8px; flex-shrink: 0; }
 .btn-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .81rem; font-weight: 600; }
 .btn-details { color: var(--liquid-accent); background: transparent; border: 1px solid var(--liquid-accent-subtle); }

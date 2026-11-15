@@ -358,7 +358,8 @@ export const handleApiRequest = async (request, response, context) => {
       if (url.searchParams.get('cached') === '1') {
         throw Object.assign(new Error('搜索不再读取旧结果，请重新搜索'), { code: 'RESOURCE_SEARCH_CACHE_DISABLED', statusCode: 400 });
       }
-      sendSuccess(response, await context.resourceSearch.search(keyword));
+      const category = url.searchParams.get('category') || 'all';
+      sendSuccess(response, await context.resourceSearch.search(keyword, { category }));
       return true;
     }
 

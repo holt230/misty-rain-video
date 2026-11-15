@@ -1,20 +1,14 @@
-const DEFAULT_SEARCH_URLS = ['http://127.0.0.1:8888/api/search'];
-const DEFAULT_TIMEOUT_MS = 30_000;
+import { CatalogResourceSearch } from './catalogResourceSearch.js';
+import { configuredSearchUrls } from './searchConfig.js';
+
+const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESULTS = 500;
 const safeText = (value, limit) => String(value || '').trim().slice(0, limit);
 const searchError = (message, code, statusCode = 503) => Object.assign(new Error(message), { code, statusCode });
 const normalizeKeyword = value => String(value || '').normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
-const configuredUrls = () => {
-  const configured = String(process.env.RESOURCE_SEARCH_URLS || '').split(',').map(value => value.trim()).filter(Boolean);
-  return [...new Set(configured.length ? configured : DEFAULT_SEARCH_URLS)].filter(value => {
-    try { return ['http:', 'https:'].includes(new URL(value).protocol); } catch { return false; }
-  });
-};
 const configuredTimeout = () => {
   const value = Number(process.env.RESOURCE_SEARCH_TIMEOUT_MS);
-  // Older deployments used 8s for an initial snapshot; that must not cut off
-  // the engine's current 20s batch now that a search waits for completion.
-  return Number.isFinite(value) && value > 0 ? Math.min(30_000, Math.max(25_000, value)) : DEFAULT_TIMEOUT_MS;
+  return Number.isFinite(value) && value > 0 ? Math.min(12_000, Math.max(3_000, value)) : DEFAULT_TIMEOUT_MS;
 };
 const configuredSource = () => ['all', 'tg', 'plugin'].includes(process.env.RESOURCE_SEARCH_SOURCE) ? process.env.RESOURCE_SEARCH_SOURCE : 'all';
 const isBundled = endpoint => ['127.0.0.1', 'localhost', 'resource-search', '[::1]'].includes(new URL(endpoint).hostname);
@@ -56,29 +50,33 @@ function mergeResults(lists) {
 
 /** A search returns only this operation's results; no stored results or fallback queries. */
 export class ResourceSearchService {
-  constructor({ fetchImpl = globalThis.fetch, urls = configuredUrls(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4 } = {}) {
+  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch } = {}) {
     this.fetchImpl = fetchImpl;
-    this.urls = [...new Set(urls)];
+    this.urls = [...new Set(urls || [])];
+    this.useCatalog = urls === undefined;
     this.source = source;
     this.timeoutMs = timeoutMs;
     this.maxConcurrent = maxConcurrent;
     this.inFlight = new Map();
+    this.catalogSearch = catalogSearch || new CatalogResourceSearch({ fetchImpl, timeoutMs });
   }
 
-  async search(rawKeyword, { priority = 'interactive' } = {}) {
+  async search(rawKeyword, { priority = 'interactive', category = 'all' } = {}) {
     const keyword = normalizeKeyword(rawKeyword);
     if (!keyword) throw searchError('请输入片名', 'RESOURCE_SEARCH_KEYWORD_REQUIRED', 400);
-    const key = keyword.toLocaleLowerCase('zh-CN');
+    if (!['all', 'tv', 'anime', 'movie', 'variety'].includes(category)) throw searchError('搜索分类不正确', 'RESOURCE_SEARCH_CATEGORY_INVALID', 400);
+    const key = `${keyword.toLocaleLowerCase('zh-CN')}\n${category}`;
     if (this.inFlight.has(key)) return this.inFlight.get(key);
     const limit = priority === 'background' ? Math.max(1, this.maxConcurrent - 2) : this.maxConcurrent;
     if (this.inFlight.size >= limit) throw searchError('当前搜索较多，请稍后重试', 'RESOURCE_SEARCH_BUSY');
-    const task = this.run(keyword).finally(() => { if (this.inFlight.get(key) === task) this.inFlight.delete(key); });
+    const task = this.run(keyword, category).finally(() => { if (this.inFlight.get(key) === task) this.inFlight.delete(key); });
     this.inFlight.set(key, task);
     return task;
   }
 
-  async run(keyword) {
-    if (!this.urls.length) throw searchError('未配置搜索来源', 'RESOURCE_SEARCH_UNAVAILABLE');
+  async run(keyword, category) {
+    if (this.useCatalog) return this.catalogSearch.search(keyword, { category });
+    if (!this.urls.length) throw searchError('搜索来源配置无效', 'RESOURCE_SEARCH_CONFIG_INVALID');
     const responses = await Promise.allSettled(this.urls.map(endpoint => this.fetchEndpoint(endpoint, keyword)));
     const lists = responses.filter(item => item.status === 'fulfilled').map(item => item.value);
     const failures = responses.filter(item => item.status === 'rejected').map(item => item.reason);

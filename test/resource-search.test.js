@@ -93,10 +93,10 @@ test('搜索并发有上限，后台任务为手动搜索保留名额', async ()
   const manual=service.search('三');hold.resolve(reply());await Promise.all([first,second,manual]);assert.equal(service.inFlight.size,0);
 });
 
-test('无效片名不发请求，默认只有内置搜索端点，无隐式公共备用源', async t => {
+test('无效片名不发请求，默认作品索引查询，无隐式公共备用源', async t => {
   const saved=process.env.RESOURCE_SEARCH_URLS;delete process.env.RESOURCE_SEARCH_URLS;
   t.after(()=>{if(saved===undefined)delete process.env.RESOURCE_SEARCH_URLS;else process.env.RESOURCE_SEARCH_URLS=saved;});
   let calls=0;const service=new ResourceSearchService({fetchImpl:async()=>{calls++;return reply();}});
-  assert.deepEqual(service.urls,['http://127.0.0.1:8888/api/search']);
+  assert.deepEqual(service.urls,[]); assert.equal(service.useCatalog,true);
   await assert.rejects(service.search('  '),{code:'RESOURCE_SEARCH_KEYWORD_REQUIRED'});assert.equal(calls,0);
 });

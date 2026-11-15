@@ -2,6 +2,7 @@ import type { CategoryType } from '../types/media';
 import type { ResourceItem } from '../types/search';
 import { isNonVideoResource } from './resourceFiltering';
 import { resourceHeading, resourceTitleMatch } from './resourceTitles';
+import { isExactWorkTitle } from '../../server/searchTitles.js';
 
 export function matchResource(keyword: string, title: string, category?: CategoryType) {
   const heading = resourceHeading(title);
@@ -40,11 +41,19 @@ export function resourceEpisode(title: string) {
 }
 
 export function rankResourceCandidates(resources: ResourceItem[], keyword: string, category?: CategoryType) {
-  const ranked = resources.map(resource => ({ resource, match: matchResource(keyword, resource.title, category) }))
+  const ranked = resources.map(resource => {
+    const match = matchResource(keyword, resource.title, category);
+    if (resource.workTitle) {
+      match.matches = isExactWorkTitle(keyword, resource.workTitle);
+      match.conflict = Boolean(category && resource.category && resource.category !== category);
+      match.otherVersion = match.conflict;
+    }
+    return { resource, match, episode: resource.latestEpisode ?? resourceEpisode(resource.title), date: Date.parse(resource.datetime) || 0 };
+  })
     .filter(item => item.match.matches)
-    .sort((a, b) => (category === 'movie' ? 0 : resourceEpisode(b.resource.title) - resourceEpisode(a.resource.title))
+    .sort((a, b) => (category === 'movie' ? 0 : b.episode - a.episode)
       || Number(a.match.otherVersion) - Number(b.match.otherVersion)
-      || b.match.score - a.match.score || (Date.parse(b.resource.datetime) || 0) - (Date.parse(a.resource.datetime) || 0));
+      || b.match.score - a.match.score || b.date - a.date);
   const seen = new Set<string>();
   return ranked.filter(({ resource }) => {
     if (seen.has(resource.url)) return false;

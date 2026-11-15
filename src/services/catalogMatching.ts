@@ -4,6 +4,10 @@ import type { ResourceItem } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
 import { matchResource } from './resourceMatching';
+import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { matchesResourceTitle } from './resourceTitles';
+
+export type PlaybackWork = Pick<CatalogItem, 'title' | 'category'> & { year?: string };
 
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 const escape = (value: string) => value.replace(/[.*+?^\x24{}()|[\]\\]/g, '\\$&');
@@ -28,7 +32,7 @@ export function findCatalogMedia(item: CatalogItem, library: MediaItem[]) {
     && normalize(media.title) === normalize(item.title) && (!item.year || media.year === item.year));
   return candidates.length === 1 ? candidates[0] : undefined;
 }
-export function matchesCatalogTitle(item: CatalogItem, title: string, requireYear = true) {
+export function matchesCatalogTitle(item: PlaybackWork, title: string, requireYear = true) {
   if (!item.title.trim() || isNonVideoResource(title, item.title) || /解说|混剪|沙雕|有声|合集|全季|多季/.test(title)) return false;
   if (requireYear && (!item.year || year(title) !== item.year)) return false;
   if (!requireYear && year(title) && item.year && year(title) !== item.year) return false;
@@ -36,17 +40,24 @@ export function matchesCatalogTitle(item: CatalogItem, title: string, requireYea
   const pattern = new RegExp('(^|[^\\p{L}\\p{N}])' + escape(item.title).replace(/\s+/g, '\\s*') + '(?=$|[^\\p{L}\\p{N}])', 'iu');
   return pattern.test(title) || normalize(title) === normalize(item.title);
 }
-export function automaticCatalogCandidates(item: CatalogItem, resources: ResourceItem[]) {
+export function automaticCatalogCandidates(item: PlaybackWork, resources: ResourceItem[]) {
   return resources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/.test(resource.url)
-    && matchesCatalogTitle(item, resource.title)
+    && (resource.workTitle ? isExactWorkTitle(item.title, resource.workTitle) && (!item.year || item.year === resource.year)
+      && (!resource.category || resource.category === item.category) : matchesCatalogTitle(item, resource.title))
     && matchResource(item.title, resource.title, item.category).matches
     && !matchResource(item.title, resource.title, item.category).conflict
     && !(item.category === 'anime' && /短剧|真人/.test(resource.title)));
 }
 
-export function validatesCatalogShare(item: CatalogItem, details: QuarkShareDetails) {
-  if (!details.videoCount || !matchesCatalogTitle(item, details.title, false)) return false;
+export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem) {
+  const metadataMatch = resource?.workTitle && isExactWorkTitle(item.title, resource.workTitle) && matchesResourceTitle(item.title, details.title)
+    && (!item.year || !year(details.title) || year(details.title) === item.year);
+  if (!details.videoCount || !(matchesCatalogTitle(item, details.title, false) || metadataMatch)) return false;
   const videos = details.entries.filter(entry => entry.isVideo);
   if (!videos.length) return false;
+  if (metadataMatch && resource?.workTitle && explicitSeason(item.title) === undefined && explicitSeason(resource.workTitle) === undefined) {
+    const found = new Set(details.entries.filter(entry => entry.isVideo || entry.isDirectory).map(entry => explicitSeason(entry.name)).filter(value => value !== undefined));
+    return found.size <= 1;
+  }
   return details.entries.every(entry => !(entry.isVideo || entry.isDirectory) || explicitSeason(entry.name) === undefined || season(entry.name) === season(item.title));
 }

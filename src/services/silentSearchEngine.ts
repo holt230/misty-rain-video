@@ -1,11 +1,12 @@
-import type { ResourceItem, SearchResult } from '../types/search';
+import type { ResourceItem, SearchCategory, SearchResult } from '../types/search';
+import { isExactWorkTitle } from '../../server/searchTitles.js';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
 import { isNonVideoResource } from './resourceFiltering';
 import { matchesResourceTitle, resourceHeading } from './resourceTitles';
 
-const REQUEST_TIMEOUT_MS = 35_000;
+const REQUEST_TIMEOUT_MS = 14_000;
 const normalizeKeyword = (keyword: string) => keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** Only query the application once for the submitted title. Results are never cached here. */
@@ -18,15 +19,15 @@ export class SilentSearchEngine {
     this.controllers.clear(); this.inFlight.clear();
   }
 
-  async search(keyword: string): Promise<SearchResult> {
+  async search(keyword: string, category: SearchCategory = 'all'): Promise<SearchResult> {
     const clean = normalizeKeyword(keyword);
     if (!clean) return this.failed('请输入片名');
-    const key = clean.toLocaleLowerCase('zh-CN');
+    const key = `${clean.toLocaleLowerCase('zh-CN')}\n${category}`;
     const pending = this.inFlight.get(key);
     if (pending) return pending;
     const controller = new AbortController();
     this.controllers.add(controller);
-    const task = this.request(clean, controller).finally(() => {
+    const task = this.request(clean, controller, category).finally(() => {
       this.controllers.delete(controller);
       if (this.inFlight.get(key) === task) this.inFlight.delete(key);
     });
@@ -34,10 +35,10 @@ export class SilentSearchEngine {
     return task;
   }
 
-  private async request(keyword: string, controller: AbortController): Promise<SearchResult> {
+  private async request(keyword: string, controller: AbortController, category: SearchCategory): Promise<SearchResult> {
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const response = await authFetch(`${apiUrl('/api/resource-search')}?${new URLSearchParams({ kw: keyword })}`, {
+      const response = await authFetch(`${apiUrl('/api/resource-search')}?${new URLSearchParams({ kw: keyword, category })}`, {
         method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal
       });
       const envelope = await response.json();
@@ -51,7 +52,9 @@ export class SilentSearchEngine {
       const items: ResourceItem[] = [];
       for (const raw of rows) {
         const item = this.parseSingleItem(raw);
-        if (!item || isNonVideoResource(item.title, keyword) || !matchesResourceTitle(keyword, item.title) || seen.has(item.url)) continue;
+        if (!item || isNonVideoResource(item.title, keyword)
+          || !(item.workTitle ? isExactWorkTitle(keyword, item.workTitle) : matchesResourceTitle(keyword, item.title))
+          || (category !== 'all' && item.category && item.category !== category) || seen.has(item.url)) continue;
         seen.add(item.url); items.push(item);
       }
       if (data.partial && !items.length) return this.failed('部分搜索来源请求失败，本次没有取得匹配结果，请重试');
@@ -72,7 +75,13 @@ export class SilentSearchEngine {
     const rawDate = String(raw.datetime || '').trim();
     const parsed = Date.parse(rawDate);
     return { id: `quark-${share.url.split('/').pop()}`, title, url: share.url, password: raw.password || share.passcode,
-      driveType: 'quark', datetime: Number.isFinite(parsed) && new Date(parsed).getFullYear() >= 2001 ? rawDate.substring(0, 10) : '日期未知', source: raw.source || '', quality, is4k };
+      driveType: 'quark', datetime: Number.isFinite(parsed) && new Date(parsed).getFullYear() >= 2001 ? rawDate.substring(0, 10) : '', source: raw.source || '', quality, is4k,
+      workTitle: typeof raw.work_title === 'string' ? raw.work_title : undefined,
+      category: ['tv', 'anime', 'movie', 'variety'].includes(raw.category) ? raw.category : undefined,
+      updateText: typeof raw.update_text === 'string' ? raw.update_text : undefined,
+      latestEpisode: Number.isInteger(raw.latest_episode) && raw.latest_episode >= 0 ? raw.latest_episode : undefined,
+      year: typeof raw.year === 'string' ? raw.year : undefined,
+      sourceUrl: typeof raw.source_url === 'string' ? raw.source_url : undefined };
   }
 
   private failed(message: string): SearchResult { return { success: false, total: 0, items: [], quarkItems: [], source: 'error', message }; }

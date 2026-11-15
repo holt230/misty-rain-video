@@ -29,7 +29,7 @@ services:
       # all 拆分插件/频道检索；8 秒返回首批状态，后台最多补查 30 秒。
       RESOURCE_SEARCH_SOURCE: all
       RESOURCE_SEARCH_TIMEOUT_MS: ${RESOURCE_SEARCH_TIMEOUT_MS:-8000}
-      RESOURCE_SEARCH_URLS: http://127.0.0.1:8888/api/search,https://so.252035.xyz/api/search
+      RESOURCE_SEARCH_URLS: ${RESOURCE_SEARCH_URLS:-}
     volumes:
       - misty-rain-data:/app/data
     read_only: true

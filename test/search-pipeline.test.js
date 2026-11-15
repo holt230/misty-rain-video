@@ -90,3 +90,9 @@ test('当前真实结果仍过滤明确无关类型和二创，特别篇属于�
  const view=mount({quarkResources:titles.map(resource)});
  try{await nextTick();assert.equal(document.querySelectorAll('.liquid-resource-row').length,2);assert.doesNotMatch(document.querySelector('.resource-rows').textContent,/除恶|壁纸|有声|沙雕/);assert.match(document.querySelector('.resource-rows').textContent,/特别篇/);}finally{view.app.unmount();}
 });
+
+test('全部类型使用来源明确分类保存，219集信息独立展示且严格匹配作品',async()=>{
+ const saved=[];const item={...resource('斗破苍穹年番',0),workTitle:'斗破苍穹年番',category:'anime',year:'2022',updateText:'更新至第219集',latestEpisode:219};
+ const view=mount({searchCategory:'all',quarkResources:[item]}, {onPreparePlay:(...args)=>saved.push(args)});
+ try{await nextTick();assert.match(document.querySelector('.update-badge').textContent,/219/);assert.match(document.querySelector('.category-picker-trigger').textContent,/全部类型/);document.querySelector('.btn-transfer').click();assert.equal(saved[0][1],'anime');}finally{view.app.unmount();}
+});

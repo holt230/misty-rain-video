@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApiContext, handleApiRequest } from './server/api.js';
 import { startBundledResourceSearch } from './server/bundledResourceSearch.js';
+import { needsBundledSearch } from './server/searchConfig.js';
 import { handleMobileConfigRequest } from './server/mobileConfig.js';
 import { handleBasePath, normalizeBasePath } from './server/basePath.js';
 
@@ -14,7 +15,8 @@ const host = process.env.HOST || '0.0.0.0';
 const basePath = normalizeBasePath(process.env.APP_BASE_PATH);
 const dataDir = path.resolve(__dirname, 'data');
 const distDir = path.resolve(__dirname, 'dist');
-const bundledResourceSearch = await startBundledResourceSearch({ appDir: __dirname, dataDir });
+// The default work-index query does not require the broad aggregation process.
+const bundledResourceSearch = needsBundledSearch() ? await startBundledResourceSearch({ appDir: __dirname, dataDir }) : null;
 if (bundledResourceSearch?.ready) {
   const configuredUrls = String(process.env.RESOURCE_SEARCH_URLS || '')
     .split(',')

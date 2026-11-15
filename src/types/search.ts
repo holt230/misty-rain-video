@@ -1,3 +1,5 @@
+import type { CategoryType } from './media';
+export type SearchCategory = CategoryType | 'all';
 export type DriveType = 'quark' | 'aliyun' | 'baidu' | 'xunlei' | '115' | 'uc' | 'tianyi' | 'mobile' | 'other';
 
 export interface ResourceItem {
@@ -11,6 +13,12 @@ export interface ResourceItem {
   quality: string;
   is4k: boolean;
   size?: string;
+  workTitle?: string;
+  category?: CategoryType;
+  updateText?: string;
+  latestEpisode?: number;
+  year?: string;
+  sourceUrl?: string;
 }
 
 export interface SearchResult {

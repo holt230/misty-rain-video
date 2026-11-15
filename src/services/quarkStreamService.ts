@@ -140,10 +140,11 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 };
 
 export class QuarkStreamService {
-  static getShareDetails(shareUrl: string, passcode = ''): Promise<QuarkShareDetails> {
+  static getShareDetails(shareUrl: string, passcode = '', signal?: AbortSignal): Promise<QuarkShareDetails> {
     return request('/api/quark/share-details', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal,
       body: JSON.stringify({ shareUrl, passcode })
     });
   }
