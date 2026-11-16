@@ -1,6 +1,7 @@
 import { TencentCatalog, parseTencentEpisodes } from './danmaku/tencentCatalog.js';
 import { isExactWorkTitle } from './searchTitles.js';
 import { readWebResponseText } from './http.js';
+import { discoverOfficialPlatforms, OfficialPlatformCatalog } from './officialPlatforms.js';
 
 const clean = value => String(value || '').replace(/<[^>]*>/g, '').trim().slice(0, 160);
 const categories = { '动漫': 'anime', '电视剧': 'tv' };
@@ -87,27 +88,41 @@ export class OfficialProgressService {
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) controller.abort();
     let timer;
-    const catalog = new TencentCatalog(async (url, options) => {
-      const response = await this.fetchImpl(url, { ...options, signal: controller.signal, redirect: 'error' });
+    const confirmed = [];
+    const request = async (url, options = {}, format = 'json') => {
+      controller.signal.throwIfAborted();
+      const target = new URL(url);
+      if (target.protocol !== 'https:' || target.port || target.username || target.password || ![
+        'pbaccess.video.qq.com', 'v.youku.com', 'pcw-api.iqiyi.com', 'pcweb.api.mgtv.com'
+      ].includes(target.hostname)) throw new Error('官方数据地址无效');
+      const response = await this.fetchImpl(target.href, { ...options, headers: { 'User-Agent': 'Mozilla/5.0', ...options.headers }, signal: controller.signal, redirect: 'error' });
       if (!response.ok) throw new Error('官方目录暂时无法访问');
       const body = await readWebResponseText(response, { maxBytes: 4 * 1024 * 1024, idleTimeoutMs: this.timeoutMs });
-      return { json: () => JSON.parse(body) };
-    });
+      return format === 'text' ? body : JSON.parse(body);
+    };
+    const catalog = new TencentCatalog(async (url, options) => ({ json: () => request(url, options) }));
+    const platforms = new OfficialPlatformCatalog(request);
+    let timedOut = false;
     try {
-      const works = await Promise.race([
+      await Promise.race([
         (async () => {
-          const candidates = parseOfficialProgress(await catalog.searchResponse(keyword), keyword, category);
-          const confirmed = [];
-          for (let start = 0; start < Math.min(candidates.length, 9); start += 3) {
-            const results = await Promise.allSettled(candidates.slice(start, start + 3).map(work => confirmOfficialLatest(catalog, work)));
-            for (const result of results) if (result.status === 'fulfilled') confirmed.push(result.value);
+          const search = await catalog.searchResponse(keyword);
+          const candidates = [
+            ...parseOfficialProgress(search, keyword, category).map(work => ({ work, provider: 'qq' })),
+            ...discoverOfficialPlatforms(search, keyword, category).map(work => ({ work, provider: work.provider }))
+          ];
+          for (let start = 0; start < Math.min(candidates.length, 12) && !controller.signal.aborted; start += 4) {
+            await Promise.allSettled(candidates.slice(start, start + 4).map(async ({ work, provider }) => {
+              const value = await (provider === 'qq' ? confirmOfficialLatest(catalog, work) : platforms.confirm(work, keyword));
+              if (!controller.signal.aborted) confirmed.push(value);
+            }));
           }
-          return confirmed;
         })(),
-        new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('官方进度读取超时')); }, this.timeoutMs); })
+        new Promise(resolve => { timer = setTimeout(() => { timedOut = true; controller.abort(); resolve(); }, this.timeoutMs); })
       ]);
-      return { status: works.length ? 'confirmed' : 'unknown', works, checkedAt: new Date().toISOString(),
-        message: works.length ? '' : '暂未在腾讯视频确认到这部作品的正片进度。' };
+      const works = [...confirmed].sort((a, b) => a.title.localeCompare(b.title) || a.platform.localeCompare(b.platform) || a.id.localeCompare(b.id));
+      return { status: works.length ? 'confirmed' : timedOut ? 'unavailable' : 'unknown', works, checkedAt: works.length || !timedOut ? new Date().toISOString() : '',
+        message: works.length ? '' : timedOut ? '官方进度暂时无法读取，已找到的资源仍按实际文件核对。' : '暂未在腾讯视频、优酷、芒果TV或爱奇艺确认到对应版本的正片进度。' };
     } catch {
       return { status: 'unavailable', works: [], checkedAt: '', message: '官方进度暂时无法读取，已找到的资源仍按实际文件核对。' };
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }

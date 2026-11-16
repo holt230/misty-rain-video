@@ -32,7 +32,15 @@ export async function readOfficialProgress(title: string, category: SearchCatego
 export function chooseOfficialProgress(data: OfficialProgress, title: string, category: SearchCategory, resources: ResourceItem[], year?: string): OfficialWorkProgress | undefined {
   const resourceCategories = new Set(resources.map(item => item.category).filter(Boolean));
   const kind = category === 'all' && resourceCategories.size === 1 ? [...resourceCategories][0] : category;
-  const works = data.works.filter(work => (kind === 'all' || kind === work.category) && (!year || work.year === year));
+  // The same edition can air on several platforms. Prefer the highest confirmed
+  // release for that edition, while preserving distinct seasons, years and types.
+  const editions = new Map<string, OfficialWorkProgress>();
+  for (const work of data.works) {
+    const key = `${searchTitleKey(work.title)}:${work.category}:${work.year}`;
+    const previous = editions.get(key);
+    if (!previous || work.latestEpisode > previous.latestEpisode || (work.latestEpisode === previous.latestEpisode && work.platform.localeCompare(previous.platform) < 0)) editions.set(key, work);
+  }
+  const works = [...editions.values()].filter(work => (kind === 'all' || kind === work.category) && (!year || work.year === year));
   const structured = works.filter(work => resources.some(resource => resource.workTitle && searchTitleKey(resource.workTitle) === searchTitleKey(work.title)
     && (!resource.year || resource.year === work.year) && (!resource.category || resource.category === work.category)));
   if (structured.length === 1) return structured[0];

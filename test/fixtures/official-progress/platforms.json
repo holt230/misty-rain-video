@@ -1,0 +1,510 @@
+{
+  "discovery": {
+    "ret": 0,
+    "data": {
+      "normalList": {
+        "itemList": [
+          {
+            "doc": {
+              "id": "sdp0010051btpqt",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "唐朝诡事录",
+              "typeName": "电视剧",
+              "year": 2022,
+              "episodeSites": [
+                {
+                  "enName": "qiyi",
+                  "totalEpisode": 36,
+                  "episodeInfoList": [
+                    {
+                      "id": "https://v.qq.com/search_redirect.html?url=https%3A%2F%2Fwww.iqiyi.com%2Fv_nvusov4apo.html%3Fvfm%3Dm_103_txsp",
+                      "url": "https://v.qq.com/search_redirect.html?cid=sdp0010051btpqt&url=https%3A%2F%2Fwww.iqiyi.com%2Fv_nvusov4apo.html%3Fvfm%3Dm_103_txsp",
+                      "title": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "doc": {
+              "id": "sdp0010051920c4",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "大主宰年番",
+              "typeName": "动漫",
+              "year": 2022,
+              "episodeSites": [
+                {
+                  "enName": "qiyi",
+                  "totalEpisode": 99,
+                  "episodeInfoList": [
+                    {
+                      "id": "https://v.qq.com/search_redirect.html?url=https%3A%2F%2Fwww.iqiyi.com%2Fv_1d74ab0t9ug.html%3Fvfm%3Dm_103_txsp",
+                      "url": "https://v.qq.com/search_redirect.html?cid=sdp0010051920c4&url=https%3A%2F%2Fwww.iqiyi.com%2Fv_1d74ab0t9ug.html%3Fvfm%3Dm_103_txsp",
+                      "title": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "doc": {
+              "id": "sdp001000ahxi3q",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "暗河传",
+              "typeName": "电视剧",
+              "year": 2025,
+              "episodeSites": [
+                {
+                  "enName": "youku",
+                  "totalEpisode": 38,
+                  "episodeInfoList": [
+                    {
+                      "id": "https://v.qq.com/search_redirect.html?url=https%3A%2F%2Fm.youku.com%2Falipay_video%2Fid_XNjQ5NzI5MTY0MA%3D%3D.html",
+                      "url": "https://v.qq.com/search_redirect.html?cid=sdp001000ahxi3q&url=https%3A%2F%2Fm.youku.com%2Falipay_video%2Fid_XNjQ5NzI5MTY0MA%3D%3D.html",
+                      "title": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "doc": {
+              "id": "sdp0010051jum7x",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "师兄啊师兄 第一季",
+              "typeName": "动漫",
+              "year": 2023,
+              "episodeSites": [
+                {
+                  "enName": "youku",
+                  "totalEpisode": 167,
+                  "episodeInfoList": [
+                    {
+                      "id": "https://v.qq.com/search_redirect.html?url=https%3A%2F%2Fm.youku.com%2Falipay_video%2Fid_XNTkzNjcwOTkwOA%3D%3D.html",
+                      "url": "https://v.qq.com/search_redirect.html?cid=sdp0010051jum7x&url=https%3A%2F%2Fm.youku.com%2Falipay_video%2Fid_XNTkzNjcwOTkwOA%3D%3D.html",
+                      "title": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "doc": {
+              "id": "sdp001000aoeqg6",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "国色芳华",
+              "typeName": "电视剧",
+              "year": 2025,
+              "episodeSites": [
+                {
+                  "enName": "hunantv",
+                  "totalEpisode": 32,
+                  "episodeInfoList": [
+                    {
+                      "id": "https://v.qq.com/search_redirect.html?url=https%3A%2F%2Fwww.mgtv.com%2Fb%2F615428%2F22328413.html%3Fcxid%3D90fe36tp1",
+                      "url": "https://v.qq.com/search_redirect.html?cid=sdp001000aoeqg6&url=https%3A%2F%2Fwww.mgtv.com%2Fb%2F615428%2F22328413.html%3Fcxid%3D90fe36tp1",
+                      "title": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "doc": {
+              "id": "sdp001000a4ain4",
+              "dataType": 2
+            },
+            "videoInfo": {
+              "title": "锦绣芳华",
+              "typeName": "电视剧",
+              "year": 2025,
+              "episodeSites": [
+                {
+                  "enName": "hunantv",
+                  "totalEpisode": 24,
+                  "episodeInfoList": [
+                    {
+                      "id": "https://v.qq.com/search_redirect.html?url=https%3A%2F%2Fwww.mgtv.com%2Fb%2F755976%2F23118095.html%3Fcxid%3D90fe36tp1",
+                      "url": "https://v.qq.com/search_redirect.html?cid=sdp001000a4ain4&url=https%3A%2F%2Fwww.mgtv.com%2Fb%2F755976%2F23118095.html%3Fcxid%3D90fe36tp1",
+                      "title": ""
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "areaBoxList": []
+    }
+  },
+  "youku": {
+    "pageMap": {
+      "extra": {
+        "videoId": "XNjQ5NzI5MTY0MA==",
+        "videoType": "正片",
+        "showId": "ecda347687c4441cb2f3",
+        "showName": "暗河传",
+        "showCategory": "电视剧",
+        "showReleaseTime": "2025-10-20 12:00:00",
+        "episodeLast": 38,
+        "episodeTotal": 38,
+        "completed": true
+      }
+    },
+    "moduleList": [
+      {
+        "components": [
+          {
+            "type": 10013,
+            "more": false,
+            "lastStage": 38,
+            "pageSize": 60,
+            "pageIndex": 1,
+            "subtitle": "38集全",
+            "itemList": [
+              {
+                "stage": 36,
+                "title": "暗河传 第36集",
+                "videoType": "正片",
+                "episodeInfo": {
+                  "benefitType": 1,
+                  "isZp": true
+                },
+                "action": {
+                  "type": "JUMP_TO_VIDEO",
+                  "value": "XNjUwNTgwOTU2OA==",
+                  "extra": {
+                    "showId": "ecda347687c4441cb2f3"
+                  }
+                }
+              },
+              {
+                "stage": 37,
+                "title": "暗河传 第37集",
+                "videoType": "正片",
+                "episodeInfo": {
+                  "benefitType": 1,
+                  "isZp": true
+                },
+                "action": {
+                  "type": "JUMP_TO_VIDEO",
+                  "value": "XNjQ5NzQxMjkxNg==",
+                  "extra": {
+                    "showId": "ecda347687c4441cb2f3"
+                  }
+                }
+              },
+              {
+                "stage": 38,
+                "title": "暗河传 第38集",
+                "videoType": "正片",
+                "episodeInfo": {
+                  "benefitType": 1,
+                  "isZp": true
+                },
+                "action": {
+                  "type": "JUMP_TO_VIDEO",
+                  "value": "XNjUwNTgxMjEyOA==",
+                  "extra": {
+                    "showId": "ecda347687c4441cb2f3"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "youkuAnime": {
+    "pageMap": {
+      "extra": {
+        "videoId": "XNTkzNjcwOTkwOA==",
+        "videoType": "正片",
+        "showId": "badbb5792f934ddb82fd",
+        "showName": "师兄啊师兄",
+        "showCategory": "动漫",
+        "showReleaseTime": "2023-01-19 10:00:00",
+        "episodeLast": 167,
+        "episodeTotal": 169,
+        "completed": false
+      }
+    },
+    "moduleList": [
+      {
+        "components": [
+          {
+            "type": 10013,
+            "more": true,
+            "lastStage": 168,
+            "pageSize": 60,
+            "pageIndex": 1,
+            "subtitle": "更新至167/169话，每周四10点VIP更新，每周三10点SVIP抢先看",
+            "itemList": [
+              {
+                "stage": 59,
+                "title": "染灯携奸计再次现身，孔宣火速霸气救场",
+                "videoType": "正片",
+                "episodeInfo": {
+                  "benefitType": 1,
+                  "isZp": true
+                },
+                "action": {
+                  "type": "JUMP_TO_VIDEO",
+                  "value": "XNjM5NTIzOTMxNg==",
+                  "extra": {
+                    "showId": "badbb5792f934ddb82fd"
+                  }
+                }
+              },
+              {
+                "stage": 60,
+                "title": "天道降罚有琴国！大禹率魔兵霸气救场",
+                "videoType": "正片",
+                "episodeInfo": {
+                  "benefitType": 1,
+                  "isZp": true
+                },
+                "action": {
+                  "type": "JUMP_TO_VIDEO",
+                  "value": "XNjM4OTIwNTM2NA==",
+                  "extra": {
+                    "showId": "badbb5792f934ddb82fd"
+                  }
+                }
+              },
+              {
+                "stage": "发布会",
+                "title": "封神榜出，众神归位！",
+                "videoType": "花絮",
+                "episodeInfo": {
+                  "benefitType": 0,
+                  "isZp": false
+                },
+                "action": {
+                  "type": "JUMP_TO_VIDEO",
+                  "value": "XNjUwMjMwMDYzMg==",
+                  "extra": {
+                    "showId": "badbb5792f934ddb82fd"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "iqiyiInfo": {
+    "code": "A00000",
+    "data": {
+      "tvId": 2510478292568400,
+      "albumId": 1205354457011501,
+      "albumName": "唐朝诡事录",
+      "channelId": 2,
+      "formatIssueTime": "2022-09-27",
+      "period": "2022-09-26",
+      "latestOrder": 36,
+      "videoCount": 36,
+      "contentType": 1,
+      "effective": true,
+      "pagePublishStatus": "PAGE_ONLINE"
+    }
+  },
+  "iqiyiAnimeInfo": {
+    "code": "A00000",
+    "data": {
+      "tvId": 4984357767210100,
+      "albumId": 5305224104606401,
+      "albumName": "大主宰年番",
+      "channelId": 4,
+      "formatIssueTime": "2023-06-30",
+      "period": "2023-06-27",
+      "latestOrder": 99,
+      "videoCount": 104,
+      "contentType": 1,
+      "effective": true,
+      "pagePublishStatus": "PAGE_ONLINE"
+    }
+  },
+  "iqiyiList": {
+    "code": "A00000",
+    "data": {
+      "albumId": "1205354457011501",
+      "latestOrder": 36,
+      "videoCount": 36,
+      "page": 1,
+      "size": 50,
+      "hasMore": false,
+      "total": 36,
+      "epsodelist": [
+        {
+          "tvId": 5915672316071600,
+          "order": 35,
+          "name": "唐朝诡事录第35集",
+          "effective": true,
+          "contentType": 1,
+          "playUrl": "http://www.iqiyi.com/v_1nfdzb2tdy4.html"
+        },
+        {
+          "tvId": 5293191618240100,
+          "order": 36,
+          "name": "唐朝诡事录第36集",
+          "effective": true,
+          "contentType": 1,
+          "playUrl": "http://www.iqiyi.com/v_1fwy4mccr9k.html"
+        }
+      ],
+      "updateprevuelist": []
+    }
+  },
+  "iqiyiAnimeList": {
+    "code": "A00000",
+    "data": {
+      "albumId": "5305224104606401",
+      "latestOrder": 99,
+      "videoCount": 104,
+      "page": 2,
+      "size": 50,
+      "hasMore": false,
+      "total": 100,
+      "epsodelist": [
+        {
+          "tvId": 8691968317157900,
+          "order": 98,
+          "name": "大主宰年番 第98集",
+          "effective": true,
+          "contentType": 1,
+          "playUrl": "http://www.iqiyi.com/v_2cr0ez2esf4.html"
+        },
+        {
+          "tvId": 7822420538251600,
+          "order": 99,
+          "name": "大主宰年番 第99集",
+          "effective": true,
+          "contentType": 1,
+          "playUrl": "http://www.iqiyi.com/v_24wcxi2wuv0.html"
+        }
+      ],
+      "updateprevuelist": [
+        {
+          "tvId": 5456031287503700,
+          "order": 100,
+          "name": "大主宰年番 第100集预告",
+          "effective": true,
+          "contentType": 3,
+          "playUrl": "http://www.iqiyi.com/v_1gwsmeuw2t4.html"
+        }
+      ]
+    }
+  },
+  "mangoInfo": {
+    "code": 200,
+    "data": {
+      "info": {
+        "clipName": "国色芳华",
+        "fstlvlType": "电视剧",
+        "clipId": "615428",
+        "videoId": "22328413",
+        "isIntact": "1",
+        "detail": {
+          "releaseTime": "2025-01-07",
+          "updateInfo": "共32集，更新至32集"
+        }
+      }
+    }
+  },
+  "mangoFirst": {
+    "code": 200,
+    "data": {
+      "info": {
+        "title": "国色芳华",
+        "type": "0",
+        "isvip": "1",
+        "desc": ""
+      },
+      "current_page": 1,
+      "total_page": 2,
+      "total": 32,
+      "list": [
+        {
+          "t1": "1",
+          "t3": "国色芳华 第1集",
+          "t4": "第1集",
+          "video_id": "22328413",
+          "clip_id": "615428",
+          "isIntact": "1",
+          "url": "/b/615428/22328413.html"
+        },
+        {
+          "t1": "25",
+          "t3": "国色芳华 第25集",
+          "t4": "第25集",
+          "video_id": "22388998",
+          "clip_id": "615428",
+          "isIntact": "1",
+          "url": "/b/615428/22388998.html"
+        }
+      ]
+    }
+  },
+  "mangoLast": {
+    "code": 200,
+    "data": {
+      "info": {
+        "title": "国色芳华",
+        "type": "0",
+        "isvip": "1",
+        "desc": ""
+      },
+      "current_page": 2,
+      "total_page": 2,
+      "total": 32,
+      "list": [
+        {
+          "t1": "31",
+          "t3": "国色芳华 第31集",
+          "t4": "第31集",
+          "video_id": "22389406",
+          "clip_id": "615428",
+          "isIntact": "1",
+          "url": "/b/615428/22389406.html"
+        },
+        {
+          "t1": "32",
+          "t3": "国色芳华 第32集",
+          "t4": "第32集",
+          "video_id": "22389443",
+          "clip_id": "615428",
+          "isIntact": "1",
+          "url": "/b/615428/22389443.html"
+        },
+        {
+          "t1": "彩29",
+          "t3": "国色画室共创彩蛋：蒋长扬邀您共享盛唐",
+          "t4": "第28集",
+          "video_id": "22350837",
+          "clip_id": "615428",
+          "isIntact": "7",
+          "url": "/b/615428/22350837.html"
+        }
+      ]
+    }
+  }
+}
