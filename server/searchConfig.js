@@ -1,5 +1,10 @@
 const OLD_SHIPPED_URLS = ['http://127.0.0.1:8888/api/search', 'https://so.252035.xyz/api/search'];
 
+/** Public channels require an explicitly reachable outbound network. Never enable implicitly. */
+export function configuredSearchChannels(value = process.env.RESOURCE_SEARCH_CHANNELS) {
+  return [...new Set(String(value || '').split(',').map(item => item.trim()).filter(item => ['Quark_Movies', 'guoman4K'].includes(item)))];
+}
+
 /** undefined selects the fixed parallel sources; [] is an invalid explicit configuration. */
 export function configuredSearchUrls(value = process.env.RESOURCE_SEARCH_URLS) {
   const values = [...new Set(String(value || '').split(',').map(item => item.trim().replace(/\/$/, '')).filter(Boolean))];

@@ -70,10 +70,11 @@ export function useQuarkTransfer() {
         if (sequence !== searchSequence || !isOpen.value) return;
         quarkResources.value = checked.resources;
         searchNotice.value = checked.message || (checked.resources.length ? result.message || '' : '');
-        if (!checked.resources.length && result.partial && !checked.error) {
-          searchNotice.value = `${checked.message}部分来源未完成查询，可稍后重试。`;
-        }
         searchError.value = checked.error || ''; searchNeedsAuth.value = Boolean(checked.needsAuth);
+        if (!checked.resources.length && result.partial && !checked.error) {
+          searchNotice.value = '';
+          searchError.value = '片源查询未完成：部分来源无法访问，已访问的分享中未核实到可用视频。请重新搜索；持续失败时需要管理员检查搜索来源。';
+        }
       } else searchError.value = result.message || '搜索失败，请重试';
     } catch { if (sequence === searchSequence && isOpen.value) searchError.value = '搜索失败，请重试'; }
     finally { if (sequence === searchSequence) { isAnalyzing.value = false; searchPending.value = false; searchPhase.value = 'done'; } }

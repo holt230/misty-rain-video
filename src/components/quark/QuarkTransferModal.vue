@@ -87,6 +87,7 @@ const officialTime = computed(() => props.officialCheckedAt ? new Date(props.off
 const officialAvailability = computed(() => {
   const latest = props.officialProgress?.latestEpisode;
   if (!latest || searchBusy.value) return '';
+  if (props.searchError) return '片源查询未完成，暂时无法确认最新一集是否可用。';
   const found = props.quarkResources.some(resource => resource.verification?.requiredEpisodes.includes(latest));
   return found ? `本次已找到官方最新第 ${latest} 集。` : `本次暂未找到官方最新第 ${latest} 集。`;
 });
@@ -371,11 +372,11 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           <div v-else class="empty-notice" :role="searchError ? 'alert' : 'status'">
             <span>{{ searchError || (resultFilter === 'all' ? searchNotice || `未找到《${searchKeyword || media.title}》的可用资源。` : '当前筛选没有结果。') }}</span>
             <button v-if="searchNeedsAuth" type="button" class="retry-search-button" @click="emit('open-auth-settings')">前往认证设置</button>
-            <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
+            <button v-if="searchError || resultFilter === 'all'" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
               重新搜索
             </button>
-            <button v-else-if="resultFilter !== 'all'" type="button" class="retry-search-button" @click="resultFilter = 'all'">查看全部结果</button>
+            <button v-else type="button" class="retry-search-button" @click="resultFilter = 'all'">查看全部结果</button>
           </div>
         </template>
       </div>

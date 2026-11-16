@@ -70,11 +70,14 @@ export class ChannelResourceSearch {
         (async () => {
           const url = new URL(`https://t.me/s/${channel}`); url.searchParams.set('q', keyword);
           const response = await this.fetchImpl(url, { signal: controller.signal, redirect: 'error', headers: { Accept: 'text/html', 'User-Agent': 'MistyRainVideo/1.0' } });
-          if (!response.ok) throw failure(`公开来源返回 HTTP ${response.status}`);
+          if (!response.ok) throw failure(`公开来源返回 HTTP ${response.status}`, 'RESOURCE_SEARCH_HTTP_ERROR');
           const rows = parseChannelResults(await readWebResponseText(response, { maxBytes: 2 * 1024 * 1024, idleTimeoutMs: this.timeoutMs }), channel, category);
           return { total: rows.length, merged_by_type: { quark: rows } };
         })()
       ]);
+    } catch (error) {
+      if (String(error.code || '').startsWith('RESOURCE_SEARCH_')) throw error;
+      throw failure('服务器无法连接公开频道来源', /redirect/i.test(error.cause?.message || error.message || '') ? 'RESOURCE_SEARCH_REDIRECT' : 'RESOURCE_SEARCH_NETWORK_ERROR');
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
   }
 }

@@ -26,10 +26,11 @@ services:
       LEGACY_LIBRARY_ROOT_FOLDER: 烟雨视频
       LIBRARY_AUTO_MAINTENANCE: ${LIBRARY_AUTO_MAINTENANCE:-true}
       LIBRARY_MAINTENANCE_MINUTES: ${LIBRARY_MAINTENANCE_MINUTES:-30}
-      # all 拆分插件/频道检索；8 秒返回首批状态，后台最多补查 30 秒。
+      # 使用本轮实际结果，不进行后台补查。公开频道需显式启用且服务器可访问。
       RESOURCE_SEARCH_SOURCE: all
       RESOURCE_SEARCH_TIMEOUT_MS: ${RESOURCE_SEARCH_TIMEOUT_MS:-8000}
       RESOURCE_SEARCH_URLS: ${RESOURCE_SEARCH_URLS:-}
+      RESOURCE_SEARCH_CHANNELS: ${RESOURCE_SEARCH_CHANNELS:-}
     volumes:
       - misty-rain-data:/app/data
     read_only: true

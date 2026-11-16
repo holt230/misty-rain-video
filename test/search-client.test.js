@@ -79,6 +79,13 @@ test('部分来源失败且过滤后无匹配项时报告失败，成功的零�
  partial=false;const empty=await new SilentSearchEngine().search('斗破苍穹');assert.equal(empty.success,true);assert.equal(empty.total,0);
 });
 
+test('来源只返回一个非视频分享且标记部分失败时，显示查询未完成与重试，而非最终未找到',async t=>{
+ mockFetch(t,async url=>String(url).includes('share-details')?Response.json({code:0,data:{title:'混淆目录',videoCount:0,entries:[{fid:'image',name:'E219.mp3',isVideo:false}]}}):response([{...row('斗破苍穹年番'),work_title:'斗破苍穹年番',category:'anime',latest_episode:219}],{partial:true}));
+ const view=useQuarkTransfer();await view.openTransferModal({id:'search-production',title:'斗破苍穹',category:'anime'});
+ assert.deepEqual(view.quarkResources.value,[]);assert.match(view.searchError.value,/片源查询未完成/);assert.equal(view.searchNotice.value,'');
+ view.closeTransferModal();
+});
+
 test('真实作品元数据219集贯穿客户端，不依赖合并标题猜测，类型传给服务端',async t=>{
  mockFetch(t,async url=>{assert.equal(new URL(url,'http://localhost').searchParams.get('category'),'anime');return response([{...row('斗破苍穹年番'),work_title:'斗破苍穹年番',category:'anime',update_text:'更新至第219集',latest_episode:219,year:'2022'}]);});
  const result=await new SilentSearchEngine().search('斗破苍穹','anime');assert.equal(result.total,1);assert.equal(result.items[0].latestEpisode,219);assert.equal(result.items[0].updateText,'更新至第219集');assert.equal(result.items[0].category,'anime');

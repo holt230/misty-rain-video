@@ -1,6 +1,6 @@
 import { CatalogResourceSearch } from './catalogResourceSearch.js';
-import { configuredSearchUrls } from './searchConfig.js';
-import { ChannelResourceSearch, SEARCH_CHANNELS } from './channelResourceSearch.js';
+import { configuredSearchChannels, configuredSearchUrls } from './searchConfig.js';
+import { ChannelResourceSearch } from './channelResourceSearch.js';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESULTS = 500;
@@ -55,7 +55,7 @@ function mergeResults(lists) {
 
 /** A search returns only this operation's results; no stored results or fallback queries. */
 export class ResourceSearchService {
-  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch } = {}) {
+  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), channels = configuredSearchChannels(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch } = {}) {
     this.fetchImpl = fetchImpl;
     this.urls = [...new Set(urls || [])];
     this.useCatalog = urls === undefined;
@@ -65,6 +65,7 @@ export class ResourceSearchService {
     this.inFlight = new Map();
     this.catalogSearch = catalogSearch || new CatalogResourceSearch({ fetchImpl, timeoutMs });
     this.channelSearch = channelSearch || new ChannelResourceSearch({ fetchImpl, timeoutMs: Math.min(timeoutMs, 5000) });
+    this.channels = configuredSearchChannels(channels.join(','));
   }
 
   async search(rawKeyword, { priority = 'interactive', category = 'all' } = {}) {
@@ -82,16 +83,32 @@ export class ResourceSearchService {
 
   async run(keyword, category) {
     if (this.useCatalog) {
+      const names = ['erxiaopan', ...this.channels];
+      const sources = [];
+      const inspect = async (name, loader) => {
+        const started = Date.now();
+        try {
+          const value = await loader();
+          sources.push({ name, status: value.partial ? 'partial' : 'success', count: value.total, durationMs: Date.now() - started });
+          return value;
+        } catch (error) {
+          const code = /^RESOURCE_SEARCH_[A-Z_]+$/.test(error.code || '') ? error.code : 'RESOURCE_SEARCH_UNAVAILABLE';
+          sources.push({ name, status: 'failed', code, count: 0, durationMs: Date.now() - started });
+          // Public diagnostic codes only. Do not log upstream URLs, proxy credentials or cookies.
+          console.warn(`[resource-search] ${name}: ${code}`);
+          throw error;
+        }
+      };
       const results = await Promise.allSettled([
-        this.catalogSearch.search(keyword, { category }),
-        ...SEARCH_CHANNELS.map(channel => this.channelSearch.search(keyword, { category, channel }))
+        inspect('erxiaopan', () => this.catalogSearch.search(keyword, { category })),
+        ...this.channels.map(channel => inspect(channel, () => this.channelSearch.search(keyword, { category, channel })))
       ]);
       const successes = results.filter(result => result.status === 'fulfilled').map(result => result.value);
       const partial = results.some(result => result.status === 'rejected') || successes.some(result => result.partial);
       const items = mergeResults(successes.map(result => result.merged_by_type.quark));
       if (!items.length && partial) throw searchError('部分搜索来源无法访问，本次未能完成查询，请重试', 'RESOURCE_SEARCH_UNAVAILABLE');
-      return { total: items.length, merged_by_type: { quark: items }, partial,
-        ...(partial ? { message: '部分来源暂时无法访问，以下仅包含本次已核对的结果。' } : {}) };
+      return { total: items.length, merged_by_type: { quark: items }, partial, sources: names.map(name => sources.find(source => source.name === name)),
+        ...(partial ? { message: '部分片源来源无法访问，本次查询未完成。' } : {}) };
     }
     if (!this.urls.length) throw searchError('搜索来源配置无效', 'RESOURCE_SEARCH_CONFIG_INVALID');
     const responses = await Promise.allSettled(this.urls.map(endpoint => this.fetchEndpoint(endpoint, keyword)));

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChannelResourceSearch, parseChannelResults } from '../server/channelResourceSearch.js';
 import { ResourceSearchService } from '../server/resourceSearch.js';
+import { configuredSearchChannels } from '../server/searchConfig.js';
 
 const post = (heading, link, id = 1) => `<div class="tgme_widget_message" data-post="guoman4K/${id}"><div class="tgme_widget_message_text">${heading}<br><br>简介：仅此一条来源的描述<br><a href="${link}">链接</a><br>标签：#国漫</div><time datetime="2026-11-${String(id).padStart(2, '0')}T00:00:00Z"></time></div>`;
 const page = (...posts) => `<main class="tgme_channel_history">${posts.join('')}</main>`;
@@ -46,6 +47,7 @@ test('默认来源在同一轮并行查原词，全部完成才返回，固定�
     return new Promise(resolve => releases.push(() => resolve({ total: 1, merged_by_type: { quark: [{ url: link(source === 'guoman4K' ? 'index' : source), note: '斗破苍穹' }] } })));
   };
   const service = new ResourceSearchService({ urls: undefined,
+    channels: ['Quark_Movies', 'guoman4K'],
     catalogSearch: { search: (keyword, { category }) => later('index', keyword, category) },
     channelSearch: { search: (keyword, { channel, category }) => later(channel, keyword, category) }
   });
@@ -64,10 +66,29 @@ test('默认来源在同一轮并行查原词，全部完成才返回，固定�
 test('默认来源部分失败不回旧结果：有新结果标记不完整，全部无结果明确查询未完成', async () => {
   let found = true;
   const service = new ResourceSearchService({
+    channels: ['Quark_Movies', 'guoman4K'],
     catalogSearch: { search: async () => found ? { total: 1, merged_by_type: { quark: [{ url: link('current'), note: '斗破苍穹' }] } } : empty() },
     channelSearch: { search: async () => { throw new Error('network'); } }
   });
   assert.equal((await service.search('斗破苍穹')).partial, true);
   found = false;
   await assert.rejects(service.search('斗破苍穹'), { code: 'RESOURCE_SEARCH_UNAVAILABLE' });
+});
+
+test('国内默认部署不请求Telegram，公开频道只有显式选择后才查询',async()=>{
+ assert.deepEqual(configuredSearchChannels(''),[]);
+ assert.deepEqual(configuredSearchChannels('unknown,guoman4K,guoman4K'),['guoman4K']);
+ let channels=0;
+ const service=new ResourceSearchService({channels:[],catalogSearch:{search:async()=>empty()},channelSearch:{search:async()=>{channels++;throw new Error('should not run');}}});
+ const result=await service.search('斗破苍穹');
+ assert.equal(channels,0);assert.equal(result.partial,false);
+ assert.deepEqual(result.sources.map(source=>source.name),['erxiaopan']);
+});
+
+test('显式频道失败时返回稳定来源诊断，不把密钥和原始异常传给客户端',async t=>{
+ t.mock.method(console,'warn',()=>{});
+ const service=new ResourceSearchService({channels:['guoman4K'],catalogSearch:{search:async()=>({total:1,merged_by_type:{quark:[{url:link('current'),note:'斗破苍穹年番'}]}})},channelSearch:{search:async()=>{throw Object.assign(new Error('http://user:private@proxy.invalid'),{code:'ECONNRESET'});}}});
+ const result=await service.search('斗破苍穹');assert.equal(result.partial,true);
+ assert.deepEqual(result.sources.map(({name,status,code})=>({name,status,code})),[{name:'erxiaopan',status:'success',code:undefined},{name:'guoman4K',status:'failed',code:'RESOURCE_SEARCH_UNAVAILABLE'}]);
+ assert.doesNotMatch(JSON.stringify(result),/private|proxy.invalid/);
 });

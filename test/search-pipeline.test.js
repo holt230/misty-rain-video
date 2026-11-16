@@ -118,3 +118,9 @@ test('官方进度和实际片源分开显示，不把只找到219集说成已�
  view.state.officialProgress.latestEpisode=219;await nextTick();assert.match(document.querySelector('.official-availability').textContent,/已找到.*219/);
  }finally{view.app.unmount();}
 });
+
+test('线上部分来源失败且无可用分享时保留官方进度，提供重试但不允许虚假入库',async()=>{
+ let retried=0;
+ const view=mount({searchError:'片源查询未完成：部分来源无法访问。',officialProgress:{title:'斗破苍穹年番',platform:'腾讯视频',latestEpisode:219,completed:true,sourceUrl:'https://v.qq.com/x/cover/test/latest.html'}},{onRetrySearch:()=>retried++});
+ try{await nextTick();assert.match(document.querySelector('.official-availability').textContent,/无法确认/);assert.equal(document.querySelector('.btn-transfer'),null);document.querySelector('.retry-search-button').click();assert.equal(retried,1);}finally{view.app.unmount();}
+});
