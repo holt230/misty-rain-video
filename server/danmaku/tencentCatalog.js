@@ -58,11 +58,14 @@ export class TencentCatalog {
       }, body: JSON.stringify(body)
     })).json();
   }
-  async search(keyword) {
-    const result = await this.post(SEARCH_URL, {
+  async searchResponse(keyword) {
+    return this.post(SEARCH_URL, {
       version: '25071701', clientType: 1, query: keyword, pagenum: 0, pagesize: 20,
       isneedQc: true, uuid: crypto.randomUUID(), extraInfo: { multi_terminal_pc: '1', themeType: '1' }
     });
+  }
+  async search(keyword) {
+    const result = await this.searchResponse(keyword);
     const works = parseTencentWorks(result);
     for (const work of works) {
       this.works.delete(work.id); this.works.set(work.id, work);

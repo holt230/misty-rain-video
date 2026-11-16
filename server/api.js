@@ -11,6 +11,7 @@ import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterS
 import { ResourceSearchService } from './resourceSearch.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
 import { CatalogService } from './catalog.js';
+import { OfficialProgressService } from './officialProgress.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +48,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     credentialStore,
     posterService: new PosterService(dataDir),
     resourceSearch: new ResourceSearchService(),
+    officialProgress: new OfficialProgressService(),
     catalog: new CatalogService(dataDir),
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
@@ -381,7 +383,22 @@ export const handleApiRequest = async (request, response, context) => {
 
     if (pathname === '/api/quark/share-details' && request.method === 'POST') {
       const input = await readRequestBody(request);
-      sendSuccess(response, await context.quarkGateway.getShareDetails(input));
+      const controller = createProxyRequestController(request, response);
+      try { sendSuccess(response, await context.quarkGateway.getShareDetails(input, { signal: controller.signal })); }
+      finally { controller.cleanup(); }
+      return true;
+    }
+
+    if (pathname === '/api/official-progress' && request.method === 'GET') {
+      const query = new URL(request.url, 'http://localhost');
+      const keyword = String(query.searchParams.get('kw') || '').trim().slice(0, 80);
+      const category = query.searchParams.get('category') || 'all';
+      if (!keyword || !['all', 'anime', 'tv', 'movie', 'variety'].includes(category)) {
+        throw Object.assign(new Error('请输入有效的片名与分类'), { statusCode: 400, code: 'INVALID_PROGRESS_QUERY' });
+      }
+      const controller = createProxyRequestController(request, response);
+      try { sendSuccess(response, await context.officialProgress.lookup(keyword, { category, signal: controller.signal })); }
+      finally { controller.cleanup(); }
       return true;
     }
 

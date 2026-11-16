@@ -2,6 +2,24 @@ import type { CategoryType } from './media';
 export type SearchCategory = CategoryType | 'all';
 export type DriveType = 'quark' | 'aliyun' | 'baidu' | 'xunlei' | '115' | 'uc' | 'tianyi' | 'mobile' | 'other';
 
+export interface OfficialWorkProgress {
+  id: string;
+  title: string;
+  category: 'anime' | 'tv';
+  year: string;
+  latestEpisode: number;
+  completed: boolean;
+  platform: string;
+  sourceUrl: string;
+}
+
+export interface OfficialProgress {
+  status: 'confirmed' | 'unknown' | 'unavailable';
+  works: OfficialWorkProgress[];
+  checkedAt: string;
+  message: string;
+}
+
 export interface ResourceItem {
   id: string;
   title: string;
@@ -27,6 +45,8 @@ export interface ResourceItem {
     selectedFids?: string[];
     requiredEpisodes: number[];
     shareTitle: string;
+    complete?: boolean;
+    notice?: string;
   };
 }
 

@@ -1,6 +1,6 @@
 const OLD_SHIPPED_URLS = ['http://127.0.0.1:8888/api/search', 'https://so.252035.xyz/api/search'];
 
-/** undefined selects the default work-index source; [] is an invalid explicit configuration. */
+/** undefined selects the fixed parallel sources; [] is an invalid explicit configuration. */
 export function configuredSearchUrls(value = process.env.RESOURCE_SEARCH_URLS) {
   const values = [...new Set(String(value || '').split(',').map(item => item.trim().replace(/\/$/, '')).filter(Boolean))];
   if (!values.length || (values.length === OLD_SHIPPED_URLS.length && OLD_SHIPPED_URLS.every(item => values.includes(item)))) return undefined;

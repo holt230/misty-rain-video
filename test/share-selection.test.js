@@ -82,6 +82,38 @@ const createGateway = t => {
 };
 const shareInput = { shareUrl: 'https://pan.quark.cn/s/test123', title: '测试剧', category: 'tv' };
 
+test('分享视频识别遵循实际媒体类型，伪装扩展名的图片不会作为视频',async t=>{
+ const {gateway,tree,writes}=createGateway(t);
+ tree.clear();tree.set('0',[
+   {...file('image','E219.mp3'),format_type:'image/png',obj_category:'image'},
+   {...file('renamed','E218.mkv'),format_type:'image/png',obj_category:'image'},
+   {...file('video','E217.mp3'),format_type:'video/quicktime',obj_category:'video'},
+   file('normal','E216.mp4')
+ ]);
+ const result=await gateway.getShareDetails({shareUrl:shareInput.shareUrl});
+ assert.deepEqual(result.entries.filter(x=>x.isVideo).map(x=>x.episodeNumber),[217,216]);
+ assert.equal(result.videoCount,2);assert.deepEqual(writes,[]);
+});
+
+test('取消目录读取将信号传到网盘请求，不继续遍历或转存',async t=>{
+ const controller=new AbortController();let received,started;
+ const begun=new Promise(resolve=>{started=resolve;});
+ t.mock.method(globalThis,'fetch',async(url,init)=>{
+   if(String(url).includes('/token?'))return Response.json({code:0,data:{stoken:'token',title:'测试剧'}});
+   received=init.signal;started();return new Promise((_,reject)=>init.signal.addEventListener('abort',()=>reject(init.signal.reason),{once:true}));
+ });
+ const gateway=new QuarkGateway({credentialStore:{getCookie:()=> 'test'}});t.after(()=>clearInterval(gateway.cleanupTimer));
+ const pending=gateway.getShareDetails({shareUrl:shareInput.shareUrl},{signal:controller.signal});
+ await begun;controller.abort();await assert.rejects(pending);assert.equal(received.aborted,true);
+});
+
+test('纯数字264、265、1080是有效集数，不因与编码或分辨率数字相同而丢失',async t=>{
+ const {gateway,tree}=createGateway(t);tree.clear();
+ tree.set('0',['264.mp4','265 4K.mp4','1080.mp4','1080p.H264.mkv'].map((name,i)=>file(String(i),name)));
+ const result=await gateway.getShareDetails({shareUrl:shareInput.shareUrl});
+ assert.deepEqual(result.entries.map(entry=>entry.episodeNumber),[264,265,1080,0]);
+});
+
 test('搜索后已变更的片源在创建片库或转存前阻止，已验证指定集可完成保存', async t => {
   const {gateway,writes}=createGateway(t);
   await assert.rejects(gateway.importShare({...shareInput,quarkRequiredEpisodes:[219],quarkVerifiedShareTitle:'测试资源'}),{code:'QUARK_SOURCE_CHANGED'});

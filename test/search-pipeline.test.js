@@ -110,3 +110,11 @@ test('核对阶段持续加载，失效或缺少目标集数直接显示未找�
  const view=mount({isAnalyzing:true,searchPhase:'verifying',verificationProgress:'正在核对第219集…'});
  try{await nextTick();assert.match(document.querySelector('.search-status').textContent,/核对第219集/);assert.equal(document.querySelector('.btn-transfer'),null);view.state.isAnalyzing=false;view.state.searchNotice='未找到《斗破苍穹》第219集的可用视频。分享中没有第219集。';await nextTick();assert.match(document.querySelector('.empty-notice').textContent,/未找到/);assert.equal(document.querySelector('.btn-transfer'),null);}finally{view.app.unmount();}
 });
+
+test('官方进度和实际片源分开显示，不把只找到219集说成已跟上220集',async()=>{
+ const item={...resource('斗破苍穹年番',0),category:'anime',verification:{summary:'第219集',latestEpisode:219,episodeCount:1,requiredEpisodes:[219],complete:false}};
+ const view=mount({quarkResources:[item],officialProgress:{title:'斗破苍穹年番',platform:'腾讯视频',latestEpisode:220,completed:false,sourceUrl:'https://v.qq.com/x/cover/test/latest.html'}});
+ try{await nextTick();assert.match(document.querySelector('.official-progress').textContent,/官方更新至第 220 集/);assert.match(document.querySelector('.official-availability').textContent,/暂未找到.*220/);
+ view.state.officialProgress.latestEpisode=219;await nextTick();assert.match(document.querySelector('.official-availability').textContent,/已找到.*219/);
+ }finally{view.app.unmount();}
+});

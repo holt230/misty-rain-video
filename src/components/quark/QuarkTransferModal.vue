@@ -4,7 +4,7 @@ import { Check, ChevronDown, Library, LoaderCircle, Play, RefreshCw, Search, Sli
 import MediaPoster from '../common/MediaPoster.vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
-import type { ResourceItem, SearchCategory } from '../../types/search';
+import type { OfficialWorkProgress, ResourceItem, SearchCategory } from '../../types/search';
 import { rankResourceCandidates, resourceEpisode } from '../../services/resourceMatching';
 import { resourceHeading } from '../../services/resourceTitles';
 import { searchIntent } from '../../services/searchIntent';
@@ -34,6 +34,9 @@ const props = defineProps<{
   searchNeedsAuth?: boolean;
   savedMedia?: MediaItem | null;
   savedSummary?: string;
+  officialProgress?: OfficialWorkProgress;
+  officialCheckedAt?: string;
+  officialNotice?: string;
 }>();
 
 const emit = defineEmits<{
@@ -80,6 +83,13 @@ const filterOptions: Array<{ value: ResultFilter; label: string }> = [
 const cleanTitle = resourceHeading;
 const targetTitle = computed(() => searchIntent(props.searchKeyword || props.media?.title || '').title);
 const soleResult = computed(() => rankedQuarkResources.value.length === 1);
+const officialTime = computed(() => props.officialCheckedAt ? new Date(props.officialCheckedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+const officialAvailability = computed(() => {
+  const latest = props.officialProgress?.latestEpisode;
+  if (!latest || searchBusy.value) return '';
+  const found = props.quarkResources.some(resource => resource.verification?.requiredEpisodes.includes(latest));
+  return found ? `本次已找到官方最新第 ${latest} 集。` : `本次暂未找到官方最新第 ${latest} 集。`;
+});
 const saveCategory = (resource: ResourceItem): CategoryType => targetCategory.value === 'all' ? resource.category || props.media?.category || props.currentCategory : targetCategory.value;
 const matchedResources = computed(() => rankResourceCandidates(
   props.quarkResources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/i.test(resource.url)),
@@ -90,11 +100,11 @@ const filteredResources = computed(() => {
   const resources = rankedQuarkResources.value.filter(resource => {
     const title = cleanTitle(resource.title);
     if (resultFilter.value === '4k') return resource.is4k || /4k/i.test(title);
-    if (resultFilter.value === 'complete') return /全集|完结|全\s*\d+\s*集/i.test(title);
+    if (resultFilter.value === 'complete') return resource.verification ? resource.verification.complete === true : /全集|完结|全\s*\d+\s*集/i.test(title);
     return true;
   });
   if (resultFilter.value !== 'episodes') return resources;
-  return [...resources].sort((left, right) => (right.latestEpisode ?? resourceEpisode(right.title)) - (left.latestEpisode ?? resourceEpisode(left.title)));
+  return [...resources].sort((left, right) => (right.verification?.latestEpisode ?? right.latestEpisode ?? resourceEpisode(right.title)) - (left.verification?.latestEpisode ?? left.latestEpisode ?? resourceEpisode(left.title)));
 });
 const visibleResources = computed(() => filteredResources.value.slice(0, visibleCount.value));
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
@@ -247,6 +257,15 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         </button>
       </form>
 
+      <section v-if="!detailResource && !savedMedia && !['movie', 'variety'].includes(searchCategory || '')" class="official-progress" aria-label="官方更新进度" aria-live="polite">
+        <template v-if="officialProgress">
+          <div class="official-progress-top"><strong>{{ officialProgress.completed ? `官方已完结 · 全 ${officialProgress.latestEpisode} 集` : `官方更新至第 ${officialProgress.latestEpisode} 集` }}</strong><a :href="officialProgress.sourceUrl" target="_blank" rel="noopener noreferrer">{{ officialProgress.platform }}</a></div>
+          <p>{{ officialProgress.title }}<span v-if="officialTime"> · 核对于 {{ officialTime }}</span></p>
+          <p v-if="officialAvailability" class="official-availability">{{ officialAvailability }}</p>
+        </template>
+        <p v-else>{{ searchPhase === 'searching' ? '正在查询官方更新进度…' : officialNotice || '官方进度暂未确认。' }}</p>
+      </section>
+
       <div v-if="!detailResource && searchBusy && !savedMedia" class="search-status" role="status" aria-live="polite">
         <LoaderCircle class="search-spinner" aria-hidden="true" />
         <div><strong>{{ searchPhase === 'verifying' ? verificationProgress || '正在核对实际剧集…' : automaticStatus || `正在搜索《${searchKeyword || media.title}》` }}</strong><p>{{ searchPhase === 'verifying' ? '确认分享可用与剧集范围后，即可保存。' : automaticStatus ? '正在核对资源，请稍候。' : '搜索请求进行中，请稍候。' }}</p></div>
@@ -326,6 +345,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
                     <span v-if="res.datetime" class="tag-meta">{{ res.datetime }}</span>
                   </div>
+                  <p v-if="res.verification?.notice" class="verification-notice">{{ res.verification.notice }}</p>
                 </div>
               </div>
 
@@ -398,6 +418,11 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .submit-search-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .submit-search-button .search-spinner { width: 16px; height: 16px; }
 .result-summary strong { color: var(--text-primary); font-size: .92rem; }
+.official-progress { margin: 16px 24px 0; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); flex-shrink: 0; }
+.official-progress-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.official-progress strong { font-size: .86rem; }.official-progress a { color: var(--text-secondary); font-size: .75rem; text-decoration: none; }
+.official-progress p { color: var(--text-tertiary); font-size: .75rem; line-height: 1.6; }.official-progress-top + p { margin-top: 5px; }
+.official-progress .official-availability { margin-top: 6px; color: var(--text-secondary); }
 .result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
 .result-filters > svg { width: 18px; height: 18px; margin-right: 4px; color: var(--text-tertiary); flex-shrink: 0; }
 .filter-chip { min-height: 44px; padding: 0 17px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .8rem; flex-shrink: 0; }
@@ -419,6 +444,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .row-info { min-width: 0; }
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
 .row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
+.verification-notice { margin-top: 12px; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
 .tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
 .update-badge { color: var(--liquid-accent); font-size: .78rem; font-weight: 650; }
 .row-right { display: flex; gap: 8px; flex-shrink: 0; }
@@ -484,7 +510,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
   .liquid-dialog-backdrop { padding: 32px; background: rgb(0 0 0 / .65) !important; }
   .liquid-dialog { width: min(1100px, 100%); height: auto; min-height: min(460px, calc(100dvh - 64px)); max-height: min(860px, calc(100dvh - 64px)); border: 1px solid var(--divider); border-radius: var(--cinema-radius-hero); }
   .dialog-header { padding: 28px 32px 20px; }
-  .result-search { margin-inline: 32px; }
+  .result-search, .official-progress { margin-inline: 32px; }
   .result-search-icon { margin-left: 10px; }
   .result-summary, .result-filters, .dialog-body { padding-left: 32px; padding-right: 32px; }
   .dialog-body { padding-bottom: 32px; }
@@ -495,7 +521,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
   .dialog-header, .result-filters, .dialog-body { padding-left: var(--page-left); padding-right: var(--page-right); }
   .dialog-top-actions { right: var(--page-right); }
   .result-summary { padding-left: var(--page-left); padding-right: var(--page-right); }
-  .result-search { margin-left: var(--page-left); margin-right: var(--page-right); }
+  .result-search, .official-progress { margin-left: var(--page-left); margin-right: var(--page-right); }
   .result-search-icon { margin-left: 6px; }
   .liquid-resource-row { padding: 20px; background: var(--surface-1); }
 }

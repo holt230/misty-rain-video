@@ -48,7 +48,7 @@ export function rankResourceCandidates(resources: ResourceItem[], keyword: strin
       match.conflict = Boolean(category && resource.category && resource.category !== category);
       match.otherVersion = match.conflict;
     }
-    return { resource, match, episode: resource.latestEpisode ?? resourceEpisode(resource.title), date: Date.parse(resource.datetime) || 0 };
+    return { resource, match, episode: resource.verification?.latestEpisode ?? resource.latestEpisode ?? resourceEpisode(resource.title), date: Date.parse(resource.datetime) || 0 };
   })
     .filter(item => item.match.matches)
     .sort((a, b) => (category === 'movie' ? 0 : b.episode - a.episode)

@@ -1,0 +1,62 @@
+{
+  "ret": 0,
+  "data": {
+    "normalList": {
+      "itemList": []
+    },
+    "areaBoxList": [
+      {
+        "itemList": [
+          {
+            "doc": {
+              "dataType": 2,
+              "id": "mzc00200aaogpgh"
+            },
+            "videoInfo": {
+              "title": "仙逆",
+              "typeName": "动漫",
+              "year": 2023,
+              "imgTag": "{\"1\":{\"info\":{\"id\":\"37\",\"pos\":\"1\",\"text\":\"2023\",\"theme_alpha\":\"0\",\"type\":\"0\"}},\"2\":{\"info\":{\"background_color\":\"#ff650f\",\"font_color\":\"#ffffff\",\"id\":\"15\",\"pos\":\"2\",\"text\":\"独播\",\"theme_alpha\":\"0\",\"type\":\"1\"}},\"3\":{\"info\":{\"id\":\"44\",\"pos\":\"3\",\"text\":\"动漫\",\"theme_alpha\":\"0\",\"type\":\"0\"}},\"4\":{\"info\":{\"id\":\"45\",\"pos\":\"4\",\"text\":\"更新中\",\"theme_alpha\":\"0\",\"type\":\"0\"}}}",
+              "episodeSites": [
+                {
+                  "enName": "qq",
+                  "totalEpisode": 170,
+                  "episodeInfoList": [
+                    {
+                      "id": "j4102t1n4uu",
+                      "title": "165",
+                      "url": "https://v.qq.com/x/cover/mzc00200aaogpgh/j4102t1n4uu.html",
+                      "markLabel": "{\"3\":{\"info\":{\"theme_alpha\":\"0\",\"id\":\"-1\",\"pos\":\"3\",\"type\":\"0\"}},\"4\":{\"info\":{\"theme_alpha\":\"0\",\"id\":\"-1\",\"pos\":\"4\",\"type\":\"0\"}},\"1\":{\"info\":{\"id\":\"-1\",\"pos\":\"1\",\"type\":\"0\",\"theme_alpha\":\"0\"}},\"2\":{\"info\":{\"theme_alpha\":\"0\",\"id\":\"1\",\"pos\":\"2\",\"type\":\"1\",\"text\":\"VIP\",\"font_color\":\"#663d00\",\"background_color\":\"#ffdf89\"}}}",
+                      "rawTags": "{\"tag_1\":{\"id\":\"-1\"},\"tag_2\":{\"id\":\"60054\",\"param\":\"1X=https://vfiles.gtimg.cn/vupload/20220519/2a0b301652943264421.png;2X=https://vfiles.gtimg.cn/vupload/20220519/2adc421652943264427.png;3X=https://vfiles.gtimg.cn/vupload/20220519/050a301652943264421.png\",\"param2\":\"1X=https://vfiles.gtimg.cn/vupload/20220519/da3ee31652943218350.png;2X=https://vfiles.gtimg.cn/vupload/20220519/0511491652943218370.png;3X=https://vfiles.gtimg.cn/vupload/20220519/11538a1652943218306.png\",\"text\":\"限免-干预\"},\"tag_3\":{\"id\":\"-1\"},\"tag_4\":{\"id\":\"-1\"}}"
+                    },
+                    {
+                      "id": "b41024whlfk",
+                      "title": "166",
+                      "url": "https://v.qq.com/x/cover/mzc00200aaogpgh/b41024whlfk.html",
+                      "markLabel": "{\"2\":{\"info\":{\"type\":\"1\",\"text\":\"VIP\",\"font_color\":\"#663d00\",\"background_color\":\"#ffdf89\",\"theme_alpha\":\"0\",\"id\":\"1\",\"pos\":\"2\"}},\"3\":{\"info\":{\"theme_alpha\":\"0\",\"id\":\"-1\",\"pos\":\"3\",\"type\":\"0\"}},\"4\":{\"info\":{\"type\":\"0\",\"theme_alpha\":\"0\",\"id\":\"-1\",\"pos\":\"4\"}},\"1\":{\"info\":{\"pos\":\"1\",\"type\":\"0\",\"theme_alpha\":\"0\",\"id\":\"-1\"}}}",
+                      "rawTags": "{\"tag_1\":{\"id\":\"-1\"},\"tag_2\":{\"id\":\"60036\",\"param\":\"1X=https://vfiles.gtimg.cn/vupload/20201015/tag_vip_x1.png;2X=https://vfiles.gtimg.cn/vupload/20201015/tag_vip_x2.png;3X=https://vfiles.gtimg.cn/vupload/20201015/tag_vip_x3.png\",\"param2\":\"1X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_vip.png;2X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_vipx25402x.png;3X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_vipx25403x.png\",\"text\":\"VIP-包月only\"},\"tag_3\":{\"id\":\"-1\"},\"tag_4\":{\"id\":\"-1\"}}"
+                    },
+                    {
+                      "id": "d4102fysvp1",
+                      "title": "167",
+                      "url": "https://v.qq.com/x/cover/mzc00200aaogpgh/d4102fysvp1.html",
+                      "markLabel": "{\"2\":{\"info\":{\"background_color\":\"#ffdf89\",\"theme_alpha\":\"0\",\"id\":\"1\",\"pos\":\"2\",\"type\":\"1\",\"text\":\"VIP\",\"font_color\":\"#663d00\"}},\"3\":{\"info\":{\"id\":\"-1\",\"pos\":\"3\",\"type\":\"0\",\"theme_alpha\":\"0\"}},\"4\":{\"info\":{\"pos\":\"4\",\"type\":\"0\",\"theme_alpha\":\"0\",\"id\":\"-1\"}},\"1\":{\"info\":{\"id\":\"-1\",\"pos\":\"1\",\"type\":\"0\",\"theme_alpha\":\"0\"}}}",
+                      "rawTags": "{\"tag_1\":{\"id\":\"-1\"},\"tag_2\":{\"id\":\"60036\",\"param\":\"1X=https://vfiles.gtimg.cn/vupload/20201015/tag_vip_x1.png;2X=https://vfiles.gtimg.cn/vupload/20201015/tag_vip_x2.png;3X=https://vfiles.gtimg.cn/vupload/20201015/tag_vip_x3.png\",\"param2\":\"1X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_vip.png;2X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_vipx25402x.png;3X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_vipx25403x.png\",\"text\":\"VIP-包月only\"},\"tag_3\":{\"id\":\"-1\"},\"tag_4\":{\"id\":\"-1\"}}"
+                    },
+                    {
+                      "id": "p4102qs75l3",
+                      "title": "168",
+                      "url": "https://v.qq.com/x/cover/mzc00200aaogpgh/p4102qs75l3.html",
+                      "markLabel": "{\"2\":{\"info\":{\"text\":\"预告\",\"font_color\":\"#ffffff\",\"background_color\":\"#ff650f\",\"theme_alpha\":\"0\",\"id\":\"35\",\"pos\":\"2\",\"type\":\"1\"}},\"3\":{\"info\":{\"type\":\"0\",\"theme_alpha\":\"0\",\"id\":\"-1\",\"pos\":\"3\"}},\"4\":{\"info\":{\"id\":\"-1\",\"pos\":\"4\",\"type\":\"0\",\"theme_alpha\":\"0\"}},\"1\":{\"info\":{\"pos\":\"1\",\"type\":\"0\",\"theme_alpha\":\"0\",\"id\":\"-1\"}}}",
+                      "rawTags": "{\"tag_1\":{\"id\":\"-1\"},\"tag_2\":{\"id\":\"60006\",\"param\":\"1X=https://vfiles-raw.gtimg.cn/vupload/20201015/tag_pre_x1.png;2X=https://vfiles-raw.gtimg.cn/vupload/20201015/tag_pre_x2.png;3X=https://vfiles-raw.gtimg.cn/vupload/20201015/tag_pre_x3.png\",\"param2\":\"1X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_trailerlite.png;2X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_trailerlitex25402x.png;3X=https://vfiles.gtimg.cn/vupload/20210322/tag_mini_trailerlitex25403x.png\",\"text\":\"预\"},\"tag_3\":{\"id\":\"-1\"},\"tag_4\":{\"id\":\"-1\"}}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

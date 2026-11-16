@@ -32,6 +32,10 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
     }
     checked.add(resource.url);
     if (resource.verification) {
+      if (resource.verification.complete === false && item.category !== 'anime') {
+        lastSourceError = resource.verification.notice || '只找到部分剧集，可查看实际集数后手动保存。';
+        continue;
+      }
       if (options.cancelled()) return { status: 'cancelled' as const, attempts: checked.size };
       options.progress('剧集已核对，正在保存到片库…');
       const saved = await options.save(resource, resource.verification.selectedFids);
@@ -62,15 +66,17 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
     let selectedFids: string[] | undefined;
     {
       const coverage = resourceCompleteness(details, item.category, resource.latestEpisode || resourceEpisode(resource.title));
-      if (!coverage.complete) {
+      if (!coverage.complete && !(item.category === 'anime' && coverage.available > 0)) {
         if (!bestPartial || coverage.available > bestPartial.available) bestPartial = coverage;
         options.progress(`当前来源实际可识别 ${coverage.available} 集，缺 ${coverage.missing.length} 集，继续核对其他来源…`);
         continue;
       }
       // A fully verified series retains the whole-source scope so future
       // updates can add episode 220+, instead of freezing the selected FIDs.
-      selectedFids = item.category === 'movie' && coverage.selectedFids.length ? coverage.selectedFids : undefined;
-      options.progress(item.category === 'movie' ? '已核对正片文件，正在加入片库…' : `已核对第 1～${coverage.actualLatest} 集连续完整，正在加入片库…`);
+      selectedFids = (item.category === 'movie' || !coverage.complete) && coverage.selectedFids.length ? coverage.selectedFids : undefined;
+      options.progress(item.category === 'movie' ? '已核对正片文件，正在加入片库…'
+        : coverage.complete ? `已核对第 1～${coverage.actualLatest} 集连续完整，正在加入片库…`
+          : `已核对 ${coverage.available} 集视频，正在保存这部分剧集…`);
     }
     const saved = await options.save(resource, selectedFids);
     return { status: saved ? 'saved' as const : 'failed' as const, attempts: checked.size };

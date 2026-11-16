@@ -49,7 +49,15 @@ export function automaticCatalogCandidates(item: PlaybackWork, resources: Resour
     && !(item.category === 'anime' && /短剧|真人/.test(resource.title)));
 }
 
-export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem) {
+export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem, { allowUnspecifiedSeason = false } = {}) {
+  if (allowUnspecifiedSeason && explicitSeason(item.title) === undefined) {
+    const match = matchResource(item.title, details.title, item.category);
+    if (!details.videoCount || !match.matches || match.otherVersion || (item.year && year(details.title) && year(details.title) !== item.year)) return false;
+    const videos = details.entries.filter(entry => entry.isVideo);
+    const seasons = new Set([details.title, ...details.entries.filter(entry => entry.isVideo || entry.isDirectory).map(entry => entry.name)]
+      .map(explicitSeason).filter(value => value !== undefined));
+    return videos.length > 0 && seasons.size <= 1;
+  }
   const metadataMatch = resource?.workTitle && isExactWorkTitle(item.title, resource.workTitle) && matchesResourceTitle(item.title, details.title)
     && (!item.year || !year(details.title) || year(details.title) === item.year);
   if (!details.videoCount || !(matchesCatalogTitle(item, details.title, false) || metadataMatch)) return false;

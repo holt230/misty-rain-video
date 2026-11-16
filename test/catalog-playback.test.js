@@ -62,7 +62,7 @@ test('authentication errors stop the queue instead of repeatedly querying protec
   assert.equal(result.status, 'manual'); assert.equal(inspected, 1); assert.match(result.message, /认证/);
 });
 
-test('自动找全集跳过虚标219但实际仅1集的来源，仅保存真实连续全集', async () => {
+test('动漫分段来源可直接保存实际219集，不要求从第一集连续完整也不保存虚标全集', async () => {
   const target = { title: '斗破苍穹', category: 'anime' };
   const sources = [1,2].map(n => ({ title: '斗破苍穹年番', workTitle: '斗破苍穹年番', category: 'anime', year: '2022', latestEpisode: 219, url: 'https://pan.quark.cn/s/source' + n }));
   let inspected = 0, saved;
@@ -70,16 +70,23 @@ test('自动找全集跳过虚标219但实际仅1集的来源，仅保存真实�
   const result = await prepareCatalogPlayback(target, { ...defaults, resources: () => sources,
     inspect: async () => { inspected++; const entries = inspected === 1 ? [video(219)] : Array.from({ length: 219 }, (_, i) => video(i + 1)); return { title: '斗破苍穹年番', videoCount: entries.length, entries }; },
     save: async (source, fids) => { saved = { source, fids }; return true; } });
-  assert.equal(result.status, 'saved'); assert.equal(inspected, 2);
-  assert.equal(saved.source.url, sources[1].url); assert.equal(saved.fids, undefined);
+  assert.equal(result.status, 'saved'); assert.equal(inspected, 1);
+  assert.equal(saved.source.url, sources[0].url); assert.deepEqual(saved.fids, ['219']);
 });
 
-test('没有完整来源时明确报告缺集且不执行入库', async () => {
-  const source = { title: '斗破苍穹年番', workTitle: '斗破苍穹年番', category: 'anime', year: '2022', latestEpisode: 219, url: 'https://pan.quark.cn/s/partial' };
-  const result = await prepareCatalogPlayback({ title: '斗破苍穹', category: 'anime' }, { ...defaults, resources: () => [source],
-    inspect: async () => ({ title: '斗破苍穹年番', videoCount: 1, entries: [{ fid: '219', name: '219.mp4', isVideo: true, episodeNumber: 219 }] }),
+test('电视剧自动播放仍优先连续来源，不把只有末集的分享当成完整版本', async () => {
+  const source = { title: '测试剧', workTitle: '测试剧', category: 'tv', year: '2026', latestEpisode: 30, url: 'https://pan.quark.cn/s/partial' };
+  const result = await prepareCatalogPlayback(work, { ...defaults, resources: () => [source],
+    inspect: async () => ({ title: '测试剧', videoCount: 1, entries: [{ fid: '30', name: '30.mp4', isVideo: true, episodeNumber: 30 }] }),
     save: async () => assert.fail('Incomplete sources must not be imported') });
-  assert.equal(result.status, 'manual'); assert.match(result.message, /缺 218 集/); assert.match(result.message, /未执行入库/);
+  assert.equal(result.status, 'manual'); assert.match(result.message, /缺 29 集/); assert.match(result.message, /未执行入库/);
+});
+
+test('已经核对的动漫分段不重复读取也不会因为未全集而被自动流程丢弃',async()=>{
+ const source={title:'测试动画',workTitle:'测试动画',category:'anime',url:'https://pan.quark.cn/s/verified',verification:{complete:false,summary:'第219集',episodeCount:1,selectedFids:['219']}};
+ let saved;
+ const result=await prepareCatalogPlayback({title:'测试动画',category:'anime'},{...defaults,resources:()=>[source],inspect:()=>assert.fail('Already verified'),save:async(_,fids)=>{saved=fids;return true;}});
+ assert.equal(result.status,'saved');assert.deepEqual(saved,['219']);
 });
 
 test('目录请求挂起时按限时取消，不无限等待或保存', async t => {

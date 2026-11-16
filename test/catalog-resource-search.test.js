@@ -82,7 +82,7 @@ test('旧Compose自带聚合地址自动迁移，管理员自定义地址保持�
 
 test('不同类型的在途搜索隔离，默认不启动或请求20秒聚合器', async () => {
   const calls = [];
-  const service = new ResourceSearchService({ catalogSearch: { search: async (keyword, options) => { calls.push({ keyword, category: options.category }); return { total: 0, merged_by_type: { quark: [] } }; } } });
+  const service = new ResourceSearchService({ channelSearch: { search: async () => ({ total: 0, merged_by_type: { quark: [] } }) }, catalogSearch: { search: async (keyword, options) => { calls.push({ keyword, category: options.category }); return { total: 0, merged_by_type: { quark: [] } }; } } });
   await Promise.all([service.search('斗破苍穹', { category: 'anime' }), service.search('斗破苍穹', { category: 'tv' })]);
   assert.equal(calls.length, 2); assert.deepEqual(calls.map(x => x.category), ['anime', 'tv']);
 });

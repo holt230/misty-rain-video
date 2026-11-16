@@ -80,6 +80,12 @@ test('规范化与去重只接受真实夸克域名，分享密码保留', async
   assert.equal(result.total,1);assert.equal(result.merged_by_type.quark[0].password,'abcd');
 });
 
+test('显式自定义搜索服务的作品类型和更新集数不在规范化阶段丢失',async()=>{
+ const row={url:'https://pan.quark.cn/s/verified',note:'斗破苍穹',work_title:'斗破苍穹年番',category:'anime',year:'2022',latest_episode:219,update_text:'更新至219集'};
+ const result=await create({fetchImpl:async()=>Response.json({code:0,data:{merged_by_type:{quark:[row]}}})}).search('斗破苍穹');
+ for(const key of ['work_title','category','year','latest_episode','update_text'])assert.equal(result.merged_by_type.quark[0][key],row[key]);
+});
+
 test('来源交错合并且最多500条，不让单一来源占满新结果', async () => {
   const crowded=Array.from({length:600},(_,i)=>({url:'https://pan.quark.cn/s/old'+i,note:'斗破苍穹 特别篇'}));
   const service=create({urls:['https://one.example/search','https://two.example/search'],fetchImpl:async url=>url.hostname==='one.example'?Response.json({code:0,data:{merged_by_type:{quark:crowded}}}):reply('latest219')});

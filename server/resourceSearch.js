@@ -1,5 +1,6 @@
 import { CatalogResourceSearch } from './catalogResourceSearch.js';
 import { configuredSearchUrls } from './searchConfig.js';
+import { ChannelResourceSearch, SEARCH_CHANNELS } from './channelResourceSearch.js';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESULTS = 500;
@@ -27,7 +28,11 @@ function normalizePayload(payload) {
     const match = safeText(row?.url, 2048).match(/^https:\/\/pan\.quark\.cn\/s\/([a-zA-Z0-9]+)(?:[/?#]|$)/i);
     if (!match) continue;
     const url = `https://pan.quark.cn/s/${match[1]}`;
-    if (!unique.has(url)) unique.set(url, { url, note: safeText(row.note || row.title, 800), password: safeText(row.password, 32), datetime: safeText(row.datetime, 64), source: safeText(row.source, 160) });
+    if (!unique.has(url)) unique.set(url, { url, note: safeText(row.note || row.title, 800), password: safeText(row.password, 32), datetime: safeText(row.datetime, 64), source: safeText(row.source, 160),
+      ...(row.work_title ? { work_title: safeText(row.work_title, 160) } : {}),
+      ...(['tv', 'anime', 'movie', 'variety'].includes(row.category) ? { category: row.category } : {}),
+      ...(Number.isInteger(row.latest_episode) && row.latest_episode >= 0 && row.latest_episode <= 5000 ? { latest_episode: row.latest_episode } : {}),
+      ...(row.year ? { year: safeText(row.year, 4) } : {}), ...(row.update_text ? { update_text: safeText(row.update_text, 160) } : {}) });
     if (unique.size >= MAX_RESULTS) break;
   }
   return [...unique.values()];
@@ -50,7 +55,7 @@ function mergeResults(lists) {
 
 /** A search returns only this operation's results; no stored results or fallback queries. */
 export class ResourceSearchService {
-  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch } = {}) {
+  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch } = {}) {
     this.fetchImpl = fetchImpl;
     this.urls = [...new Set(urls || [])];
     this.useCatalog = urls === undefined;
@@ -59,6 +64,7 @@ export class ResourceSearchService {
     this.maxConcurrent = maxConcurrent;
     this.inFlight = new Map();
     this.catalogSearch = catalogSearch || new CatalogResourceSearch({ fetchImpl, timeoutMs });
+    this.channelSearch = channelSearch || new ChannelResourceSearch({ fetchImpl, timeoutMs: Math.min(timeoutMs, 5000) });
   }
 
   async search(rawKeyword, { priority = 'interactive', category = 'all' } = {}) {
@@ -75,7 +81,18 @@ export class ResourceSearchService {
   }
 
   async run(keyword, category) {
-    if (this.useCatalog) return this.catalogSearch.search(keyword, { category });
+    if (this.useCatalog) {
+      const results = await Promise.allSettled([
+        this.catalogSearch.search(keyword, { category }),
+        ...SEARCH_CHANNELS.map(channel => this.channelSearch.search(keyword, { category, channel }))
+      ]);
+      const successes = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+      const partial = results.some(result => result.status === 'rejected') || successes.some(result => result.partial);
+      const items = mergeResults(successes.map(result => result.merged_by_type.quark));
+      if (!items.length && partial) throw searchError('部分搜索来源无法访问，本次未能完成查询，请重试', 'RESOURCE_SEARCH_UNAVAILABLE');
+      return { total: items.length, merged_by_type: { quark: items }, partial,
+        ...(partial ? { message: '部分来源暂时无法访问，以下仅包含本次已核对的结果。' } : {}) };
+    }
     if (!this.urls.length) throw searchError('搜索来源配置无效', 'RESOURCE_SEARCH_CONFIG_INVALID');
     const responses = await Promise.allSettled(this.urls.map(endpoint => this.fetchEndpoint(endpoint, keyword)));
     const lists = responses.filter(item => item.status === 'fulfilled').map(item => item.value);
