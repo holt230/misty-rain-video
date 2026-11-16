@@ -19,6 +19,15 @@ export interface ResourceItem {
   latestEpisode?: number;
   year?: string;
   sourceUrl?: string;
+  verification?: {
+    summary: string;
+    episodeCount: number;
+    latestEpisode: number;
+    requestedEpisode?: number;
+    selectedFids?: string[];
+    requiredEpisodes: number[];
+    shareTitle: string;
+  };
 }
 
 export interface SearchResult {

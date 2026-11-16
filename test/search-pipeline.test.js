@@ -81,8 +81,8 @@ test('219集实际返回时排在176集之前，不用收录日期或4K冒充最
 });
 
 test('不存在219集时如实展示176，不生成或改写集数，切词重置筛选和滚动',async()=>{
- const view=mount({quarkResources:[resource('斗破苍穹 更新176集 4K',0)]});
- try{await nextTick();assert.doesNotMatch(document.body.textContent,/219/);[...document.querySelectorAll('[role="radio"]')].find(x=>x.textContent==='4K').click();await nextTick();document.querySelector('.dialog-body').scrollTop=500;view.state.searchKeyword='新搜索';view.state.quarkResources=[resource('新搜索 更新219集 1080P',1)];await nextTick();assert.equal(document.querySelector('[role="radio"][aria-checked="true"]').textContent,'全部');assert.equal(document.querySelector('.dialog-body').scrollTop,0);assert.equal(document.querySelectorAll('.liquid-resource-row').length,1);}finally{view.app.unmount();}
+ const view=mount({quarkResources:[resource('斗破苍穹 更新176集 4K',0),resource('斗破苍穹 更新176集 1080P',2)]});
+ try{await nextTick();assert.doesNotMatch(document.body.textContent,/219/);[...document.querySelectorAll('[role="radio"]')].find(x=>x.textContent==='4K').click();await nextTick();document.querySelector('.dialog-body').scrollTop=500;view.state.searchKeyword='新搜索';view.state.quarkResources=[resource('新搜索 更新219集 1080P',1)];await nextTick();assert.equal(document.querySelector('.result-filters'),null);assert.equal(document.querySelector('.dialog-body').scrollTop,0);assert.equal(document.querySelectorAll('.liquid-resource-row').length,1);}finally{view.app.unmount();}
 });
 
 test('当前真实结果仍过滤明确无关类型和二创，特别篇属于同名结果可查看',async()=>{
@@ -92,7 +92,21 @@ test('当前真实结果仍过滤明确无关类型和二创，特别篇属于�
 });
 
 test('全部类型使用来源明确分类保存，219集信息独立展示且严格匹配作品',async()=>{
- const saved=[];const item={...resource('斗破苍穹年番',0),workTitle:'斗破苍穹年番',category:'anime',year:'2022',updateText:'更新至第219集',latestEpisode:219};
- const view=mount({searchCategory:'all',quarkResources:[item]}, {onPreparePlay:(...args)=>saved.push(args)});
+ const saved=[];const item={...resource('斗破苍穹年番',0),workTitle:'斗破苍穹年番',category:'anime',year:'2022',updateText:'更新至第219集',latestEpisode:219,verification:{summary:'已核对第219集的视频文件',episodeCount:1,latestEpisode:219,requestedEpisode:219,selectedFids:['e219'],requiredEpisodes:[219],shareTitle:'斗破苍穹年番'}};
+ const view=mount({searchCategory:'all',searchKeyword:'斗破苍穹 第219集',quarkResources:[item]}, {onSaveToCards:(...args)=>saved.push(args)});
  try{await nextTick();assert.match(document.querySelector('.update-badge').textContent,/219/);assert.match(document.querySelector('.category-picker-trigger').textContent,/全部类型/);document.querySelector('.btn-transfer').click();assert.equal(saved[0][1],'anime');}finally{view.app.unmount();}
+});
+
+test('单个已核对结果直接衔接保存，保存期间禁用重复提交，失败能重试，成功提供播放和片库入口',async()=>{
+ const item={...resource('斗破苍穹年番',0),category:'anime',verification:{summary:'已核对第219集的视频文件',episodeCount:1,latestEpisode:219,selectedFids:['e219'],requiredEpisodes:[219],shareTitle:'斗破苍穹年番'}};
+ const actions=[];const view=mount({quarkResources:[item]}, {onSaveToCards:()=>actions.push('save'),onPlaySaved:()=>actions.push('play'),onViewLibrary:()=>actions.push('library')});
+ try{await nextTick();assert.match(document.querySelector('.ready-heading').textContent,/可以保存/);assert.equal(document.querySelector('.result-filters'),null);assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'保存到片库');document.querySelector('.btn-transfer').click();assert.deepEqual(actions,['save']);
+ view.state.isSaving=true;view.state.savingResourceId='0';await nextTick();assert.equal(document.querySelector('.btn-transfer').disabled,true);assert.match(document.querySelector('.btn-transfer').textContent,/正在保存/);document.querySelector('.btn-transfer').click();assert.deepEqual(actions,['save']);
+ view.state.isSaving=false;view.state.saveError={title:'保存失败',message:'网络错误'};view.state.failedResourceId='0';await nextTick();assert.match(document.querySelector('.resource-save-error').textContent,/网络错误/);assert.equal(document.querySelector('.save-receipt'),null);
+ view.state.saveError=null;view.state.savedMedia={title:'斗破苍穹年番',quarkFid:'saved',category:'anime'};view.state.savedSummary=item.verification.summary;await nextTick();assert.match(document.querySelector('.save-receipt').textContent,/已保存到片库/);assert.equal(document.querySelector('.resource-rows'),null);const buttons=document.querySelectorAll('.receipt-actions button');buttons[0].click();buttons[1].click();assert.deepEqual(actions,['save','play','library']);}finally{view.app.unmount();}
+});
+
+test('核对阶段持续加载，失效或缺少目标集数直接显示未找到且无保存按钮',async()=>{
+ const view=mount({isAnalyzing:true,searchPhase:'verifying',verificationProgress:'正在核对第219集…'});
+ try{await nextTick();assert.match(document.querySelector('.search-status').textContent,/核对第219集/);assert.equal(document.querySelector('.btn-transfer'),null);view.state.isAnalyzing=false;view.state.searchNotice='未找到《斗破苍穹》第219集的可用视频。分享中没有第219集。';await nextTick();assert.match(document.querySelector('.empty-notice').textContent,/未找到/);assert.equal(document.querySelector('.btn-transfer'),null);}finally{view.app.unmount();}
 });

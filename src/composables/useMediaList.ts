@@ -72,19 +72,19 @@ export function useMediaList(enabled?: Ref<boolean>, paused?: Ref<boolean>) {
   });
 
   /** 保存影视到当前账户的片库。 */
-  const saveMedia = async (item: MediaItem) => {
+  const saveMedia = async (item: MediaItem, { notify = true } = {}) => {
     try {
-      toast.show(item.quarkFid
+      if (notify) toast.show(item.quarkFid
         ? `正在验证《${item.title}》的新片源...`
         : item.title === '待识别片名' ? '正在验证分享链接并添加到片库…'
         : `正在转存《${item.title}》到云端片库...`, '↻', 2200);
       const result = await MediaStore.saveMedia(item);
       allMediaList.value = result.items;
       loadError.value = '';
-      toast.show(result.message, '✓', 3200);
+      if (notify) toast.show(result.message, '✓', 3200);
       return result.items;
     } catch (error) {
-      toast.show(getLibrarySaveFeedback(error).title, '!', 3500);
+      if (notify) toast.show(getLibrarySaveFeedback(error).title, '!', 3500);
       throw error;
     }
   };

@@ -16,6 +16,9 @@ export interface MediaItem {
   quarkShareUrl?: string;      // 夸克网盘直链
   quarkPasscode?: string;      // 分享提取码（如资源需要）
   quarkSelectionFids?: string[]; // 选择保存的分享文件/文件夹；不填写表示全部保存
+  /** Save-time checks only; never persisted as library metadata. */
+  quarkRequiredEpisodes?: number[];
+  quarkVerifiedShareTitle?: string;
   quarkFid?: string;           // 烟雨影视片库中的夸克目录 ID
   quarkQuality?: string;       // 夸克画质 (如: 4K 臻彩)
   localEpisodeCount?: number;  // 当前片库中的正片数量

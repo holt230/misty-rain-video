@@ -31,6 +31,12 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
       continue;
     }
     checked.add(resource.url);
+    if (resource.verification) {
+      if (options.cancelled()) return { status: 'cancelled' as const, attempts: checked.size };
+      options.progress('剧集已核对，正在保存到片库…');
+      const saved = await options.save(resource, resource.verification.selectedFids);
+      return { status: saved ? 'saved' as const : 'failed' as const, attempts: checked.size };
+    }
     options.progress('正在核对第 ' + checked.size + ' 个片源的片名、年份与正片内容…');
     let details: QuarkShareDetails;
     const controller = new AbortController();

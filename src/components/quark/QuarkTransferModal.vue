@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ChevronDown, LoaderCircle, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
+import { Check, ChevronDown, Library, LoaderCircle, Play, RefreshCw, Search, SlidersHorizontal, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import QuarkResourceDetails from './QuarkResourceDetails.vue';
 import type { MediaItem, CategoryType } from '../../types/media';
 import type { ResourceItem, SearchCategory } from '../../types/search';
 import { rankResourceCandidates, resourceEpisode } from '../../services/resourceMatching';
 import { resourceHeading } from '../../services/resourceTitles';
+import { searchIntent } from '../../services/searchIntent';
 import SkeletonCard from '../common/SkeletonCard.vue';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { useDialog } from '../../composables/useDialog';
@@ -28,6 +29,11 @@ const props = defineProps<{
   failedResourceId?: string;
   automaticStatus?: string;
   playAfterSave?: boolean;
+  searchPhase?: 'searching' | 'verifying' | 'done';
+  verificationProgress?: string;
+  searchNeedsAuth?: boolean;
+  savedMedia?: MediaItem | null;
+  savedSummary?: string;
 }>();
 
 const emit = defineEmits<{
@@ -37,7 +43,8 @@ const emit = defineEmits<{
   (e: 'transfer', res: ResourceItem): void;
   (e: 'retry-search'): void;
   (e: 'search', keyword: string, category: SearchCategory): void;
-  (e: 'prepare-play', media: MediaItem, targetCategory: CategoryType, resources: ResourceItem[]): void;
+  (e: 'play-saved'): void;
+  (e: 'view-library'): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
 }>();
 
@@ -71,10 +78,12 @@ const filterOptions: Array<{ value: ResultFilter; label: string }> = [
 ];
 
 const cleanTitle = resourceHeading;
+const targetTitle = computed(() => searchIntent(props.searchKeyword || props.media?.title || '').title);
+const soleResult = computed(() => rankedQuarkResources.value.length === 1);
 const saveCategory = (resource: ResourceItem): CategoryType => targetCategory.value === 'all' ? resource.category || props.media?.category || props.currentCategory : targetCategory.value;
 const matchedResources = computed(() => rankResourceCandidates(
   props.quarkResources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/i.test(resource.url)),
-  props.searchKeyword || props.media?.title || '', targetCategory.value === 'all' ? undefined : targetCategory.value
+  targetTitle.value, targetCategory.value === 'all' ? undefined : targetCategory.value
 ));
 const rankedQuarkResources = computed(() => matchedResources.value.filter(item => !item.match.conflict).map(item => item.resource));
 const filteredResources = computed(() => {
@@ -120,6 +129,13 @@ const submitSearch = () => {
   if (!keyword || props.isSaving || searchingCurrentQuery.value) return;
   searchInput.value?.blur();
   emit('search', keyword, targetCategory.value);
+};
+const selectCategory = (category: SearchCategory) => {
+  if (props.isSaving) return;
+  categoryExpanded.value = false;
+  if (category === targetCategory.value) return;
+  targetCategory.value = category;
+  emit('search', searchQuery.value.trim() || props.searchKeyword || props.media?.title || '', category);
 };
 
 const handleBodyScroll = (event: Event) => {
@@ -168,7 +184,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
             </div>
 
             <!-- 默认沿用当前分类，需要时再展开修改。 -->
-            <div class="cat-selector-row">
+            <div v-if="!savedMedia" class="cat-selector-row">
               <button type="button" class="category-picker-trigger" :disabled="isSaving" :aria-expanded="categoryExpanded" aria-controls="resource-category-options" @click="categoryExpanded = !categoryExpanded">
                 分类 · {{ targetCategoryName }}<ChevronDown aria-hidden="true" />
               </button>
@@ -181,7 +197,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                   :class="{ active: targetCategory === category.value }"
                   :aria-pressed="targetCategory === category.value"
                   :disabled="isSaving"
-                  @click="targetCategory = category.value; categoryExpanded = false"
+                  @click="selectCategory(category.value)"
                 >
                   {{ category.label }}
                 </button>
@@ -197,7 +213,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         </div>
       </div>
 
-      <form v-if="!detailResource" class="result-search cinema-search-field" role="search" @submit.prevent="submitSearch">
+      <form v-if="!detailResource && !savedMedia" class="result-search cinema-search-field" role="search" @submit.prevent="submitSearch">
         <Search class="result-search-icon" aria-hidden="true" />
         <input
           ref="searchInput"
@@ -227,22 +243,22 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           :disabled="searchingCurrentQuery || isSaving || !searchQuery.trim()"
         >
           <LoaderCircle v-if="searchingCurrentQuery" class="search-spinner" aria-hidden="true" />
-          {{ searchingCurrentQuery ? '搜索中…' : '搜索' }}
+          {{ searchingCurrentQuery ? searchPhase === 'verifying' ? '核对中…' : '搜索中…' : '搜索' }}
         </button>
       </form>
 
-      <div v-if="!detailResource && searchBusy" class="search-status" role="status" aria-live="polite">
+      <div v-if="!detailResource && searchBusy && !savedMedia" class="search-status" role="status" aria-live="polite">
         <LoaderCircle class="search-spinner" aria-hidden="true" />
-        <div><strong>{{ automaticStatus || `正在搜索《${searchKeyword || media.title}》` }}</strong><p>{{ automaticStatus ? '正在核对资源，请稍候。' : '搜索请求进行中，请稍候。' }}</p></div>
+        <div><strong>{{ searchPhase === 'verifying' ? verificationProgress || '正在核对实际剧集…' : automaticStatus || `正在搜索《${searchKeyword || media.title}》` }}</strong><p>{{ searchPhase === 'verifying' ? '确认分享可用与剧集范围后，即可保存。' : automaticStatus ? '正在核对资源，请稍候。' : '搜索请求进行中，请稍候。' }}</p></div>
       </div>
-      <div v-if="!detailResource && !searchBusy && !searchError && rankedQuarkResources.length" class="result-summary" aria-live="polite">
+      <div v-if="!detailResource && !savedMedia && !searchBusy && !searchError && rankedQuarkResources.length > 1" class="result-summary" aria-live="polite">
         <span>找到</span>
         <strong>{{ rankedQuarkResources.length }}</strong>
-        <span>条搜索结果</span>
+        <span>个可保存的结果</span>
       </div>
-      <p v-if="!detailResource && !searchBusy && searchNotice" class="result-summary" role="status">{{ searchNotice }}</p>
+      <p v-if="!detailResource && !savedMedia && !searchBusy && searchNotice && rankedQuarkResources.length" class="result-summary" role="status">{{ searchNotice }}</p>
 
-      <div v-if="!detailResource && !searchBusy && !searchError && rankedQuarkResources.length" class="result-filters" role="radiogroup" aria-label="资源筛选">
+      <div v-if="!detailResource && !savedMedia && !searchBusy && !searchError && rankedQuarkResources.length > 1" class="result-filters" role="radiogroup" aria-label="资源筛选">
         <SlidersHorizontal aria-hidden="true" />
         <button
           v-for="option in filterOptions"
@@ -261,7 +277,12 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 
       <!-- 列表内容 -->
       <div ref="resultsBody" class="dialog-body" :class="{ 'showing-details': detailResource }" :aria-busy="searchBusy" @scroll.passive="handleBodyScroll">
-        <QuarkResourceDetails v-if="detailResource" ref="detailsRef"
+        <section v-if="savedMedia" class="save-receipt" role="status" aria-label="保存成功">
+          <span class="receipt-icon"><Check aria-hidden="true" /></span>
+          <h2>已保存到片库</h2><strong>{{ savedMedia.title }}</strong><p>{{ savedSummary }}</p>
+          <div class="receipt-actions"><button type="button" class="btn-action btn-transfer" @click="emit('play-saved')"><Play aria-hidden="true" />立即播放</button><button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button></div>
+        </section>
+        <QuarkResourceDetails v-else-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
           :save-error="failedResourceId === detailResource.id ? saveError : null" :play-after-save="playAfterSave"
           @back="detailResource = null" @open-auth-settings="emit('open-auth-settings')"
@@ -279,7 +300,8 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         </template>
 
         <template v-else>
-          <div v-if="visibleResources.length > 0" class="resource-rows">
+          <div v-if="visibleResources.length > 0" class="resource-rows" :class="{ 'verified-single': soleResult }">
+            <div v-if="soleResult && visibleResources[0]?.verification" class="ready-heading" role="status"><Check aria-hidden="true" /><div><strong>已找到，可以保存到片库</strong><p>实际视频已核对，保存后即可从片库播放。</p></div></div>
             <div
               v-for="res in visibleResources"
               :key="res.id"
@@ -296,7 +318,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往认证设置</button>
                   </div>
                   <div class="row-tags">
-                    <span v-if="res.updateText" class="update-badge">来源标注：{{ res.updateText }}</span>
+                    <span v-if="res.verification" class="update-badge">{{ res.verification.summary }}</span>
                     <span v-if="res.category" class="tag-meta">{{ categories.find(category => category.value === res.category)?.label }}</span>
                     <span v-if="res.year" class="tag-meta">{{ res.year }}</span>
                     <span class="tag-badge">{{ res.quality }}</span>
@@ -308,14 +330,15 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
               </div>
 
               <div class="row-right">
-                <button type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
+                <button v-if="!res.verification" type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
                 <button
                   class="btn-action btn-transfer"
                   :class="{ 'is-saving': isSaving && savingResourceId === res.id }"
-                  :disabled="isSaving"
-                  @click="res.workTitle && !replacingSource ? emit('prepare-play', media, saveCategory(res), rankedQuarkResources) : emit('save-to-cards', media, saveCategory(res), res)"
+                  :disabled="isSaving || !res.verification"
+                  @click="failedResourceId === res.id && saveError?.needsSearch ? emit('retry-search') : emit('save-to-cards', media, saveCategory(res), res, res.verification?.selectedFids)"
                 >
-                  {{ isSaving && savingResourceId === res.id ? (replacingSource ? '正在替换…' : '正在添加…') : failedResourceId === res.id && saveError ? '重试' : replacingSource ? (playAfterSave ? '替换并播放' : '全部替换') : res.workTitle ? '自动找齐并播放' : playAfterSave ? '添加并播放' : '添加到片库' }}
+                  <LoaderCircle v-if="isSaving && savingResourceId === res.id" class="search-spinner" aria-hidden="true" />
+                  {{ isSaving && savingResourceId === res.id ? '正在保存到片库…' : failedResourceId === res.id && saveError ? saveError.needsSearch ? '重新搜索' : '重新保存' : replacingSource ? '保存并替换片源' : '保存到片库' }}
                 </button>
               </div>
             </div>
@@ -326,7 +349,8 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
           </div>
 
           <div v-else class="empty-notice" :role="searchError ? 'alert' : 'status'">
-            <span>{{ searchError || (resultFilter === 'all' ? `未找到《${searchKeyword || media.title}》的相关资源。` : '当前筛选没有结果。') }}</span>
+            <span>{{ searchError || (resultFilter === 'all' ? searchNotice || `未找到《${searchKeyword || media.title}》的可用资源。` : '当前筛选没有结果。') }}</span>
+            <button v-if="searchNeedsAuth" type="button" class="retry-search-button" @click="emit('open-auth-settings')">前往认证设置</button>
             <button v-if="searchError" type="button" class="retry-search-button" :disabled="isSaving" @click="emit('retry-search')">
               <RefreshCw aria-hidden="true" />
               重新搜索
@@ -381,6 +405,15 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
 .dialog-body.showing-details { display: flex; overflow: hidden; }
 .resource-rows { display: grid; gap: 16px; }
+.verified-single { padding-top: 24px; }
+.ready-heading { display: flex; align-items: flex-start; gap: 12px; color: var(--text-primary); padding: 4px 0 8px; }
+.ready-heading > svg { width: 24px; color: var(--success); flex-shrink: 0; }
+.ready-heading strong { font-size: 16px; }.ready-heading p { margin-top: 6px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.save-receipt { display: grid; gap: 16px; justify-items: center; padding: 40px 16px; text-align: center; }
+.receipt-icon { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--success-subtle); color: var(--success); }
+.save-receipt h2 { font-size: 22px; }.save-receipt p { color: var(--text-secondary); font-size: 14px; }
+.receipt-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 12px; }
+.receipt-actions button { gap: 8px; min-height: 48px; }.receipt-actions svg { width: 18px; }
 .liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 24px; border: 1px solid var(--divider); background: var(--surface-1); }
 .row-left { min-width: 0; flex: 1; }
 .row-info { min-width: 0; }

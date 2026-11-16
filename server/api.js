@@ -399,12 +399,13 @@ export const handleApiRequest = async (request, response, context) => {
         }
         if (/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(item.quarkShareUrl || '')) {
           const imported = await context.quarkGateway.importShare(item, user);
+          const { quarkRequiredEpisodes, quarkVerifiedShareTitle, ...persistentItem } = item;
           if (imported.replacedFid) {
             userData.mediaRepository.removeFid(imported.replacedFid);
             userData.playbackHistory.removeByMediaFid(imported.replacedFid);
           }
           userData.mediaRepository.save({
-            ...item, ...imported.item, poster: persistablePoster(item.poster),
+            ...persistentItem, ...imported.item, poster: persistablePoster(item.poster),
             // Explicitly clear a previous selection when the user switches back to saving everything.
             quarkSelectionFids: item.quarkSelectionFids
           });
@@ -567,12 +568,13 @@ export const handleApiRequest = async (request, response, context) => {
     if (pathname === '/api/library/import' && request.method === 'POST') {
       const item = await readRequestBody(request);
       const imported = await context.quarkGateway.importShare(item, user);
+      const { quarkRequiredEpisodes, quarkVerifiedShareTitle, ...persistentItem } = item;
       if (imported.replacedFid) {
         userData.mediaRepository.removeFid(imported.replacedFid);
         userData.playbackHistory.removeByMediaFid(imported.replacedFid);
       }
       userData.mediaRepository.save({
-        ...item,
+        ...persistentItem,
         ...imported.item,
         poster: persistablePoster(item.poster)
       });

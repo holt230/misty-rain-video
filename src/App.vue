@@ -76,6 +76,9 @@ const {
   searchPending,
   searchKeyword,
   searchCategory,
+  searchPhase,
+  verificationProgress,
+  searchNeedsAuth,
   openTransferModal,
   closeTransferModal,
   retrySearch,
@@ -89,6 +92,12 @@ const pendingCatalog = ref<CatalogItem | null>(null);
 const playAfterTransfer = ref(false);
 const automaticStatus = ref('');
 const automaticNotice = ref('');
+const transferSavedMedia = ref<MediaItem | null>(null);
+const transferSavedSummary = ref('');
+watch([isTransferOpen, searchPending], () => {
+  if (!isTransferOpen.value || searchPending.value) { transferSavedMedia.value = null; transferSavedSummary.value = ''; }
+  if (searchPending.value) { saveError.value = null; failedResourceId.value = ''; }
+});
 let automaticSequence = 0;
 const automaticRequested = ref(false);
 const libraryFilter = ref<'all' | 'watching' | 'updated'>('all');
@@ -337,7 +346,11 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
   const cardToSave: MediaItem = {
     ...media,
     category: cat,
-    quarkSelectionFids: selectedFids,
+    title: bestRes?.verification && !media.quarkFid ? bestRes.workTitle || media.title : media.title,
+    year: bestRes?.year || media.year,
+    quarkSelectionFids: selectedFids ?? bestRes?.verification?.selectedFids,
+    quarkRequiredEpisodes: bestRes?.verification?.requiredEpisodes,
+    quarkVerifiedShareTitle: bestRes?.verification?.shareTitle,
     tag: bestRes?.quality || media.tag || '',
     quarkQuality: bestRes?.quality || media.quarkQuality || '',
     quarkShareUrl: bestRes?.url || media.quarkShareUrl,
@@ -350,14 +363,20 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
   const account = user.value?.username;
   const playAfterSave = playAfterTransfer.value;
   try {
-    const savedItems = await saveMedia(cardToSave);
+    const savedItems = await saveMedia(cardToSave, { notify: !bestRes?.verification });
     if (account !== user.value?.username) { void refreshList(); return false; }
     currentCategory.value = cat;
     const saved = (media.catalogId ? savedItems.find(item => item.catalogId === media.catalogId && item.quarkFid) : undefined)
       || savedItems.find(item => item.quarkShareUrl === cardToSave.quarkShareUrl && item.quarkFid);
+    if (bestRes?.verification && !saved) throw new Error('保存请求已完成，但未能确认片库记录，请刷新片库后检查。');
     cancelAutomatic();
     pendingCatalog.value = null;
     playAfterTransfer.value = false;
+    if (bestRes?.verification && !playAfterSave && saved) {
+      transferSavedMedia.value = saved;
+      transferSavedSummary.value = bestRes.verification.summary;
+      return true;
+    }
     closeTransferModal();
     if (playAfterSave && saved) {
       isSavingTransfer.value = false;
@@ -545,24 +564,15 @@ watch([isAnalyzing, searchPending, quarkResources], async () => {
 });
 const searchTransferResources = (keyword: string, category?: SearchCategory) => { cancelAutomatic(); return refreshResources(keyword, category); };
 const retryTransferSearch = () => { cancelAutomatic(); retrySearch(); };
-const prepareResourcePlayback = async (media: MediaItem, category: CategoryType, resources: ResourceItem[]) => {
-  if (automaticStatus.value || isSavingTransfer.value) return;
-  cancelAutomatic();
-  const sequence = automaticSequence;
-  playAfterTransfer.value = true;
-  automaticStatus.value = '正在自动核对最新剧集与缺集情况…';
-  const result = await prepareCatalogPlayback({ title: searchKeyword.value || media.title, category }, {
-    resources: () => resources,
-    searching: () => false,
-    cancelled: () => sequence !== automaticSequence || !isTransferOpen.value,
-    inspect: (resource, signal) => QuarkStreamService.getShareDetails(resource.url, resource.password || '', signal),
-    save: (resource, fids) => handleSaveCard({ ...media, title: resource.workTitle || media.title, year: resource.year || media.year, category }, category, resource, fids),
-    progress: message => { if (sequence === automaticSequence) automaticStatus.value = message; }
-  });
-  if (sequence !== automaticSequence) return;
-  automaticStatus.value = '';
-  if (result.status === 'manual') automaticNotice.value = result.message || '暂未找到完整可用片源，请稍后重试。';
-  if (result.status === 'failed') automaticNotice.value = '添加未完成，请查看错误后重试。';
+const playSavedTransfer = () => {
+  const media = transferSavedMedia.value;
+  if (!media || isSavingTransfer.value) return;
+  closeTransferModal(); handleSelectMedia(media, true);
+};
+const showSavedLibrary = () => {
+  if (!transferSavedMedia.value || isSavingTransfer.value) return;
+  currentCategory.value = transferSavedMedia.value.category;
+  closeTransferModal(); mobileTab.value = 'library'; setMobileHistoryLayer('library', true);
 };
 </script>
 
@@ -589,7 +599,7 @@ const prepareResourcePlayback = async (media: MediaItem, category: CategoryType,
     </div>
     <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" :in-library="!!findCatalogMedia(catalogDetail, allMediaList)" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
     <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
-    <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" @prepare-play="prepareResourcePlayback" @save-to-cards="handleSaveCard" />
+    <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
     <DeleteMediaConfirm :open="!!deletingMedia" :media="deletingMedia" :deleting="isDeletingMedia" @cancel="closeDeleteDialog" @confirm="confirmDeleteMedia" />
     <CategoryPickerSheet :open="!!categoryMedia" :media="categoryMedia" :saving="isSavingCategory" @cancel="closeCategoryPicker" @select="selectMediaCategory" />
     <MediaActionSheet :open="!!actionMedia" :media="actionMedia" @cancel="closeMediaActions" @edit-category="editActionMediaCategory" @re-search="reSearchActionMedia" @update-library="updateActionMedia" @delete="deleteActionMedia" />

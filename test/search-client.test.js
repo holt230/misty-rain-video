@@ -7,6 +7,7 @@ const {SilentSearchEngine}=await compile('src/services/silentSearchEngine.ts');
 const {useQuarkTransfer}=await compile('src/composables/useQuarkTransfer.ts');
 const row=(title,id='series')=>({note:title,url:'https://pan.quark.cn/s/'+id,datetime:'2026-11-14'});
 const response=(rows=[],extra={})=>Response.json({code:0,data:{total:rows.length,merged_by_type:{quark:rows},...extra}});
+const shareResponse = (title, count=219) => Response.json({code:0,data:{title,videoCount:count,entries:Array.from({length:count},(_,i)=>({fid:'e'+(i+1),name:`第${i+1}集.mp4`,isVideo:true,episodeNumber:i+1,size:100}))}});
 
 test('每次提交只请求本站原关键词，连续搜索不补词或复用旧结果',async t=>{
  const calls=[];t.mock.method(globalThis,'fetch',async(url,init)=>{calls.push({url:String(url),init});return response([row(calls.length===1?'斗破苍穹 更新176集':'斗破苍穹 更新219集')]);});
@@ -15,7 +16,7 @@ test('每次提交只请求本站原关键词，连续搜索不补词或复用�
 });
 
 test('失败、空结果和认证失效只显示本次状态，不补查公共源或拿旧结果',async t=>{
- let mode='ok';const calls=[];t.mock.method(globalThis,'fetch',async url=>{calls.push(String(url));return mode==='ok'?response([row('斗破苍穹 更新219集')]):mode==='empty'?response():Response.json({code:mode==='auth'?'APP_AUTH_REQUIRED':'DOWN',message:mode==='auth'?'请先登录':'搜索失败，请重试'},{status:mode==='auth'?401:503});});
+ let mode='ok';const calls=[];t.mock.method(globalThis,'fetch',async url=>{if(String(url).includes('share-details'))return shareResponse('斗破苍穹');calls.push(String(url));return mode==='ok'?response([row('斗破苍穹 更新219集')]):mode==='empty'?response():Response.json({code:mode==='auth'?'APP_AUTH_REQUIRED':'DOWN',message:mode==='auth'?'请先登录':'搜索失败，请重试'},{status:mode==='auth'?401:503});});
  const view=useQuarkTransfer();await view.openTransferModal({id:'search-once',title:'斗破苍穹',category:'anime'});
  mode='empty';await view.refreshResources('斗破苍穹');assert.equal(view.quarkResources.value.length,0);assert.equal(view.searchError.value,'');
  mode='fail';await view.refreshResources('斗破苍穹');assert.equal(view.quarkResources.value.length,0);assert.match(view.searchError.value,/失败/);
@@ -23,18 +24,18 @@ test('失败、空结果和认证失效只显示本次状态，不补查公共�
 });
 
 test('请求未结束时加载状态持续，发起新搜索立即清空旧结果',async t=>{
- let finish;t.mock.method(globalThis,'fetch',()=>new Promise(resolve=>{finish=resolve;}));const view=useQuarkTransfer();
+ let finish;t.mock.method(globalThis,'fetch',url=>String(url).includes('share-details')?Promise.resolve(shareResponse('斗破苍穹')):new Promise(resolve=>{finish=resolve;}));const view=useQuarkTransfer();
  const pending=view.openTransferModal({id:'search-loading',title:'斗破苍穹',category:'anime'});
  assert.equal(view.isAnalyzing.value,true);assert.equal(view.searchPending.value,true);assert.equal(view.quarkResources.value.length,0);
  finish(response([row('斗破苍穹 更新219集')]));await pending;assert.equal(view.isAnalyzing.value,false);assert.equal(view.searchPending.value,false);view.closeTransferModal();
 });
 
 test('切词中止旧请求，旧响应晚到不会替换新结果或关闭新加载状态',async t=>{
- const calls=[];t.mock.method(globalThis,'fetch',(url,init)=>new Promise(resolve=>calls.push({url:String(url),signal:init.signal,resolve})));
+ const calls=[];t.mock.method(globalThis,'fetch',(url,init)=>String(url).includes('share-details')?Promise.resolve(shareResponse('新搜索',1)):new Promise(resolve=>calls.push({url:String(url),signal:init.signal,resolve})));
  const view=useQuarkTransfer();const old=view.openTransferModal({id:'search-race',title:'旧搜索',category:'tv'});const current=view.refreshResources('新搜索');
  assert.equal(calls[0].signal.aborted,true);assert.equal(view.currentMedia.value.title,'新搜索');
  calls[0].resolve(response([row('旧搜索 4K')]));await old;assert.equal(view.searchPending.value,true);assert.equal(view.quarkResources.value.length,0);
- calls[1].resolve(response([row('新搜索 1080P')]));await current;assert.equal(view.quarkResources.value[0].title,'新搜索 1080P');assert.equal(view.searchPending.value,false);view.closeTransferModal();
+ calls[1].resolve(response([row('新搜索 全1集 1080P')]));await current;assert.equal(view.quarkResources.value[0].title,'新搜索 全1集 1080P');assert.equal(view.searchPending.value,false);view.closeTransferModal();
 });
 
 test('同词在途点击只发一条请求，结束后重搜再发一条',async t=>{

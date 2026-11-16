@@ -66,6 +66,20 @@ test('选集保存传递并持久化范围，随后全部保存清除旧范围',
   assert.equal(context.saved().quarkSelectionFids, undefined);
 });
 
+test('核对条件传到保存接口但不写入长期片库元数据', async () => {
+  for (const route of ['/api/media-cards', '/api/library/import']) {
+    const context=makeContext();
+    const response=makeResponse();
+    const input={id:'verified',title:'测试剧',category:'tv',quarkShareUrl:'https://pan.quark.cn/s/test',quarkRequiredEpisodes:[1],quarkVerifiedShareTitle:'测试剧'};
+    await handleApiRequest(makeRequest(route,input),response,context);
+    assert.equal(response.statusCode,200);
+    assert.deepEqual(context.calls[1].quarkRequiredEpisodes,[1]);
+    assert.equal(context.calls[1].quarkVerifiedShareTitle,'测试剧');
+    assert.equal(context.saved().quarkRequiredEpisodes,undefined);
+    assert.equal(context.saved().quarkVerifiedShareTitle,undefined);
+  }
+});
+
 test('旧搜索缓存接口被拒绝，不能读取旧结果；同样需要登录', async () => {
   const context = makeContext();
   const calls = [];

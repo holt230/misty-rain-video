@@ -1,6 +1,7 @@
 import dns from 'node:dns';
 import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
+import { assertVerifiedImport } from './verifiedImport.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 
@@ -676,7 +677,9 @@ export class QuarkGateway {
     passcode = '',
     quarkPasscode = '',
     quarkFid: replaceQuarkFid = '',
-    quarkSelectionFids
+    quarkSelectionFids,
+    quarkRequiredEpisodes,
+    quarkVerifiedShareTitle
   }, user = SYSTEM_USER) {
     const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
@@ -729,8 +732,6 @@ export class QuarkGateway {
     let releaseFolder;
 
     try {
-      const userRoot = await this.#getUserRoot(cookie, principal, true);
-      const categoryFolder = await this.#ensureDriveFolder(userRoot.fid, folderName, cookie);
       const shareItems = selectionTree
         ? this.#selectedLibraryEpisodes(selectionTree, selectedItems, category)
         : await this.#walkShareDirectory({
@@ -743,6 +744,10 @@ export class QuarkGateway {
       if (!shareItems.length) {
         throw new QuarkApiError('分享中没有可识别的正片视频，无法转存', { code: 'QUARK_SHARE_EMPTY', statusCode: 422 });
       }
+      assertVerifiedImport({ expectedTitle: quarkVerifiedShareTitle, shareTitle: share.title, requiredEpisodes: quarkRequiredEpisodes },
+        shareItems.filter(item => !ancillaryVideoPattern.test(item.fileName || item.file_name || '')).map(item => item.episodeNumber || extractEpisodeNumber(item.fileName || item.file_name)));
+      const userRoot = await this.#getUserRoot(cookie, principal, true);
+      const categoryFolder = await this.#ensureDriveFolder(userRoot.fid, folderName, cookie);
 
       if (replacementFid) {
         return await this.#replaceLibrarySource({

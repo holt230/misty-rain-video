@@ -82,6 +82,16 @@ const createGateway = t => {
 };
 const shareInput = { shareUrl: 'https://pan.quark.cn/s/test123', title: '测试剧', category: 'tv' };
 
+test('搜索后已变更的片源在创建片库或转存前阻止，已验证指定集可完成保存', async t => {
+  const {gateway,writes}=createGateway(t);
+  await assert.rejects(gateway.importShare({...shareInput,quarkRequiredEpisodes:[219],quarkVerifiedShareTitle:'测试资源'}),{code:'QUARK_SOURCE_CHANGED'});
+  assert.deepEqual(writes,[]);
+  await assert.rejects(gateway.importShare({...shareInput,quarkRequiredEpisodes:[1],quarkVerifiedShareTitle:'其他资源'}),{code:'QUARK_SOURCE_CHANGED'});
+  assert.deepEqual(writes,[]);
+  const saved=await gateway.importShare({...shareInput,quarkSelectionFids:['e1'],quarkRequiredEpisodes:[1],quarkVerifiedShareTitle:'测试资源'});
+  assert.ok(saved.item.quarkFid);assert.equal(saved.transferredCount,1);assert.ok(writes.some(x=>x.type==='save'));
+});
+
 test('父文件夹和子文件重复选择只转存一次，文件夹覆盖其完整子树', () => {
   const entries = flattened();
   const selected = resolveShareSelection(entries, ['s1', 'e1', 'e1']);

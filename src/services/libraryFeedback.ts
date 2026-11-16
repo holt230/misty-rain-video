@@ -2,6 +2,7 @@ export interface LibrarySaveFeedback {
   title: string;
   message: string;
   needsAuth?: boolean;
+  needsSearch?: boolean;
 }
 
 export class LibrarySaveError extends Error {
@@ -33,6 +34,7 @@ export const parseLibraryInput = (input: string) => {
 export const getLibrarySaveFeedback = (error: unknown): LibrarySaveFeedback => {
   const code = error instanceof LibrarySaveError ? error.code : '';
   const message = error instanceof Error ? error.message : '';
+  if (code === 'QUARK_SOURCE_CHANGED') return { title: '片源已变化，尚未保存', message: message || '视频文件已变化，请重新搜索核对。', needsSearch: true };
   if (code === 'QUARK_AUTH_REQUIRED' || code === 'ADMIN_REQUIRED') {
     return { title: '片库认证需要更新', message: '请在“我的”中更新播放与片库认证后重试；普通账户请联系管理员。', needsAuth: true };
   }

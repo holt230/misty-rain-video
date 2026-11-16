@@ -136,6 +136,7 @@
 .recent-remove svg { width: 13px; height: 13px; }
 .recent-remove:hover { color: var(--danger); }
 .search-hint { color: var(--text-tertiary); font-size: 13px; margin-top: 36px; }
+.search-episode-help { margin-top: 12px; color: var(--text-tertiary); font-size: 12px; line-height: 1.6; }
 #app .library-page .category-toolbar { display: flex; border-color: var(--divider); margin-bottom: 12px; }
 #app .library-title h1 { font-size: 28px; }
 .library-filter-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 28px; padding: 6px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); }
