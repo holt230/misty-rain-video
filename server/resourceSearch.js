@@ -1,6 +1,7 @@
 import { CatalogResourceSearch } from './catalogResourceSearch.js';
 import { configuredSearchChannels, configuredSearchUrls } from './searchConfig.js';
 import { ChannelResourceSearch } from './channelResourceSearch.js';
+import { PublicFeedResourceSearch } from './publicFeedResourceSearch.js';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESULTS = 500;
@@ -55,7 +56,7 @@ function mergeResults(lists) {
 
 /** A search returns only this operation's results; no stored results or fallback queries. */
 export class ResourceSearchService {
-  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), channels = configuredSearchChannels(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch } = {}) {
+  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), channels = configuredSearchChannels(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch, publicFeedSearch } = {}) {
     this.fetchImpl = fetchImpl;
     this.urls = [...new Set(urls || [])];
     this.useCatalog = urls === undefined;
@@ -65,6 +66,7 @@ export class ResourceSearchService {
     this.inFlight = new Map();
     this.catalogSearch = catalogSearch || new CatalogResourceSearch({ fetchImpl, timeoutMs });
     this.channelSearch = channelSearch || new ChannelResourceSearch({ fetchImpl, timeoutMs: Math.min(timeoutMs, 5000) });
+    this.publicFeedSearch = publicFeedSearch || new PublicFeedResourceSearch({ fetchImpl, timeoutMs });
     this.channels = configuredSearchChannels(channels.join(','));
   }
 
@@ -83,13 +85,13 @@ export class ResourceSearchService {
 
   async run(keyword, category) {
     if (this.useCatalog) {
-      const names = ['erxiaopan', ...this.channels];
+      const names = ['erxiaopan', 'public_guoman4K', ...this.channels];
       const sources = [];
       const inspect = async (name, loader) => {
         const started = Date.now();
         try {
           const value = await loader();
-          sources.push({ name, status: value.partial ? 'partial' : 'success', count: value.total, durationMs: Date.now() - started });
+          sources.push({ name, status: value.skipped ? 'skipped' : value.partial ? 'partial' : 'success', count: value.total, durationMs: Date.now() - started });
           return value;
         } catch (error) {
           const code = /^RESOURCE_SEARCH_[A-Z_]+$/.test(error.code || '') ? error.code : 'RESOURCE_SEARCH_UNAVAILABLE';
@@ -101,6 +103,7 @@ export class ResourceSearchService {
       };
       const results = await Promise.allSettled([
         inspect('erxiaopan', () => this.catalogSearch.search(keyword, { category })),
+        inspect('public_guoman4K', () => this.publicFeedSearch.search(keyword, { category })),
         ...this.channels.map(channel => inspect(channel, () => this.channelSearch.search(keyword, { category, channel })))
       ]);
       const successes = results.filter(result => result.status === 'fulfilled').map(result => result.value);

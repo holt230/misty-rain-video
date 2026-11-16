@@ -61,7 +61,16 @@ export function automaticCatalogCandidates(item: PlaybackWork, resources: Resour
 export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem, { allowUnspecifiedSeason = false } = {}) {
   if (allowUnspecifiedSeason && explicitSeason(item.title) === undefined) {
     const match = matchResource(item.title, details.title, item.category);
-    if (!details.videoCount || !match.matches || match.otherVersion || (item.year && year(details.title) && year(details.title) !== item.year)) return false;
+    // Public posts often use a publisher marker plus a shortened directory name
+    // (e.g. "M 牧神"). Only accept a strict Han prefix when the posted work name
+    // independently matches, with no other edition/season or extra title text.
+    const directoryPrefix = details.title.normalize('NFKC').match(/^[A-Z]\s+([\p{Script=Han}]{2,})(?:\s*[(（](?:19|20)\d{2}[)）])?\s*$/u)?.[1] || '';
+    const workKey = normalize(item.title);
+    const posted = resource ? matchResource(item.title, resource.title, item.category) : undefined;
+    const publishedPrefix = Boolean(resource?.source === 'public_guoman4K' && posted?.matches && !posted.otherVersion
+      && directoryPrefix && workKey.startsWith(normalize(directoryPrefix)) && directoryPrefix.length >= Math.ceil(workKey.length / 2));
+    if (!details.videoCount || (!(match.matches && !match.otherVersion) && !publishedPrefix)
+      || (item.year && year(details.title) && year(details.title) !== item.year)) return false;
     const videos = details.entries.filter(entry => entry.isVideo);
     const seasons = new Set([details.title, ...details.entries.filter(entry => entry.isVideo || entry.isDirectory).map(entry => entry.name)]
       .map(explicitSeason).filter(value => value !== undefined));

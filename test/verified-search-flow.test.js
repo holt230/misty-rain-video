@@ -80,4 +80,15 @@ test('官方已更新到更高集数时不把旧目录当作当前全集，动�
  assert.deepEqual(result.resources[0].verification.requiredEpisodes,[219]);
 });
 
+test('准确发布标题可以核对有明确发布者标记的短目录名，其他作品和模糊拼音仍拒绝',async()=>{
+ const published={...resource,title:'【国漫】牧神记 (2024) 更新109集',workTitle:undefined,year:undefined,source:'public_guoman4K',latestEpisode:109};
+ const inspect=async title=>({title,videoCount:1,entries:[{...file(109),name:'109 4K.mp4'}]});
+ const accepted=await verifySearchResults([published],{...options({title:'牧神记',episode:109}),inspect:()=>inspect('M 牧神')});
+ assert.equal(accepted.resources.length,1);assert.deepEqual(accepted.resources[0].verification.selectedFids,['e109']);
+ for(const title of ['M 其他作品','M 牧神的新故事','牧神','mushen']){
+  const result=await verifySearchResults([published],{...options({title:'牧神记',episode:109}),inspect:()=>inspect(title)});assert.equal(result.resources.length,0,title);
+ }
+ const wrongPost=await verifySearchResults([{...published,title:'其他作品',source:'public_guoman4K'}],{...options({title:'牧神记'}),inspect:()=>inspect('M 牧神')});assert.equal(wrongPost.resources.length,0);
+});
+
 const mockFetch=(t,handler)=>t.mock.method(globalThis,'fetch',(url,init)=>String(url).includes('/official-progress')?Promise.resolve(Response.json({code:0,data:{status:'unknown',works:[],checkedAt:'',message:'官方进度暂未确认'}})):handler(url,init));
