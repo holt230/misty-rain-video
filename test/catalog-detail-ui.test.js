@@ -112,6 +112,18 @@ test('metadata outages do not prevent playback and do not insert untrusted HTML'
   } finally { view.app.unmount(); }
 });
 
+test('尚公主等旧片库无年份时明确提供个人片库播放，不把找源当作唯一主操作',async t=>{
+ t.mock.method(globalThis,'fetch',fixtures);
+ const view=mount();
+ try{
+  view.props.unversionedLibrary=true;await flush();
+  assert.match(document.querySelector('.play-feature').textContent,/播放片库中的同名影片/);
+  assert.match(document.querySelector('.detail-play-note').textContent,/未标注年份/);
+  document.querySelector('.play-feature').click();assert.equal(view.plays,1);
+  view.props.inLibrary=true;await nextTick();assert.match(document.querySelector('.play-feature').textContent,/立即播放/);
+ }finally{view.app.unmount();}
+});
+
 test('switching subjects aborts old requests and late results cannot overwrite the next subject', async t => {
   const requests = [];
   t.mock.method(globalThis, 'fetch', (url, options) => new Promise(resolve => { requests.push({ url, signal: options.signal, resolve }); }));

@@ -32,6 +32,15 @@ export function findCatalogMedia(item: CatalogItem, library: MediaItem[]) {
     && normalize(media.title) === normalize(item.title) && (!item.year || media.year === item.year));
   return candidates.length === 1 ? candidates[0] : undefined;
 }
+
+/** An unversioned personal copy is an explicit playback choice, not an edition match. */
+export function findUnversionedCatalogMedia(item: CatalogItem, library: MediaItem[]) {
+  if (!item.year || findCatalogMedia(item, library)) return undefined;
+  const sameTitle = library.filter(media => media.quarkFid && media.category === item.category
+    && normalize(media.title) === normalize(item.title));
+  if (sameTitle.length !== 1 || sameTitle[0].year || sameTitle[0].catalogId) return undefined;
+  return sameTitle[0];
+}
 export function matchesCatalogTitle(item: PlaybackWork, title: string, requireYear = true) {
   if (!item.title.trim() || isNonVideoResource(title, item.title) || /解说|混剪|沙雕|有声|合集|全季|多季/.test(title)) return false;
   if (requireYear && (!item.year || year(title) !== item.year)) return false;

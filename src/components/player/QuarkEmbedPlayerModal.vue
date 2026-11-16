@@ -22,6 +22,9 @@ import { useDialog } from '../../composables/useDialog';
 import { useMobileLandscape } from '../../composables/useMobileLandscape';
 import { usePlaybackChrome } from '../../composables/usePlaybackChrome';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
+import { playbackCoverage } from '../../services/playbackCoverage';
+import { chooseOfficialProgress, readOfficialProgress } from '../../services/officialProgress';
+import type { OfficialWorkProgress } from '../../types/search';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -58,6 +61,18 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
+const officialWork = ref<OfficialWorkProgress>();
+let coverageController: AbortController | undefined;
+watch([() => props.isOpen, () => props.media?.quarkFid, () => props.media?.title], async ([open]) => {
+  coverageController?.abort(); officialWork.value = undefined;
+  const media = props.media;
+  if (!open || !media || media.category !== 'tv') return;
+  const controller = new AbortController(); coverageController = controller;
+  const data = await readOfficialProgress(media.title, media.category, controller.signal);
+  if (controller.signal.aborted) return;
+  officialWork.value = chooseOfficialProgress(data, media.title, media.category, [], media.year);
+}, { immediate: true });
+onBeforeUnmount(() => coverageController?.abort());
 const playback = ref<PreparedPlayback | null>(null);
 const currentEpisodeIndex = ref(0);
 const episodeGroupIndex = ref(0);
@@ -245,11 +260,12 @@ const audioTracks = computed(() => detectedAudioTracks.value.length
   : (playback.value?.audioTracks || []));
 const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1 || getNativeAudioTrackCount() > 1);
 const selectedSoundEffect = computed(() => soundEffectOptions.find(option => option.value === soundEffectMode.value));
+const libraryCoverage = computed(() => playbackCoverage(episodes.value, props.media?.category, officialWork.value?.latestEpisode));
 const episodeStatus = computed(() => {
   const episode = currentEpisode.value;
-  if (!episode) return episodes.value.length ? `共 ${episodes.value.length} 集` : '';
+  if (!episode) return episodes.value.length ? `片库 ${libraryCoverage.value.count} 集` : '';
   const currentLabel = episode.episodeNumber > 0 ? `第 ${episode.episodeNumber} 集` : episode.episodeTitle;
-  return `${currentLabel} / 共 ${episodes.value.length} 集`;
+  return `${currentLabel} · 片库 ${libraryCoverage.value.count} 集`;
 });
 const loadingTitle = computed(() => phase.value === 'resolving'
   ? '正在载入片库'
@@ -1591,6 +1607,11 @@ defineExpose({ retry, dismissLayer });
         </main>
 
         <aside v-if="episodes.length" ref="episodePanelRef" class="episode-panel" :class="{ 'sheet-open': episodeSheetOpen }" :role="episodeSheetOpen ? 'dialog' : undefined" :aria-modal="episodeSheetOpen || undefined" aria-label="选集">
+          <div class="episode-coverage" role="status" aria-live="polite">
+            <strong>{{ libraryCoverage.summary }}</strong>
+            <span v-if="officialWork">{{ officialWork.completed ? `官方共 ${officialWork.latestEpisode} 集` : `官方已更新至第 ${officialWork.latestEpisode} 集` }} · {{ officialWork.platform }}</span>
+            <span v-if="libraryCoverage.missingLabel">{{ libraryCoverage.missingLabel }}</span>
+          </div>
           <div class="episode-heading">
             <div class="episode-heading-title">
               <div class="episode-heading-main">
@@ -1754,6 +1775,8 @@ defineExpose({ retry, dismissLayer });
 .episode-heading small, .episode-heading span { color: var(--text-tertiary); font-size: .66rem; }
 .episode-heading > small { flex-shrink: 0; }
 .episode-update-time { font-variant-numeric: tabular-nums; }
+.episode-coverage { display: grid; flex-shrink: 0; gap: 6px; margin: 16px 12px 0; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 14px; background: var(--surface-1); font-size: 12px; line-height: 1.6; }
+.episode-coverage strong { color: var(--text-primary); font-weight: 600; }.episode-coverage span { color: var(--text-secondary); }
 .episode-ranges { display: flex; flex-shrink: 0; gap: 6px; overflow-x: auto; padding: 0 12px 10px; }
 .episode-ranges button { min-height: 44px; flex-shrink: 0; padding: 0 14px; border: var(--glass-border); border-radius: 24px; color: var(--text-secondary); background: var(--glass-bg); font-size: .76rem; }
 .episode-ranges button.active { color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-weight: 650; }

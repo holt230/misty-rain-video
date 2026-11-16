@@ -8,7 +8,7 @@ await fs.mkdir('.local-runtime/tests', { recursive: true });
 const dir = await fs.mkdtemp('.local-runtime/tests/matching-');
 const file = path.resolve(dir, 'matching.mjs');
 await build({ entryPoints: ['src/services/catalogMatching.ts'], outfile: file, bundle: true, format: 'esm', logLevel: 'silent' });
-const { automaticCatalogCandidates, findCatalogMedia, matchesCatalogTitle, validatesCatalogShare } = await import(pathToFileURL(file));
+const { automaticCatalogCandidates, findCatalogMedia, findUnversionedCatalogMedia, matchesCatalogTitle, validatesCatalogShare } = await import(pathToFileURL(file));
 const work = { catalogId: 'douban:1', title: '九门', category: 'tv', year: '2026' };
 const candidate = title => ({ title, url: 'https://pan.quark.cn/s/abcd' });
 test('automatic choice rejects wrong year, seasons, title boundaries and commentary compilations', () => {
@@ -24,6 +24,13 @@ test('library identity respects editions and stable catalog links', () => {
   assert.equal(findCatalogMedia(work, [base]), undefined);
   assert.equal(findCatalogMedia(work, [base, { ...base, quarkFid: 'two' }]), undefined);
   assert.equal(findCatalogMedia(work, [{ ...base, title: '自定义名字', catalogId: 'douban:1' }]).quarkFid, 'one');
+});
+test('旧片库的唯一同名无年份影片可作为明确播放选择，但不冒充已匹配的官方版本',()=>{
+ const owned={title:'九门',category:'tv',quarkFid:'owned'};
+ assert.equal(findCatalogMedia(work,[owned]),undefined);
+ assert.equal(findUnversionedCatalogMedia(work,[owned]),owned);
+ for(const library of [[{...owned,year:'2021'}],[{...owned,catalogId:'douban:other'}],[owned,{...owned,quarkFid:'second'}],[{...owned,category:'anime'}],[{...owned,title:'九门 第二季'}]])assert.equal(findUnversionedCatalogMedia(work,library),undefined);
+ assert.equal(findUnversionedCatalogMedia(work,[{...owned,year:'2026'}]),undefined);
 });
 test('automatic source selection never imports image or audio resources with a matching film title and year', () => {
   const titles = ['九门 2026 4K 壁纸', '九门 2026 高清海报', '九门 2026 原声带', '九门 2026.jpg', '九门 2026 1080P'];

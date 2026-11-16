@@ -8,7 +8,7 @@ import MediaPoster from '../common/MediaPoster.vue';
 import CatalogPersonAvatar from './CatalogPersonAvatar.vue';
 import CatalogPersonDetail from './CatalogPersonDetail.vue';
 import CatalogComments from './CatalogComments.vue';
-const props = defineProps<{ item: CatalogItem; inLibrary: boolean }>();
+const props = defineProps<{ item: CatalogItem; inLibrary: boolean; unversionedLibrary?: boolean }>();
 const emit = defineEmits<{ (event: 'close'): void; (event: 'play'): void; (event: 'sources'): void }>();
 const root = ref<HTMLElement | null>(null);
 const selectedPerson = ref<CatalogCredit | null>(null);
@@ -98,8 +98,8 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
       <div class="detail-overview"><MediaPoster :src="item.poster" :alt="item.title + '海报'" class="detail-poster" /><div><span class="eyebrow">{{ item.year || '发现好故事' }}</span><h1 id="catalog-detail-title">{{ item.title }}</h1><p>{{ item.status || '影片资料' }}</p><span v-if="item.rating" class="detail-score">{{ item.rating.toFixed(1) }}<small>豆瓣评分</small></span></div></div>
     </div>
     <div class="detail-body">
-      <button type="button" class="cinema-button primary play-feature" @click="emit('play')"><Play fill="currentColor" />{{ inLibrary ? '立即播放 / 续播' : '找源并播放' }}</button>
-      <p class="detail-play-note">{{ inLibrary ? '从你的个人片库播放，自动恢复观看进度' : '自动查找匹配资源，验证后加入个人片库并播放' }}</p>
+      <button type="button" class="cinema-button primary play-feature" @click="emit('play')"><Play fill="currentColor" />{{ inLibrary ? '立即播放 / 续播' : unversionedLibrary ? '播放片库中的同名影片' : '找源并播放' }}</button>
+      <p class="detail-play-note">{{ inLibrary ? '从你的个人片库播放，自动恢复观看进度' : unversionedLibrary ? '片库已有同名影片，旧记录未标注年份；点击播放已有版本。' : '自动查找匹配资源，验证后加入个人片库并播放' }}</p>
       <dl v-if="facts.length" class="detail-facts"><div v-for="field in facts" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl>
       <p v-else class="detail-brief">{{ item.subtitle || '发现下一部喜欢的作品' }}</p>
       <button type="button" class="cinema-button secondary" @click="emit('sources')"><Search />自己选择片源</button>

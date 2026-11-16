@@ -25,6 +25,13 @@ test('标准文件名保留季、上下集和扩展名，旧嵌套目录与新�
   assert.equal(normalizePlaybackEpisodes([video('幕后玩家.mkv')]).length, 1);
 });
 
+test('电视剧补集比较全部集数，已有35至40集时可补1至34集，不只追加更大的集号',()=>{
+ const all=normalizePlaybackEpisodes(Array.from({length:40},(_,i)=>video(`S01E${i+1}.mp4`)));
+ const local=all.filter(e=>e.episodeNumber>=35);
+ const missing=missingLibraryEpisodes(local,all,{...card,title:'尚公主'});
+ assert.deepEqual(missing.map(e=>e.episodeNumber).sort((a,b)=>a-b),Array.from({length:34},(_,i)=>i+1));
+});
+
 test('候选核对片名、年份、季数和覆盖集数，拒绝搜索备注、合集和同名续集', () => {
   const localEpisodes = normalizePlaybackEpisodes([video('第01集.mkv'), video('第02集.mkv')]);
   const episodes = normalizePlaybackEpisodes([video('测试剧.E01.mkv'), video('测试剧.E02.mkv'), video('测试剧.E03.mkv')]);

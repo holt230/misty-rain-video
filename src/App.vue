@@ -8,7 +8,7 @@ import HomePage from './components/catalog/HomePage.vue';
 import SearchPage from './components/catalog/SearchPage.vue';
 import CatalogDetail from './components/catalog/CatalogDetail.vue';
 import { useCatalog } from './composables/useCatalog';
-import { findCatalogMedia } from './services/catalogMatching';
+import { findCatalogMedia, findUnversionedCatalogMedia } from './services/catalogMatching';
 import { prepareCatalogPlayback } from './services/catalogPlayback';
 import { QuarkStreamService } from './services/quarkStreamService';
 import type { CatalogItem } from './types/catalog';
@@ -91,6 +91,7 @@ const {
 const searchPageRef = ref<InstanceType<typeof SearchPage> | null>(null);
 const { feeds: catalogFeeds, browse: catalogBrowse, items: catalogItems, loading: catalogLoading, refresh: refreshCatalog, refreshChannel: refreshCatalogChannel, loadMore: loadMoreCatalog } = useCatalog(authenticated);
 const catalogDetail = ref<CatalogItem | null>(null);
+const unversionedCatalogMedia = computed(() => catalogDetail.value ? findUnversionedCatalogMedia(catalogDetail.value, allMediaList.value) : undefined);
 const pendingCatalog = ref<CatalogItem | null>(null);
 const playAfterTransfer = ref(false);
 const automaticStatus = ref('');
@@ -324,7 +325,7 @@ const closeCatalogDetail = () => requestLayerClose('detail', () => { catalogDeta
 const startCatalogPlayback = (automatic = true) => {
   const item = catalogDetail.value;
   if (!item) return;
-  const existing = findCatalogMedia(item, allMediaList.value);
+  const existing = findCatalogMedia(item, allMediaList.value) || unversionedCatalogMedia.value;
   if (existing && automatic) { handleSelectMedia(existing); return; }
   cancelAutomatic();
   pendingCatalog.value = item;
@@ -552,6 +553,13 @@ watch([isAnalyzing, searchPending, quarkResources], async () => {
   if (!item) return;
   const sequence = automaticSequence;
   automaticRequested.value = false;
+  if (!quarkResources.value.length) {
+    automaticStatus.value = '';
+    // Preserve the actual search/inspection failure instead of replacing it
+    // with the generic "no complete source" message from the playback queue.
+    automaticNotice.value = searchError.value ? '' : searchNotice.value;
+    return;
+  }
   const result = await prepareCatalogPlayback(item, {
     resources: () => quarkResources.value,
     searching: () => searchPending.value,
@@ -603,7 +611,7 @@ const showSavedLibrary = () => {
       <AccountPage v-if="mobileTab === 'account'" ref="accountPageRef" @section-change="handleAccountSection" :user="user" :history="history" :history-error="historyError" :loading-history="loadingHistory" :deleting-history-id="deletingHistoryId" @retry-history="refreshHistory()" @auth-updated="handlePlaybackAuthUpdated" @back="navigateMobileTab('home')" @play-history="continuePlayback" @delete-history="removeHistory" @logout="handleLogout" />
       <MobileTabBar :active-tab="mobileTab" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
     </div>
-    <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" :in-library="!!findCatalogMedia(catalogDetail, allMediaList)" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
+    <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" :in-library="!!findCatalogMedia(catalogDetail, allMediaList)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
     <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
     <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
     <DeleteMediaConfirm :open="!!deletingMedia" :media="deletingMedia" :deleting="isDeletingMedia" @cancel="closeDeleteDialog" @confirm="confirmDeleteMedia" />
