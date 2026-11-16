@@ -119,6 +119,7 @@ const visibleLibrary = computed(() => {
 });
 const pageScroll = new Map<MobileDockTab, number>();
 const embedPlayingMedia = ref<MediaItem | null>(null);
+const requestedLibraryEpisode = ref<number>();
 const accountPageRef = ref<InstanceType<typeof AccountPage> | null>(null);
 const deletingMedia = ref<MediaItem | null>(null);
 const isDeletingMedia = ref(false);
@@ -266,9 +267,10 @@ watch(
 /**
  * 调起影院播放窗
  */
-const handleSelectMedia = (media: MediaItem, replace = false) => {
+const handleSelectMedia = (media: MediaItem, replace = false, episode?: number) => {
   if (isSavingTransfer.value) { toast.show('正在添加影片，请稍候', '↻'); return; }
   embedPlayingMedia.value = media;
+  requestedLibraryEpisode.value = episode;
   selectedHistoryEntry.value = history.value.find(entry =>
     (media.quarkFid && entry.media.quarkFid === media.quarkFid) || entry.media.id === media.id
   ) || null;
@@ -277,11 +279,13 @@ const handleSelectMedia = (media: MediaItem, replace = false) => {
 };
 
 const continuePlayback = (entry: PlaybackHistoryEntry) => {
+  requestedLibraryEpisode.value = undefined;
   selectedHistoryEntry.value = entry;
   embedPlayingMedia.value = entry.media;
   isEmbedPlayerOpen.value = true;
   setMobileHistoryLayer('player');
 };
+const playSearchLibraryMedia = (media: MediaItem, episode?: number) => handleSelectMedia(media, false, episode);
 
 const closeEmbedPlayer = () => {
   requestLayerClose('player', () => { isEmbedPlayerOpen.value = false; });
@@ -598,7 +602,7 @@ const showSavedLibrary = () => {
       <DesktopSidebar :active-page="mobileTab" :user="user" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
       <TopNavigation :active-page="mobileTab" :disabled="isSavingTransfer" @home="navigateMobileTab('home')" @search="focusMobileSearch" @submit="submitHeaderSearch" @history="showHistory" />
       <HomePage v-show="mobileTab === 'home'" :active="mobileTab === 'home' && !catalogDetail && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia" :feeds="catalogFeeds" :browse="catalogBrowse" :loading="catalogLoading" :library="enrichedMediaList" :history="history" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" @refresh-channel="refreshCatalogChannel" @load-more="loadMoreCatalog" />
-      <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :error="failedResourceId === 'direct' ? saveError : null" @search="handleSearchMedia" @select="openCatalogDetail" @play="handleSelectMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
+      <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :error="failedResourceId === 'direct' ? saveError : null" @search="handleSearchMedia" @select="openCatalogDetail" @play="playSearchLibraryMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
       <main v-show="mobileTab === 'library'" class="page-container library-page">
         <header class="library-intro"><div class="library-title"><h1>我的片库</h1><p>{{ allMediaList.length }} 部影片，随时开场</p></div><div class="library-actions"><button type="button" class="check-updates-button" :class="{ checking: isCheckingUpdates }" :disabled="isCheckingUpdates || isApplyingUpdates" aria-label="检查片库更新" @click="checkLibraryUpdates(true, true)"><RefreshCw /><span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span></button><button type="button" class="add-library-button" @click="focusMobileSearch"><Plus />添加</button></div></header>
         <div class="category-toolbar"><CategoryTabs v-model="currentCategory" :counts="categoryCounts" /></div>
@@ -612,7 +616,7 @@ const showSavedLibrary = () => {
       <MobileTabBar :active-tab="mobileTab" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
     </div>
     <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" :in-library="!!findCatalogMedia(catalogDetail, allMediaList)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
-    <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
+    <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" :requested-episode="requestedLibraryEpisode" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
     <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
     <DeleteMediaConfirm :open="!!deletingMedia" :media="deletingMedia" :deleting="isDeletingMedia" @cancel="closeDeleteDialog" @confirm="confirmDeleteMedia" />
     <CategoryPickerSheet :open="!!categoryMedia" :media="categoryMedia" :saving="isSavingCategory" @cancel="closeCategoryPicker" @select="selectMediaCategory" />

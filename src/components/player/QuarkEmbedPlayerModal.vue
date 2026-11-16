@@ -25,12 +25,14 @@ import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 import { playbackCoverage } from '../../services/playbackCoverage';
 import { chooseOfficialProgress, readOfficialProgress } from '../../services/officialProgress';
 import type { OfficialWorkProgress } from '../../types/search';
+import { libraryPlaybackSelection } from '../../services/libraryPlaybackSelection';
 
 const props = defineProps<{
   isOpen: boolean;
   username?: string;
   media: MediaItem | null;
   historyEntry?: PlaybackHistoryEntry | null;
+  requestedEpisode?: number;
 }>();
 
 const emit = defineEmits<{
@@ -1122,13 +1124,8 @@ const loadSession = async () => {
     if (sequence !== requestSequence || !props.isOpen) return;
     session.value = result;
     announce(`已读取 ${result.episodes.length} 个视频文件`);
-    const history = props.historyEntry;
-    const matchedHistoryIndex = history
-      ? result.episodes.findIndex(episode => episode.fid === history.episodeFid)
-      : -1;
-    const resumeIndex = matchedHistoryIndex >= 0 ? matchedHistoryIndex : (orderedEpisodeEntries.value[0]?.index || 0);
-    const resumeAt = history && matchedHistoryIndex >= 0 && !history.completed ? history.position : 0;
-    await prepareEpisode(resumeIndex, resumeAt);
+    const selected = libraryPlaybackSelection(result.episodes, props.historyEntry, props.requestedEpisode, orderedEpisodeEntries.value[0]?.index || 0);
+    await prepareEpisode(selected.index, selected.position);
   } catch (error) {
     if (sequence === requestSequence) handleServiceError(error);
   }
@@ -1257,7 +1254,7 @@ useDialog(dialogRef, () => props.isOpen, () => {
 });
 
 watch(
-  [() => props.isOpen, () => props.media?.id],
+  [() => props.isOpen, () => props.media?.id, () => props.requestedEpisode],
   ([isOpen]) => {
     if (isOpen) loadSession();
     else {
