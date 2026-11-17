@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type Hls from 'hls.js';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Expand, Shrink, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Expand, Shrink, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; desktop?: boolean; hls?: Hls | null; username?: string }>();
-const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; fullscreen?: boolean; nativeVideoFullscreen?: boolean; desktop?: boolean; title?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
+const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'web-fullscreen'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
 const visible = ref(true);
 const paused = ref(true);
 const muted = ref(false);
@@ -20,7 +20,7 @@ const seekSliderStyle = computed(() => {
   const buff = Math.min(100, Math.max(0, (buffered.value / duration.value) * 100));
   const maxBuff = Math.max(played, buff);
   return {
-    background: `linear-gradient(to right, #fff 0%, #fff ${played}%, rgba(255, 255, 255, 0.38) ${played}%, rgba(255, 255, 255, 0.38) ${maxBuff}%, rgba(255, 255, 255, 0.14) ${maxBuff}%, rgba(255, 255, 255, 0.14) 100%)`
+    '--played': `${played}%`, '--buffered': `${maxBuff}%`
   };
 });
 const notice = ref('');
@@ -242,15 +242,11 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     }
     if (event.key === 'f' || event.key === 'F') {
       event.preventDefault();
-      if (props.desktop && supportsNativeFullscreen) {
-        void toggleNativeFullscreen();
-      } else {
-        emit('fullscreen');
-      }
-    }
-    if (event.key === 'w' || event.key === 'W') {
-      event.preventDefault();
       emit('fullscreen');
+    }
+    if (props.desktop && !props.fullscreen && (event.key === 'w' || event.key === 'W')) {
+      event.preventDefault();
+      emit('web-fullscreen');
     }
     if (event.key === 'm' || event.key === 'M') toggleMute();
   };
@@ -309,51 +305,23 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     clearTimeout(seekNoticeTimer);
   };
 }, { immediate: true });
-const isNativeFullscreen = ref(typeof document !== 'undefined' && Boolean(document.fullscreenElement));
-const supportsNativeFullscreen = typeof document !== 'undefined' && Boolean(document.fullscreenEnabled);
-
-const updateNativeFullscreenState = () => {
-  isNativeFullscreen.value = typeof document !== 'undefined' && Boolean(document.fullscreenElement);
-};
-
-const toggleNativeFullscreen = async () => {
-  if (typeof document === 'undefined') return;
-  const target = props.video.closest('.video-stage') || props.video.closest('.player-window') || props.video;
-  try {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-    } else if (target && 'requestFullscreen' in target) {
-      await (target as HTMLElement).requestFullscreen();
-    }
-  } catch {
-    emit('fullscreen');
-  }
-};
-
-onMounted(() => {
-  if (typeof document !== 'undefined') {
-    document.addEventListener('fullscreenchange', updateNativeFullscreenState);
-  }
-});
-
 watch(() => props.expanded, value => { if (!value) locked.value = false; reveal(); });
 onBeforeUnmount(() => {
-  if (typeof document !== 'undefined') {
-    document.removeEventListener('fullscreenchange', updateNativeFullscreenState);
-  }
   release();
   emit('lock-change', false);
 });
 </script>
 
 <template>
-  <div class="mobile-controls" :class="{ concealed: !visible, locked, desktop }" @pointerdown="reveal" @focusin="reveal">
+  <div class="mobile-controls" :class="{ concealed: !visible, locked, desktop, expanded }" @pointerdown="reveal" @focusin="reveal">
     <p v-if="notice" class="control-notice" role="status">{{ notice }}</p>
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
     <div v-if="seekNotice && !boosted" class="speed-notice" role="status">{{ seekNotice }}</div>
     <button v-if="expanded && !desktop" class="lock-control" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
     <div v-if="!locked" class="control-tools">
-      <span class="desktop-shortcuts">空格 播放/暂停 · ← → 快退/快进</span>
+      <button v-if="expanded" type="button" class="back-control" aria-label="返回播放页面" @click="emit('back')"><ArrowLeft /></button>
+      <span v-if="expanded" class="playing-title">{{ title }}</span>
+      <span v-else class="desktop-shortcuts">空格 播放/暂停 · ← → 快退/快进</span>
       <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
       <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
     </div>
@@ -370,22 +338,23 @@ onBeforeUnmount(() => {
       <button type="button" class="mute-button" :aria-label="muted ? '取消静音' : '静音'" @click="toggleMute"><VolumeX v-if="muted" /><Volume2 v-else /></button>
       <input class="volume-slider" type="range" aria-label="音量" min="0" max="1" step="0.05" :value="muted ? 0 : volume" @input="changeVolume" />
       <select v-if="subtitles.length" aria-label="影片字幕" :value="subtitle" @change="selectSubtitle"><option value="off">字幕关</option><option v-for="track in subtitles" :key="track.id" :value="track.id">{{ track.label }}</option></select>
+      <button type="button" class="fit-control" :aria-label="pictureFit === 'cover' ? '画面已填满，点击显示完整画面' : '画面完整显示，点击填满屏幕（裁切边缘）'" @click="emit('picture-fit')">{{ pictureFit === 'cover' ? '填满' : '适应' }}</button>
       <select aria-label="播放倍速" :value="speed" @change="changeSpeed"><option v-for="rate in rates" :key="rate" :value="rate">{{ rate }}×</option></select>
       <button
-        v-if="desktop && supportsNativeFullscreen"
         type="button"
-        :aria-label="isNativeFullscreen ? '退出系统全屏 (F)' : '系统全屏 (F)'"
-        :title="isNativeFullscreen ? '退出系统全屏 (F)' : '系统全屏 (F)'"
-        @click="toggleNativeFullscreen"
+        :aria-label="fullscreen ? '退出系统全屏' : nativeVideoFullscreen ? '系统视频全屏' : '全屏播放'"
+        :title="fullscreen ? '退出系统全屏 (F)' : nativeVideoFullscreen ? '系统视频全屏，使用系统播放控件' : '全屏播放 (F)'"
+        @click="emit('fullscreen')"
       >
-        <Shrink v-if="isNativeFullscreen" />
+        <Shrink v-if="fullscreen" />
         <Expand v-else />
       </button>
       <button
+        v-if="desktop && !fullscreen"
         type="button"
-        :aria-label="desktop ? (expanded ? '退出网页全屏 (W)' : '网页全屏 (W)') : (expanded ? '退出横屏' : '横屏播放')"
-        :title="desktop ? (expanded ? '退出网页全屏 (W)' : '网页全屏 (W)') : (expanded ? '退出横屏' : '横屏播放')"
-        @click="emit('fullscreen')"
+        :aria-label="expanded ? '退出网页全屏 (W)' : '网页全屏 (W)'"
+        :title="expanded ? '退出网页全屏 (W)' : '网页全屏 (W)'"
+        @click="emit('web-fullscreen')"
       >
         <Minimize v-if="expanded" />
         <Maximize v-else />
@@ -397,9 +366,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mobile-controls { position: absolute; z-index: 3; inset: 0; color: #fff; pointer-events: none; background: linear-gradient(rgb(0 0 0 / .35), transparent 30%, transparent 48%, rgb(0 0 0 / .75)); transition: opacity .2s; }
+.mobile-controls { --control-left: 12px; --control-right: 12px; --control-top: 8px; --control-bottom: 4px; }
+.mobile-controls.expanded { --control-left: calc(16px + var(--player-inset-left, 0px)); --control-right: calc(16px + var(--player-inset-right, 0px)); --control-top: calc(8px + var(--player-inset-top, 0px)); --control-bottom: calc(8px + var(--player-inset-bottom, 0px)); }
 .mobile-controls.concealed:not(:has(:focus-visible)) { opacity: 0; pointer-events: none; }
 .mobile-controls.concealed:not(:has(:focus-visible)) :is(button, input, select) { pointer-events: none; }
-button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 50%; background: transparent; color: inherit; pointer-events: auto; transition: background .18s; }
+button { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 0; border-radius: 50%; background: transparent; color: inherit; pointer-events: auto; cursor: pointer; transition: background .18s; }
 button svg { width: 21px; height: 21px; }
 input { min-width: 0; height: 44px; margin: 0; accent-color: #fff; touch-action: none; pointer-events: auto; }
 .time { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -408,25 +379,43 @@ select { max-width: 95px; min-width: 0; height: 44px; padding: 0 8px; border: 0;
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .mobile-controls { transition: none; } }
 
-.control-tools { position: absolute; inset: 8px max(12px, var(--safe-area-right)) auto max(12px, var(--safe-area-left)); display: flex; align-items: center; justify-content: end; gap: 8px; }
+.control-tools { position: absolute; inset: var(--control-top) var(--control-right) auto var(--control-left); display: flex; align-items: center; justify-content: end; gap: 8px; }
 .control-tools button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; width: auto; min-width: 44px; flex-basis: auto; padding: 8px 12px; border-radius: 14px; background: rgb(0 0 0 / .32); font-size: 12px; }
 .control-tools svg { width: 18px; height: 18px; }
-.playback-actions { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(20px, 4vw, 36px); }
+.control-tools .back-control { width: 44px; flex: 0 0 44px; padding: 10px; border-radius: 50%; }
+.playing-title { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; text-shadow: 0 1px 4px #000; }
+.playback-actions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(20px, 4vw, 36px); }
 .playback-actions button { background: rgb(0 0 0 / .24); }
 .playback-actions .play-toggle { width: 52px; height: 52px; flex-basis: 52px; background: rgb(255 255 255 / .18); }
 .play-toggle svg { width: 28px; height: 28px; fill: currentColor; }
 .seek-symbol { position: relative; display: block; width: 24px; height: 24px; }
 .seek-symbol svg { width: 24px; height: 24px; }
 .seek-symbol > span { position: absolute; inset: 0; display: grid; place-items: center; padding-top: 2px; font-size: 9px; font-weight: 700; line-height: 1; }
-.lock-control { position: absolute; top: 50%; left: max(12px, var(--safe-area-left)); transform: translateY(-50%); background: rgb(0 0 0 / .4); }
+.lock-control { position: absolute; top: 50%; left: var(--control-left); transform: translateY(-50%); background: rgb(0 0 0 / .4); }
 .mobile-controls.locked { background: transparent; }
-.speed-notice { position: absolute; top: 10px; left: 50%; z-index: 1; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 14px; background: rgb(0 0 0 / .8); color: #fff; border-radius: 12px; font-size: 12px; white-space: nowrap; }
-.transport { position: absolute; inset: auto max(12px, var(--safe-area-right)) max(4px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; column-gap: 8px; }
+.speed-notice { position: absolute; top: calc(var(--control-top) + 48px); left: 50%; z-index: 1; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 14px; background: rgb(0 0 0 / .8); color: #fff; border-radius: 12px; font-size: 12px; white-space: nowrap; }
+.transport { position: absolute; inset: auto var(--control-right) var(--control-bottom) var(--control-left); display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; column-gap: 8px; }
 .transport .time { text-align: center; }
-.seek-slider { width: 100%; }
+.seek-slider { --played: 0%; --buffered: 0%; width: 100%; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+.seek-slider::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, #fff var(--played), rgb(255 255 255 / .4) var(--played), rgb(255 255 255 / .4) var(--buffered), rgb(255 255 255 / .2) var(--buffered)); }
+.seek-slider::-moz-range-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, #fff var(--played), rgb(255 255 255 / .4) var(--played), rgb(255 255 255 / .4) var(--buffered), rgb(255 255 255 / .2) var(--buffered)); }
+.seek-slider::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4.5px; border: 0; border-radius: 50%; -webkit-appearance: none; background: #fff; }
+.seek-slider::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; }
 .secondary-controls { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.fit-control { font-size: 12px; white-space: nowrap; }
 .secondary-controls .mute-button { margin-right: auto; }
 .volume-slider, .desktop-shortcuts { display: none; }
+.mobile-controls:not(.expanded):not(.desktop) .control-tools { display: none; }
+.mobile-controls:not(.expanded):not(.desktop) .transport { grid-template-columns: 32px minmax(0, 1fr) 32px auto; column-gap: 6px; }
+.mobile-controls:not(.expanded):not(.desktop) .secondary-controls { grid-column: auto; gap: 0; }
+.mobile-controls:not(.expanded):not(.desktop) .secondary-controls :is(.mute-button, .fit-control, select[aria-label='影片字幕']) { display: none; }
+.mobile-controls:not(.expanded):not(.desktop) .secondary-controls select { max-width: 48px; padding: 0 4px; background: transparent; }
+.mobile-controls:not(.expanded):not(.desktop) .time { font-size: 10px; }
+@media (max-height: 320px) and (orientation: landscape) {
+  .mobile-controls.expanded .transport { grid-template-columns: 36px minmax(0, 1fr) 36px auto; }
+  .mobile-controls.expanded .secondary-controls { grid-column: auto; gap: 4px; }
+  .mobile-controls.expanded .secondary-controls .mute-button { margin-right: 4px; }
+}
 @media (min-width: 1024px) and (pointer: fine) {
   .playback-actions { top: 46%; }
   .playback-actions .play-toggle { width: 64px; height: 64px; flex-basis: 64px; }

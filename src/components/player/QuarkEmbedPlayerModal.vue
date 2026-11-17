@@ -20,6 +20,7 @@ import {
 import { useToast } from '../../composables/useToast';
 import { useDialog } from '../../composables/useDialog';
 import { useMobileLandscape } from '../../composables/useMobileLandscape';
+import { usePlayerFullscreen, type NativeFullscreenVideo } from '../../composables/usePlayerFullscreen';
 import { usePlaybackChrome } from '../../composables/usePlaybackChrome';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 import { playbackCoverage } from '../../services/playbackCoverage';
@@ -60,6 +61,7 @@ interface SoundEffectOption {
 
 const toast = useToast();
 const videoRef = ref<HTMLVideoElement | null>(null);
+const playerWindowRef = ref<HTMLElement | null>(null);
 const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
@@ -167,8 +169,10 @@ let introSkipped = false;
 let episodeCompletionHandled = false;
 const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
-  && (window.matchMedia('(max-width: 820px)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-const { immersive, rotated, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen);
+  && (window.matchMedia('(max-width: 820px), (max-height: 600px) and (pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+const { fullscreen, nativeVideoFullscreen, notice: fullscreenNotice, toggleFullscreen, exitFullscreen } =
+  usePlayerFullscreen(() => playerWindowRef.value, () => videoRef.value, () => props.isOpen, isMobilePlaybackDevice);
+const { immersive, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen, () => fullscreen.value);
 usePlaybackChrome(() => props.isOpen && immersive.value);
 
 const soundEffectOptions: SoundEffectOption[] = [
@@ -1207,12 +1211,8 @@ const retry = () => {
   else loadSession();
 };
 
-type NativeFullscreenVideo = HTMLVideoElement & {
-  webkitExitFullscreen?: () => void;
-  webkitDisplayingFullscreen?: boolean;
-};
-
 const close = () => {
+  void exitFullscreen();
   resetLandscape();
   void persistProgress(true, false, true);
   phase.value = 'idle';
@@ -1240,6 +1240,7 @@ const openEpisodeSheet = () => {
 const dismissLayer = () => {
   if (settingsExpanded.value) { settingsExpanded.value = false; return true; }
   if (episodeSheetOpen.value) { episodeSheetOpen.value = false; return true; }
+  if (fullscreen.value) { void exitFullscreen(); return true; }
   if (immersive.value) { toggleWebFullscreen(); return true; }
   return false;
 };
@@ -1295,14 +1296,14 @@ defineExpose({ retry, dismissLayer });
   <div
     class="player-backdrop"
     ref="dialogRef"
-    :class="{ active: isOpen, 'landscape-inline': immersive, 'rotated-player': rotated }"
+    :class="{ active: isOpen, 'landscape-inline': immersive, 'mobile-player': isMobilePlaybackDevice }"
     :style="immersiveStyle"
     role="dialog"
     aria-modal="true"
     :aria-label="media ? `播放《${media.title}》` : '视频播放器'"
     @click.self="close"
   >
-    <section v-if="media" class="player-window">
+    <section v-if="media" ref="playerWindowRef" class="player-window" :class="{ 'immersive-window': immersive }">
       <header v-show="!controlsLocked" class="player-header">
         <div class="title-block">
           <button class="icon-button player-back-button" type="button" aria-label="返回上一页" @click="back"><ArrowLeft /></button>
@@ -1364,8 +1365,13 @@ defineExpose({ retry, dismissLayer });
 
             <MobilePlaybackControls
               v-if="videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" :desktop="!isMobilePlaybackDevice" @fullscreen="toggleWebFullscreen" @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
+              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" :fullscreen="fullscreen" :native-video-fullscreen="nativeVideoFullscreen" :desktop="!isMobilePlaybackDevice"
+              :title="`${media.title}${currentEpisode ? ' · ' + currentEpisode.episodeTitle : ''}`" :picture-fit="pictureFit"
+              @fullscreen="toggleFullscreen" @web-fullscreen="toggleWebFullscreen" @back="back" @picture-fit="pictureFit = pictureFit === 'contain' ? 'cover' : 'contain'"
+              @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
             />
+            <p v-if="fullscreenNotice" class="fullscreen-notice" role="status">{{ fullscreenNotice }}</p>
+            <button v-if="immersive && (phase !== 'ready' || manualPlayRequired)" class="stage-back-button icon-button" type="button" aria-label="返回播放页面" @click="back"><ArrowLeft /></button>
 
             <div v-if="phase === 'resolving' || phase === 'preparing'" class="stage-state loading-state" role="status" aria-live="polite">
               <img v-if="media.poster && !isMobilePlaybackDevice" class="stage-poster" :src="media.poster" alt="" aria-hidden="true" />
@@ -1675,10 +1681,11 @@ defineExpose({ retry, dismissLayer });
 .skip-durations .preferences-error { color: var(--danger); }
 
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
-.player-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / .58); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
+.player-backdrop { position: fixed; top: var(--player-top, 0px); left: var(--player-left, 0px); width: var(--player-width, 100%); height: var(--player-height, 100dvh); z-index: 1400; display: grid; place-items: center; padding: 0; background: var(--liquid-canvas); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
-.player-window { display: flex; flex-direction: column; width: min(1240px, 100%); height: min(850px, calc(100dvh - 48px)); min-height: 0; overflow: hidden; border: var(--glass-border); border-radius: 22px; color: var(--text-primary); background: var(--liquid-canvas); box-shadow: var(--glass-shadow-lg); }
+.player-window { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow: hidden; border: 0; color: var(--text-primary); background: var(--liquid-canvas); }
+.player-window:fullscreen { width: 100vw; height: 100dvh; max-width: none; margin: 0; background: #000; }
 .player-header { display: flex; flex-shrink: 0; min-height: 80px; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 24px; border-bottom: 1px solid var(--divider); background: transparent; }
 .title-block, .header-actions { display: flex; align-items: center; gap: 12px; }
 .title-block, .title-copy { min-width: 0; }
@@ -1695,7 +1702,9 @@ defineExpose({ retry, dismissLayer });
 .player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
 .video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
 /* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
-.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 220px; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
+.video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 0; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
+.fullscreen-notice { position: absolute; z-index: 10; top: calc(60px + var(--player-inset-top, 0px)); left: max(16px, var(--player-inset-left, 0px)); right: max(16px, var(--player-inset-right, 0px)); margin: 0 auto; width: fit-content; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; color: #fff; background: rgb(0 0 0 / .85); font-size: 12px; text-align: center; }
+.stage-back-button { position: absolute; z-index: 11; top: calc(8px + var(--player-inset-top, 0px)); left: calc(16px + var(--player-inset-left, 0px)); color: #fff; background: rgb(0 0 0 / .35); }
 .video-stage, .video-stage :deep(*) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
 .video-element { touch-action: none; }
@@ -1794,7 +1803,6 @@ defineExpose({ retry, dismissLayer });
 @media (max-width: 1000px) and (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 255px; } .source-badge { display: none; } .player-toolbar .toolbar-chevron { display: none; } }
 @media (max-width: 820px) {
   .player-backdrop { padding: 0; place-items: stretch; background: rgb(0 0 0 / .58); }
-  .player-window { width: 100%; height: 100dvh; border: 0; border-radius: 0;  box-shadow: var(--glass-highlight-inner), 0 28px 90px rgb(0 0 0 / .4); }
   .player-header { min-height: calc(72px + var(--safe-area-top)); padding: calc(10px + var(--safe-area-top)) calc(18px + var(--safe-area-right)) 10px calc(18px + var(--safe-area-left)); }
   .source-badge { display: none; }
   .title-copy h2 { font-size: 1.06rem; }
@@ -1835,27 +1843,19 @@ defineExpose({ retry, dismissLayer });
 }
 @media (max-width: 360px) { .episode-list { grid-template-columns: repeat(4, minmax(0, 1fr)); } .player-toolbar button { gap: 5px; padding: 8px; } .player-toolbar button > svg { width: 17px; height: 17px; } }
 .player-backdrop.landscape-inline { height: var(--player-height, 100dvh); padding: 0; background: #000; }
-.landscape-inline .player-window { position: absolute; top: var(--player-inset-top, 0px); left: var(--player-inset-left, 0px); width: calc(100% - var(--player-inset-left, 0px) - var(--player-inset-right, 0px)); height: calc(100% - var(--player-inset-top, 0px) - var(--player-inset-bottom, 0px)); border: 0; border-radius: 0; background: #000; box-shadow: none; }
-.landscape-inline .player-header { position: absolute; z-index: 8; top: 0; right: 0; min-height: 0; padding: 8px; border: 0; background: transparent; pointer-events: none; }
-.landscape-inline .title-block, .landscape-inline .text-action { display: none; }
-.landscape-inline .header-actions { pointer-events: auto; }
-.landscape-inline .icon-button { color: #fff; background: rgb(15 17 22 / .58); }
-.landscape-inline .player-back-button { pointer-events: auto; }
+.landscape-inline .player-window { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; margin: 0; border: 0; border-radius: 0; background: #000; box-shadow: none; }
+.landscape-inline .player-header { display: none; }
 .landscape-inline .player-layout, .landscape-inline .video-column { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .landscape-inline .video-column { padding: 0; background: #000; }
-.landscape-inline .video-stage { --safe-area-top: 0px; --safe-area-right: 0px; --safe-area-bottom: 0px; --safe-area-left: 0px; width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
+.landscape-inline .video-stage { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
 .landscape-inline .video-column > .danmaku-controls,
 .landscape-inline .player-toolbar,
 .landscape-inline .playback-settings,
 .landscape-inline .episode-panel { display: none; }
-.rotated-player .player-window { position: absolute; top: calc(50% + (var(--player-inset-top, 0px) - var(--player-inset-bottom, 0px)) / 2); left: calc(50% + (var(--player-inset-left, 0px) - var(--player-inset-right, 0px)) / 2); width: calc(var(--player-height) - var(--player-inset-top, 0px) - var(--player-inset-bottom, 0px)); height: calc(var(--player-width) - var(--player-inset-left, 0px) - var(--player-inset-right, 0px)); max-width: none; max-height: none; transform: translate(-50%, -50%) rotate(90deg); }
-.rotated-player .player-header { top: 0; right: 0; }
 
 @media (prefers-reduced-motion: reduce) { .player-backdrop, .loading-wave i, .playback-starting-pill svg, .setting-switch span, .setting-switch::before { transition: none; animation: none; } }
 
 /* A full playback page with independent sheets; changing sheets never remounts video. */
-.player-backdrop { padding: 0; background: var(--liquid-canvas); }
-.player-window { position: relative; width: 100%; height: var(--app-viewport-height); border: 0; border-radius: 0; box-shadow: none; }
 .player-header { min-height: calc(68px + var(--safe-area-top)); padding-top: calc(10px + var(--safe-area-top)); }
 .player-back-button { background: transparent; }
 .episode-heading-actions { display: flex; align-items: center; gap: 4px; }
@@ -1865,12 +1865,12 @@ defineExpose({ retry, dismissLayer });
 .playback-settings { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(560px, calc(100% - 48px)); max-height: 80%; overflow: hidden; margin: 0; background: var(--surface-1); border: 1px solid var(--divider); }
 .episode-panel.sheet-open { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(420px, calc(100% - 48px)); height: min(75%, 700px); overflow: hidden; margin: 0; border-radius: 16px; border: 1px solid var(--divider); background: var(--surface-1); }
 .episode-panel.sheet-open .episode-list { overflow-y: auto; }
-@media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(100dvh - 200px); } }
+@media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(var(--player-height, 100dvh) - 200px); } }
 @media (min-width: 821px) and (max-width: 1199px) { .player-layout { grid-template-columns: minmax(0, 1fr) 260px; } }
 @media (min-width: 1024px) {
   .player-window { max-width: 1920px; margin-inline: auto; }
   .video-column { padding: 24px; }
-  .video-stage { max-height: calc(100dvh - 240px); }
+  .video-stage { max-height: calc(var(--player-height, 100dvh) - 240px); }
   .episode-panel { background: var(--surface-1); }
   .episode-item { border-radius: 10px; }
   .episode-heading { padding: 24px 16px 16px; }
@@ -1879,7 +1879,7 @@ defineExpose({ retry, dismissLayer });
   .player-header { min-height: calc(74px + var(--safe-area-top)); padding: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)) 12px 12px; }
   .player-layout { display: block; }
   .video-column { display: contents; }
-  .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: 16 / 9; min-height: 210px; max-height: 55dvh; }
+  .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: var(--video-ratio, 16 / 9); min-height: 0; max-height: calc(var(--player-height, 100dvh) * .55); }
   .video-column > :deep(.danmaku-controls) { margin: 0 16px; }
   .player-toolbar { margin: 0 16px; }
   .episode-panel { margin: 8px 16px calc(24px + var(--safe-area-bottom)); }
@@ -1887,12 +1887,11 @@ defineExpose({ retry, dismissLayer });
   .episode-panel.sheet-open { inset: auto max(12px, var(--safe-area-right)) max(12px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); width: auto; height: 65%; border-radius: 24px; padding-bottom: 12px; }
   .episode-panel.sheet-open .episode-list { flex: 1; min-height: 0; overflow-y: auto; }
 }
-.landscape-inline .player-header { left: 0; right: auto; display: block; }
-.landscape-inline .title-block { display: flex; }
-.landscape-inline .title-copy, .landscape-inline .header-actions { display: none; }
 .landscape-inline .video-stage { position: relative; max-height: none; min-height: 0; height: 100%; }
 .landscape-inline .playback-settings { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); max-height: 100%; border-radius: 0; }
-.landscape-inline .settings-panel-heading { padding: 12px 16px; }
-.landscape-inline .settings-panel-body { padding: 16px; }
+.landscape-inline .settings-panel-heading { padding: max(12px, var(--player-inset-top, 0px)) calc(16px + var(--player-inset-right, 0px)) 12px 16px; }
+.landscape-inline .settings-panel-body { padding: 16px calc(16px + var(--player-inset-right, 0px)) calc(16px + var(--player-inset-bottom, 0px)) 16px; }
 .landscape-inline .episode-panel.sheet-open { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); height: 100%; border-radius: 0; }
+.landscape-inline .episode-panel.sheet-open .episode-heading { padding-top: max(12px, var(--player-inset-top, 0px)); padding-right: calc(16px + var(--player-inset-right, 0px)); }
+.landscape-inline .episode-panel.sheet-open .episode-list { padding-right: calc(12px + var(--player-inset-right, 0px)); padding-bottom: calc(16px + var(--player-inset-bottom, 0px)); }
 </style>

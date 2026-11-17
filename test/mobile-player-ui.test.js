@@ -44,9 +44,9 @@ function video() {
 function mount() {
   document.body.innerHTML = '<div class="video-stage"><div id="mount"></div></div>';
   const media = video(); media.tabIndex = 0; document.querySelector('.video-stage').appendChild(media);
-  const props = reactive({ video: markRaw(media), expanded: false });
+  const props = reactive({ video: markRaw(media), expanded: false, fullscreen: false });
   let toggles = 0;
-  const app = createApp({ render: () => h(Controls, { ...props, onFullscreen: () => { toggles++; props.expanded = !props.expanded; } }) });
+  const app = createApp({ render: () => h(Controls, { ...props, onFullscreen: () => { toggles++; props.fullscreen = !props.fullscreen; props.expanded = props.fullscreen; } }) });
   app.mount('#mount');
   return { app, props, media, get toggles() { return toggles; } };
 }
@@ -63,9 +63,9 @@ test('mobile controls play, pause, seek without time updates overriding a drag, 
     range.dispatchEvent(event('change')); await nextTick(); assert.equal(view.media.currentTime, 65);
     range.value = '80'; range.dispatchEvent(event('input')); await nextTick();
     range.dispatchEvent(event('pointercancel')); await nextTick(); assert.equal(range.value, '65');
-    button('横屏播放').click(); await nextTick(); assert.ok(button('退出横屏'));
-    button('退出横屏').click(); await nextTick(); assert.equal(view.toggles, 2);
-    assert.ok(button('横屏播放'));
+    button('全屏播放').click(); await nextTick(); assert.ok(button('退出系统全屏'));
+    button('退出系统全屏').click(); await nextTick(); assert.equal(view.toggles, 2);
+    assert.ok(button('全屏播放'));
   } finally { view.app.unmount(); }
 });
 test('subtitle selection leaves metadata tracks alone; mute can restore zero volume', async () => {
@@ -154,7 +154,7 @@ test('play rejection is visible and replaced video no longer controls the UI', a
     assert.equal(replacement.paused, false);
   } finally { view.app.unmount(); }
 });
-test('portrait-locked landscape swaps dimensions, follows resize, exits without re-entering and resets on close', async () => {
+test('真实旋转进入横屏，竖屏网页全屏不交换尺寸，退出和关闭正确重置', async () => {
   document.body.innerHTML = '<div id="mount"></div>';
   const resize = (width, height) => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
@@ -166,13 +166,13 @@ test('portrait-locked landscape swaps dimensions, follows resize, exits without 
   const app = createApp({ setup() { layout = useMobileLandscape(true, () => props.open); return () => h('div'); } }); app.mount('#mount');
   try {
     assert.equal(layout.immersive.value, false);
-    layout.toggleWebFullscreen(); assert.equal(layout.rotated.value, true);
-    assert.deepEqual(layout.immersiveStyle.value, { '--player-width': '402px', '--player-height': '874px', '--player-inset-top': '0px', '--player-inset-right': '0px', '--player-inset-bottom': '0px', '--player-inset-left': '0px' });
-    resize(874, 402); assert.equal(layout.rotated.value, false); assert.equal(layout.immersive.value, true);
+    layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, true);
+    assert.deepEqual(layout.immersiveStyle.value, { '--player-width': '402px', '--player-height': '874px', '--player-top': '0px', '--player-left': '0px', '--player-inset-top': '0px', '--player-inset-right': '0px', '--player-inset-bottom': '0px', '--player-inset-left': '0px' });
+    resize(874, 402); assert.equal(layout.immersive.value, true);
     layout.toggleWebFullscreen(); resize(874, 380); assert.equal(layout.immersive.value, false);
     resize(402, 874); resize(874, 402); assert.equal(layout.immersive.value, true);
     resize(402, 874); layout.toggleWebFullscreen();
-    props.open = false; await nextTick(); assert.equal(layout.immersive.value, false); assert.equal(layout.rotated.value, false);
+    props.open = false; await nextTick(); assert.equal(layout.immersive.value, false);
     props.open = true; await nextTick(); assert.equal(layout.immersive.value, false);
   } finally { app.unmount(); }
   const before = layout.immersiveStyle.value;
@@ -261,7 +261,7 @@ test('desktop portrait windows expand without applying the phone rotation transf
   const app = createApp({ setup() { layout = useMobileLandscape(false, () => true); return () => h('div'); } });
   app.mount('#mount');
   try {
-    layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, true); assert.equal(layout.rotated.value, false);
+    layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, true);
     layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, false);
   } finally { app.unmount(); }
 });
