@@ -343,11 +343,21 @@ const arrayFrom = value => {
 
 const firstNonEmpty = (...values) => values.find(value => typeof value === 'string' && value.trim()) || '';
 
+const normalizePlaybackAudioTracks = items => items.map((item, index) => ({
+  id: String(item.id ?? item.audio_track_id ?? item.index ?? index),
+  label: firstNonEmpty(item.name, item.label, item.title, item.language, item.lang) || `音轨 ${index + 1}`,
+  language: firstNonEmpty(item.language, item.lang),
+  codec: firstNonEmpty(item.codec, item.audio_codec, item.codec_name),
+  channels: String(item.channels || item.channel_layout || '')
+}));
+
 const playbackVideoItems = data => [
   ...arrayFrom(data?.video_list),
   ...arrayFrom(data?.videos),
   ...arrayFrom(data?.transcoding_list)
 ];
+const dolbyVisionProfile = item => Number(item?.video_info?.dolby_vision?.profile
+  || item?.video?.dolby_vision?.profile || item?.dolby_vision?.profile) || 0;
 
 const hasRawPlaybackSource = data => playbackVideoItems(data).some(item => {
   const info = item?.video_info || item?.video || {};
@@ -1338,6 +1348,8 @@ export class QuarkGateway {
         fps: source.fps,
         codec: source.codec,
         bitrate: source.bitrate,
+        ...(source.audioTracks?.length ? { audioTracks: source.audioTracks } : {}),
+        ...(source.colorCompatibilityRisk ? { colorCompatibilityRisk: true } : {}),
         mimeType: source.mimeType,
         isHls: source.isHls,
         delivery: source.delivery,
@@ -2460,6 +2472,7 @@ export class QuarkGateway {
 
   async #normalizePlayData(data, savedFid, cookie, nativeHls = false) {
     const rawSources = playbackVideoItems(data);
+    const hasDolbyVisionProfile5 = rawSources.some(item => dolbyVisionProfile(item) === 5);
     const seen = new Set();
     const sources = [];
 
@@ -2484,6 +2497,11 @@ export class QuarkGateway {
       ].flat().filter(Boolean).join(',');
       const isHls = /\.m3u8(?:$|\?)/i.test(upstreamUrl)
         || /m3u8|mpegurl|hls/i.test(formatHints);
+      const embeddedAudio = arrayFrom(info.streams?.audio_stream_list);
+      const audioTracks = normalizePlaybackAudioTracks(embeddedAudio.length
+        ? embeddedAudio
+        : arrayFrom(item.audio_list || item.audio_tracks || info.audio_list || info.audio_tracks || (info.audio ? [info.audio] : [])));
+      const codec = firstNonEmpty(info.video_codec, info.codec, item.video_codec, item.codec);
       sources.push({
         upstreamUrl,
         requestProfile: data?.__playbackProfile || 'web',
@@ -2494,8 +2512,10 @@ export class QuarkGateway {
         width,
         height,
         fps: Number(info.fps || item.fps) || 0,
-        codec: firstNonEmpty(info.video_codec, info.codec, item.video_codec, item.codec),
+        codec,
+        colorCompatibilityRisk: hasDolbyVisionProfile5 && /^(?:h[.]?264|avc[13]?)(?:\b|$)/i.test(codec),
         bitrate: Number(info.bit_rate || info.bitrate || item.bit_rate || item.bitrate) || 0,
+        audioTracks,
         mimeType: isHls ? 'application/vnd.apple.mpegurl' : (item.mime_type || (/mkv|matroska/i.test(formatHints) ? 'video/x-matroska' : 'video/mp4')),
         isHls,
         nativeHls,
@@ -2562,13 +2582,7 @@ export class QuarkGateway {
       ...arrayFrom(data?.audio_tracks),
       ...rawSources.flatMap(item => arrayFrom(item?.audio_list || item?.audio_tracks))
     ];
-    const audioTracks = rawAudio.map((item, index) => ({
-      id: String(item.id ?? item.audio_track_id ?? index),
-      label: item.name || item.label || item.language || `音轨 ${index + 1}`,
-      language: item.language || item.lang || '',
-      codec: item.codec || item.audio_codec || '',
-      channels: item.channels || item.channel_layout || ''
-    }));
+    const audioTracks = normalizePlaybackAudioTracks(rawAudio);
     const subtitles = arrayFrom(data?.subtitle_list || data?.subtitles).map((item, index) => ({
       id: String(item.id ?? index),
       label: item.name || item.label || item.language || `字幕 ${index + 1}`,

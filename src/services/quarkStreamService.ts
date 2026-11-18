@@ -51,6 +51,8 @@ export interface PlaybackSource {
   fps: number;
   codec: string;
   bitrate: number;
+  audioTracks?: PlaybackAudioTrack[];
+  colorCompatibilityRisk?: boolean;
   mimeType: string;
   isHls: boolean;
   delivery?: 'direct' | 'proxy';

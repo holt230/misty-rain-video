@@ -1,4 +1,52 @@
-import type { PlaybackSource } from './quarkStreamService';
+import type { PlaybackAudioTrack, PlaybackSource } from './quarkStreamService';
+
+type NativeAudioTrack = { id: string; label: string; language: string; enabled: boolean };
+type NativeAudioTrackList = ArrayLike<NativeAudioTrack> & EventTarget;
+
+export const getNativeAudioTracks = (video: HTMLVideoElement) =>
+  (video as HTMLVideoElement & { audioTracks?: NativeAudioTrackList }).audioTracks;
+
+export const audioTrackChannelLabel = (channels: string) => {
+  if (/^(?:2|stereo)$/i.test(channels)) return '立体声';
+  if (/^(?:6$|5\.1(?:$|\())/.test(channels)) return '5.1 声道';
+  return '';
+};
+
+const audioLanguage = (value = '') => value.trim().toLowerCase().replace(/^und$/, '');
+
+export const describeNativeAudioTracks = (tracks: ArrayLike<NativeAudioTrack>, metadata: PlaybackAudioTrack[]) =>
+  Array.from(tracks, (track, index) => {
+    // The upstream per-file track order applies only when the browser exposes the same set.
+    const reported = metadata.length === tracks.length ? metadata[index] : undefined;
+    const nativeLanguage = audioLanguage(track.language);
+    const reportedLanguage = audioLanguage(reported?.language);
+    const details = nativeLanguage && reportedLanguage && nativeLanguage !== reportedLanguage ? undefined : reported;
+    return {
+      id: track.id || String(index),
+      label: track.label || details?.label || `音轨 ${index + 1}`,
+      language: nativeLanguage || reportedLanguage,
+      codec: details?.codec || '',
+      channels: details?.channels || ''
+    };
+  });
+
+export const findStereoAudioTrack = (tracks: PlaybackAudioTrack[], current: number) => {
+  if (audioTrackChannelLabel(tracks[current]?.channels || '') === '立体声') return current;
+  const activeLanguage = audioLanguage(tracks[current]?.language);
+  return tracks.findIndex(track => audioTrackChannelLabel(track.channels) === '立体声'
+    && (!activeLanguage || audioLanguage(track.language) === activeLanguage));
+};
+
+export const enableOnlyAudioTrack = (tracks: ArrayLike<NativeAudioTrack>, index: number) => {
+  const target = tracks[index];
+  if (!target) return false;
+  if (!target.enabled) target.enabled = true;
+  if (!target.enabled) return false;
+  for (const track of Array.from(tracks)) {
+    if (track !== target && track.enabled) track.enabled = false;
+  }
+  return Array.from(tracks).every(track => track.enabled === (track === target));
+};
 
 export const configureVideoRequest = (video: HTMLVideoElement, source: PlaybackSource) => {
   // 原生媒体（含 Safari HLS）不要求 CORS；hls.js 读取分片仍需 CORS。

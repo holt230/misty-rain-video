@@ -3,7 +3,8 @@ import type Hls from 'hls.js';
 import DanmakuControls from './DanmakuControls.vue';
 import MobilePlaybackControls from './MobilePlaybackControls.vue';
 import { playbackHealth } from '../../services/playbackHealth';
-import { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource } from '../../services/playbackSource';
+import { audioTrackChannelLabel, configureVideoRequest, describeNativeAudioTracks, enableOnlyAudioTrack,
+  findStereoAudioTrack, getNativeAudioTracks, playbackSourceLabel, selectInitialPlaybackSource } from '../../services/playbackSource';
 import SubtitleControls from './SubtitleControls.vue';
 import { PlayerPreferencesService } from '../../services/playerPreferencesService';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
@@ -158,6 +159,8 @@ let bufferingTimer: number | null = null;
 let hlsNetworkRetryTimer: number | null = null;
 let hlsNetworkRetryCount = 0;
 let hlsMediaRecoveryCount = 0;
+let nativeAudioObserver: AbortController | undefined;
+let nativeAudioManuallySelected = false;
 let lastPlaybackPosition = 0;
 let lastPlaybackProgressAt = 0;
 let lastAudibleVolume = Math.max(0.1, Math.min(1, Number(localStorage.getItem('misty_rain_player_volume')) || 1));
@@ -263,8 +266,9 @@ const compatibleSource = computed(() => selectInitialPlaybackSource(
 ));
 const audioTracks = computed(() => detectedAudioTracks.value.length
   ? detectedAudioTracks.value
-  : (playback.value?.audioTracks || []));
-const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1 || getNativeAudioTrackCount() > 1);
+  : (selectedSource.value?.audioTracks || playback.value?.audioTracks || []));
+const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1);
+const audioChannelLabel = computed(() => audioTrackChannelLabel(detectedAudioTracks.value[selectedAudioIndex.value]?.channels || ''));
 const selectedSoundEffect = computed(() => soundEffectOptions.find(option => option.value === soundEffectMode.value));
 const libraryCoverage = computed(() => playbackCoverage(episodes.value, props.media?.category, officialWork.value?.latestEpisode));
 const episodeStatus = computed(() => {
@@ -318,6 +322,9 @@ const resetSoundEffectGraph = (replaceVideo = false) => {
 };
 
 const destroyPlaybackEngine = () => {
+  nativeAudioObserver?.abort();
+  nativeAudioObserver = undefined;
+  nativeAudioManuallySelected = false;
   if (hlsNetworkRetryTimer !== null) {
     window.clearTimeout(hlsNetworkRetryTimer);
     hlsNetworkRetryTimer = null;
@@ -372,9 +379,27 @@ const stopVideo = (resetAudioOutput = false) => {
   videoRef.value.load();
 };
 
-const getNativeAudioTrackCount = () => {
-  const tracks = (videoRef.value as (HTMLVideoElement & { audioTracks?: { length: number } }) | null)?.audioTracks;
-  return tracks?.length || 0;
+const observeNativeAudioTracks = (video: HTMLVideoElement, source: PlaybackSource) => {
+  const tracks = getNativeAudioTracks(video);
+  if (!tracks) return;
+  const controller = new AbortController();
+  nativeAudioObserver = controller;
+  const options = { signal: controller.signal };
+  const sync = (selectDefault: boolean) => {
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    const detected = describeNativeAudioTracks(tracks, source.audioTracks || []);
+    const current = Array.from(tracks).findIndex(track => track.enabled);
+    if (selectDefault && isIOSPlaybackDevice && !nativeAudioManuallySelected && detected.length > 1) {
+      const stereo = findStereoAudioTrack(detected, current);
+      if (stereo >= 0) enableOnlyAudioTrack(tracks, stereo);
+    }
+    detectedAudioTracks.value = detected;
+    selectedAudioIndex.value = Array.from(tracks).findIndex(track => track.enabled);
+  };
+  video.addEventListener('loadedmetadata', () => sync(true), options);
+  tracks.addEventListener('addtrack', () => sync(true), options);
+  tracks.addEventListener('removetrack', () => sync(false), options);
+  tracks.addEventListener('change', () => sync(false), options);
 };
 
 const announce = (message: string) => {
@@ -684,6 +709,7 @@ const attachSource = async (
     }
   }
 
+  observeNativeAudioTracks(video, source);
   video.src = source.url;
   video.load();
   seekAndMaybePlay(resumeAt, shouldPlay, attachSequence, applyIntroSkip);
@@ -1164,14 +1190,11 @@ const selectAudioTrack = (index: number) => {
     return;
   }
 
-  const nativeTracks = (videoRef.value as (HTMLVideoElement & {
-    audioTracks?: ArrayLike<{ enabled: boolean }>;
-  }) | null)?.audioTracks;
-  if (nativeTracks && index < nativeTracks.length) {
-    for (let trackIndex = 0; trackIndex < nativeTracks.length; trackIndex += 1) {
-      nativeTracks[trackIndex].enabled = trackIndex === index;
-    }
+  const nativeTracks = videoRef.value && getNativeAudioTracks(videoRef.value);
+  if (nativeTracks && enableOnlyAudioTrack(nativeTracks, index)) {
+    nativeAudioManuallySelected = true;
     selectedAudioIndex.value = index;
+    announce(`已切换到${audioTrackChannelLabel(audioTracks.value[index]?.channels || '') || audioTracks.value[index]?.label || '所选音轨'}`);
   }
 };
 
@@ -1446,7 +1469,7 @@ defineExpose({ retry, dismissLayer });
                 @click="settingsExpanded = !settingsExpanded"
               >
                 <SlidersHorizontal aria-hidden="true" />
-                <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ selectedSoundEffect?.label || '原声' }}</small></span>
+                <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ audioChannelLabel || selectedSoundEffect?.label || '原声' }}</small></span>
                 <ChevronDown class="toolbar-chevron" aria-hidden="true" />
               </button>
               <button type="button" @click="openEpisodeSheet">
@@ -1500,24 +1523,29 @@ defineExpose({ retry, dismissLayer });
               </div>
               <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">当前画质经服务器加载，带宽较低时可降低画质。若有“原画直连”，可尝试切换；部分设备不支持原画格式。</p>
               <p v-else-if="selectedSource?.resolution === 'original'" class="delivery-hint">原画直接从网盘加载，播放效果取决于设备对原始视频与音频格式的支持。</p>
+              <div v-if="selectedSource?.colorCompatibilityRisk" class="color-compatibility">
+                <p>这份视频转码后可能偏绿或偏紫。遇到偏色时，可换一个版本。</p>
+                <button type="button" class="text-action" @click="emit('re-search', media)">查找其他版本</button>
+              </div>
             </div>
 
             <div v-if="audioTracks.length" class="setting-group">
               <div class="setting-heading">
                 <span>音频</span>
-                <small>{{ audioSwitchable ? '可切换音轨' : '当前流音频信息' }}</small>
+                <small>{{ audioSwitchable ? '可切换音轨' : audioTracks.length > 1 ? '当前浏览器暂不支持切换' : '当前音轨' }}</small>
               </div>
-              <div class="option-scroll">
+              <div class="option-scroll" role="group" aria-label="音轨">
                 <button
                   v-for="(track, index) in audioTracks"
                   :key="track.id"
                   type="button"
                   class="option-chip"
                   :class="{ active: selectedAudioIndex === index }"
+                  :aria-pressed="selectedAudioIndex === index"
                   :disabled="!audioSwitchable"
                   @click="selectAudioTrack(index)"
                 >
-                  {{ track.label }}{{ track.codec ? ` · ${track.codec}` : '' }}
+                  {{ track.label }}{{ audioTrackChannelLabel(track.channels) ? ` · ${audioTrackChannelLabel(track.channels)}` : '' }}
                 </button>
               </div>
             </div>
@@ -1678,6 +1706,8 @@ defineExpose({ retry, dismissLayer });
 .skip-durations .preferences-error { color: var(--danger); }
 
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
+.color-compatibility { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; color: var(--text-secondary); font-size: .76rem; line-height: 1.6; }
+.color-compatibility .text-action { padding-inline: 10px; color: var(--liquid-accent); background: transparent; }
 .player-backdrop { position: fixed; top: var(--player-top, 0px); left: var(--player-left, 0px); width: var(--player-width, 100%); height: var(--player-height, 100dvh); z-index: 1400; display: grid; place-items: center; padding: 0; background: var(--liquid-canvas); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
