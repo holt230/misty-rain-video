@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { getLibraryUpdateFeedback } from '../../services/libraryUpdateFeedback';
+import { episodeRangeLabel } from '../../services/resourceCompleteness';
 import { ChevronDown, Ellipsis, Play, X } from '@lucide/vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import type { MediaItem } from '../../types/media';
 
 const props = defineProps<{ media: MediaItem }>();
-const updateFeedback = computed(() => getLibraryUpdateFeedback(props.media));
+const availability = computed(() => {
+  const { category, localEpisodeNumbers, localEpisodeCount } = props.media;
+  if (category === 'movie' || category === 'variety') return categoryLabels[category];
+  if (localEpisodeNumbers?.length) return '可看' + episodeRangeLabel(localEpisodeNumbers);
+  if (localEpisodeCount && localEpisodeCount > 0) return `已保存 ${localEpisodeCount} 个视频`;
+  return '查看选集';
+});
 const qualityLabel = computed(() => {
   const value = `${props.media.tag || ''} ${props.media.quarkQuality || ''}`;
   return value.match(/(?:4K|8K|2160P|1080P|720P|HDR|杜比)/i)?.[0].toUpperCase() || '';
@@ -33,7 +39,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
     <button
       type="button"
       class="card-play-target"
-      :aria-label="`播放《${media.title}》${media.latestEpisodeNumber ? `，更新至第 ${media.latestEpisodeNumber} 集` : ''}${updateFeedback ? `，${updateFeedback.label}` : ''}`"
+      :aria-label="`播放《${media.title}》，${availability}`"
       @click="emit('click-card', media)"
     >
       <span class="poster-viewport">
@@ -48,12 +54,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 
       <span class="card-caption">
         <span class="media-title" :title="media.title">{{ media.title }}</span>
-        <span class="media-subtitle" :title="updateFeedback?.detail" :class="{ 'has-update': (media.newEpisodeCount || 0) > 0 }">
-          <template v-if="(media.newEpisodeCount || 0) > 0">新增 {{ media.newEpisodeCount }} 集</template>
-          <template v-else-if="updateFeedback">{{ updateFeedback.label }}</template>
-          <template v-else-if="media.latestEpisodeNumber">更新至 {{ media.latestEpisodeNumber }} 集</template>
-          <template v-else>{{ media.status || categoryLabels[media.category] }}</template>
-        </span>
+        <span class="media-subtitle" :title="availability">{{ availability }}</span>
       </span>
     </button>
 
@@ -78,7 +79,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
     </button>
 
     <div class="hover-actions">
-      <button type="button" class="card-action" title="更换资源" @click="emit('re-search', media)">换源</button>
+      <button type="button" class="card-action" @click="emit('re-search', media)">其他版本</button>
       <button
         type="button"
         class="card-action danger"
@@ -101,7 +102,7 @@ const categoryLabels: Record<MediaItem['category'], string> = {
 .card-caption { display: grid; min-width: 0; width: 100%; gap: 4px; padding: 0 30px 0 1px; }
 .media-title { display: block; overflow: hidden; color: var(--text-primary); font-size: .9rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; }
 .media-subtitle { overflow: hidden; color: var(--text-tertiary); font-size: .72rem; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
-.media-subtitle.has-update { color: var(--text-primary); }
+.media-subtitle { white-space: normal; overflow-wrap: anywhere; }
 .more-trigger { position: absolute; bottom: -3px; right: -8px; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; }
 .more-trigger::before { display: none; }
 .more-trigger:hover { color: var(--text-primary); background: var(--glass-bg); }

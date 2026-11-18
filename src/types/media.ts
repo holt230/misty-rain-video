@@ -25,6 +25,7 @@ export interface MediaItem {
   quarkFid?: string;           // 烟雨影视片库中的夸克目录 ID
   quarkQuality?: string;       // 夸克画质 (如: 4K 臻彩)
   localEpisodeCount?: number;  // 当前片库中的正片数量
+  localEpisodeNumbers?: number[];
   sourceEpisodeCount?: number; // 原片源中的正片数量
   latestEpisodeNumber?: number;// 原片源最新集数
   latestEpisodeTitle?: string; // 原片源最新一集标题
@@ -38,6 +39,7 @@ export interface LibraryUpdateStatus {
   quarkFid: string;
   title: string;
   localEpisodeCount: number;
+  localEpisodeNumbers?: number[];
   sourceEpisodeCount: number;
   latestEpisodeNumber: number;
   latestEpisodeTitle: string;

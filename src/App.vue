@@ -17,6 +17,7 @@ import type { CatalogItem } from './types/catalog';
 import DesktopSidebar from './components/layout/DesktopSidebar.vue';
 import MobileTabBar, { type MobileTab as MobileDockTab } from './components/layout/MobileTabBar.vue';
 import CategoryTabs from './components/media/CategoryTabs.vue';
+import LibrarySortMenu from './components/media/LibrarySortMenu.vue';
 import MediaGrid from './components/media/MediaGrid.vue';
 import DeleteMediaConfirm from './components/media/DeleteMediaConfirm.vue';
 import CategoryPickerSheet from './components/media/CategoryPickerSheet.vue';
@@ -93,7 +94,15 @@ const {
 const searchPageRef = ref<InstanceType<typeof SearchPage> | null>(null);
 const { feeds: catalogFeeds, browse: catalogBrowse, items: catalogItems, loading: catalogLoading, platform: catalogPlatform, selectPlatform: selectCatalogPlatform, refresh: refreshCatalog, refreshChannel: refreshCatalogChannel, loadMore: loadMoreCatalog } = useCatalog(authenticated);
 const catalogDetail = ref<CatalogItem | null>(null);
-const unversionedCatalogMedia = computed(() => catalogDetail.value ? findUnversionedCatalogMedia(catalogDetail.value, allMediaList.value) : undefined);
+const detailCopy = computed(() => catalogDetail.value && findCatalogMedia(catalogDetail.value, enrichedMediaList.value));
+const playLabel = (fid?: string) => {
+  const record = fid && history.value.find(entry => entry.media.quarkFid === fid);
+  if (record && record.position > 0 && !record.completed) return record.episodeNumber ? `继续看第 ${record.episodeNumber} 集` : '继续观看';
+  const copy = enrichedMediaList.value.find(item => item.quarkFid === fid);
+  return copy?.localEpisodeNumbers?.[0] === 1 && !record ? '从第 1 集开始' : '立即播放';
+};
+const unversionedCatalogMedia = computed(() => catalogDetail.value ? findUnversionedCatalogMedia(catalogDetail.value, enrichedMediaList.value) : undefined);
+const detailPlayable = computed(() => detailCopy.value || unversionedCatalogMedia.value);
 const pendingCatalog = ref<CatalogItem | null>(null);
 const playAfterTransfer = ref(false);
 const automaticStatus = ref('');
@@ -104,6 +113,9 @@ const archiveBatchPreview = ref<{ resourceId: string; plan: ArchiveBatchPreview 
 const archiveBatchJobs = ref<ArchiveBatchJob[]>([]);
 const transferBatchId = ref('');
 const transferBatch = computed(() => archiveBatchJobs.value.find(job => job.id === transferBatchId.value));
+const attentionJobs = computed(() => archiveBatchJobs.value.filter(job => job.status !== 'success' || job.cleanupPendingCount));
+const inlineFind = ref(false);
+watch(isTransferOpen, open => { if (!open) inlineFind.value = false; }, { flush: 'sync' });
 watch([isTransferOpen, searchPending], () => {
   if (!isTransferOpen.value || searchPending.value) { transferSavedMedia.value = null; transferSavedSummary.value = ''; transferBatchId.value = ''; }
   if (!isTransferOpen.value || searchPending.value) archiveBatchPreview.value = null;
@@ -159,7 +171,9 @@ const refreshArchiveBatches = async () => {
       transferSavedSummary.value = receipt.message;
       if (transferSavedMedia.value && receipt.targetFid) transferSavedMedia.value = { ...transferSavedMedia.value, quarkFid: receipt.targetFid };
     }
-    if (jobs.some(job => previous.get(job.id) === 'running' && job.status !== 'running')) void refreshList(true);
+    if (jobs.some(job => previous.get(job.id) === 'running' && job.status !== 'running')) {
+      void refreshList(true); void checkLibraryUpdates(true);
+    }
   } catch { /* Keep the last known status and retry while a task is running. */ }
   finally {
     archiveBatchRefreshing = false;
@@ -408,9 +422,10 @@ const handleSearchMedia = (keyword: string, category: SearchCategory = 'all') =>
   cancelAutomatic();
   pendingCatalog.value = null;
   playAfterTransfer.value = false;
+  inlineFind.value = true;
   void openTransferModal({ id: 'search-' + Date.now(), title: keyword, category: category === 'all' ? currentCategory.value : category, tag: '', poster: '', quarkShareUrl: '' }, category);
-  setMobileHistoryLayer('transfer');
 };
+const clearInlineFind = () => { if (inlineFind.value && !isSavingTransfer.value) closeTransferModal(); };
 
 // 保存片单
 const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]) => {
@@ -443,6 +458,11 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
           const preview = await previewArchiveBatch(cardToSave, bestRes);
           if (account !== user.value?.username) return false;
           archiveBatchPreview.value = { resourceId: bestRes.id, plan: preview };
+          if (preview.targetFid && preview.officialLatest > 0 && preview.existingEpisodes.length === preview.officialLatest && !preview.plannedEpisodes.length && !preview.missingEpisodes.length) {
+            transferSavedMedia.value = allMediaList.value.find(item => item.quarkFid === preview.targetFid)
+              || { ...cardToSave, id: 'quark:' + preview.targetFid, quarkFid: preview.targetFid };
+            transferSavedSummary.value = `第 1～${preview.officialLatest} 集已在片库`;
+          }
           return false;
         }
         archiveImportMessage.value = '正在准备保存…';
@@ -621,6 +641,7 @@ const handleLogout = async () => {
 
 const navigateMobileTab = async (tab: MobileDockTab) => {
   if (isSavingTransfer.value) return;
+  if (tab !== 'search') clearInlineFind();
   pageScroll.set(mobileTab.value, window.scrollY);
   mobileTab.value = tab;
   setMobileHistoryLayer(tab, true);
@@ -685,7 +706,8 @@ const retryTransferSearch = () => { cancelAutomatic(); pendingCatalog.value = nu
 const playSavedTransfer = () => {
   const media = transferSavedMedia.value;
   if (!media || isSavingTransfer.value) return;
-  closeTransferModal(); handleSelectMedia(media, true);
+  const replace = !inlineFind.value;
+  closeTransferModal(); handleSelectMedia(media, replace);
 };
 const showSavedLibrary = () => {
   if (!transferSavedMedia.value || isSavingTransfer.value) return;
@@ -698,33 +720,42 @@ const showSavedLibrary = () => {
   <div class="liquid-spatial-canvas" aria-hidden="true"></div>
   <LoginScreen v-if="checking || !authenticated" :checking="checking" :submitting="loggingIn" :error-message="errorMessage" @login="login" />
   <template v-else-if="user">
-    <div :inert="!!catalogDetail || isEmbedPlayerOpen || isTransferOpen || !!deletingMedia || !!categoryMedia || !!actionMedia">
+    <div :inert="!!catalogDetail || isEmbedPlayerOpen || (isTransferOpen && !inlineFind) || !!deletingMedia || !!categoryMedia || !!actionMedia">
       <DesktopSidebar :active-page="mobileTab" :user="user" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
       <TopNavigation :active-page="mobileTab" :disabled="isSavingTransfer" @home="navigateMobileTab('home')" @search="focusMobileSearch" @submit="submitHeaderSearch" @history="showHistory" />
       <HomePage v-show="mobileTab === 'home'" :active="mobileTab === 'home' && !catalogDetail && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia" :feeds="catalogFeeds" :platform="catalogPlatform" @platform="selectCatalogPlatform" :browse="catalogBrowse" :loading="catalogLoading" :library="enrichedMediaList" :history="history" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" @refresh-channel="refreshCatalogChannel" @load-more="loadMoreCatalog" />
-      <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :error="failedResourceId === 'direct' ? saveError : null" @search="handleSearchMedia" @select="openCatalogDetail" @play="playSearchLibraryMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
+      <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :play-label="playLabel" :show-results="inlineFind && isTransferOpen" :searching="inlineFind && searchPending" :error="failedResourceId === 'direct' ? saveError : null" @criteria-change="clearInlineFind" @search="handleSearchMedia" @select="openCatalogDetail" @play="playSearchLibraryMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
       <main v-show="mobileTab === 'library'" class="page-container library-page">
         <header class="library-intro"><div class="library-title"><h1>我的片库</h1><p>{{ allMediaList.length }} 部影片，随时开场</p></div><div class="library-actions"><button type="button" class="check-updates-button" :class="{ checking: isCheckingUpdates }" :disabled="isCheckingUpdates || isApplyingUpdates" aria-label="检查片库更新" @click="checkLibraryUpdates(true, true)"><RefreshCw /><span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span></button><button type="button" class="add-library-button" @click="focusMobileSearch"><Plus />添加</button></div></header>
-        <section v-if="archiveBatchJobs.length" class="archive-batches" aria-label="电视剧补集任务">
-          <div v-for="job in archiveBatchJobs" :key="job.id" class="archive-batch-status" role="status">
+        <details v-if="attentionJobs.length" class="archive-batches"><summary>保存记录（{{ attentionJobs.length }}）</summary>
+          <div v-for="job in attentionJobs" :key="job.id" class="archive-batch-status" role="status">
             <div><strong>{{ job.title }} · {{ job.status === 'running' ? '正在补集' : job.status === 'success' ? '已补齐' : '补集未完成' }}</strong><p>{{ job.message }}</p><small>已完成 {{ job.completedEpisodes.length }} / {{ job.total }} 集<span v-if="job.cleanupPendingCount"> · 部分临时文件未清理，可能占用网盘空间</span></small></div>
             <button v-if="job.status === 'running'" type="button" :disabled="stoppingArchiveBatch === job.id" @click="stopBatch(job.id)">停止补集</button>
             <button v-else-if="job.status !== 'success'" type="button" @click="resumeArchiveBatch(job)">继续补集</button>
           </div>
-        </section>
+        </details>
         <div class="category-toolbar"><CategoryTabs v-model="currentCategory" :counts="categoryCounts" /></div>
-        <div class="library-filter-row"><div role="group" aria-label="片库状态"><button type="button" :class="{ active: libraryFilter === 'all' }" :aria-pressed="libraryFilter === 'all'" @click="libraryFilter = 'all'">全部</button><button type="button" :class="{ active: libraryFilter === 'watching' }" :aria-pressed="libraryFilter === 'watching'" @click="libraryFilter = 'watching'">在看</button><button type="button" :class="{ active: libraryFilter === 'updated' }" :aria-pressed="libraryFilter === 'updated'" @click="libraryFilter = 'updated'">有更新</button></div><select v-model="librarySort" aria-label="片库排序"><option value="default">默认排序</option><option value="recent">最近观看</option><option value="title">片名排序</option></select></div>
+        <div class="library-filter-row">
+          <div class="library-filters" role="group" aria-label="片库状态">
+            <button type="button" :class="{ active: libraryFilter === 'all' }" :aria-pressed="libraryFilter === 'all'" @click="libraryFilter = 'all'">全部</button>
+            <button type="button" :class="{ active: libraryFilter === 'watching' }" :aria-pressed="libraryFilter === 'watching'" @click="libraryFilter = 'watching'">在看</button>
+            <button type="button" :class="{ active: libraryFilter === 'updated' }" :aria-pressed="libraryFilter === 'updated'" @click="libraryFilter = 'updated'">有更新</button>
+          </div>
+          <LibrarySortMenu v-if="mobileTab === 'library'" v-model="librarySort" />
+        </div>
         <button v-if="availableUpdateMedia.length" type="button" class="apply-updates-button" :disabled="isApplyingUpdates || isCheckingUpdates" @click="applyLibraryUpdates(availableUpdateMedia)">{{ isApplyingUpdates ? '正在补充新剧集…' : availableUpdateMedia.length + ' 部影片发现新剧集，立即补集' }}</button>
         <div v-if="loadError" class="inline-feedback library-load-error" role="alert"><strong>暂时无法读取片库</strong><p>{{ loadError }}</p><button type="button" :disabled="isLoading" @click="refreshList()">重新加载</button></div>
         <div v-if="!isLoading && mediaList.length && !visibleLibrary.length" class="catalog-empty"><p>当前分类下没有符合条件的影片。</p><button type="button" class="cinema-button secondary" @click="libraryFilter = 'all'">查看全部影片</button></div>
         <MediaGrid v-else-if="!loadError || allMediaList.length || isLoading" :media-list="visibleLibrary" :loading="isLoading" :current-category="currentCategory" :current-category-name="categoryNames[currentCategory]" @select-media="handleSelectMedia" @delete-card="handleDeleteCard" @re-search="handleReSearch" @edit-category="openCategoryPicker" @open-actions="openMediaActions" @start-search="focusMobileSearch" />
       </main>
-      <AccountPage v-if="mobileTab === 'account'" ref="accountPageRef" @section-change="handleAccountSection" :user="user" :history="history" :history-error="historyError" :loading-history="loadingHistory" :deleting-history-id="deletingHistoryId" @retry-history="refreshHistory()" @auth-updated="handlePlaybackAuthUpdated" @back="navigateMobileTab('home')" @play-history="continuePlayback" @delete-history="removeHistory" @logout="handleLogout" />
+      <AccountPage v-if="mobileTab === 'account'" ref="accountPageRef" @section-change="handleAccountSection" :user="user" :history="history" :history-error="historyError" :loading-history="loadingHistory" :deleting-history-id="deletingHistoryId" @retry-history="refreshHistory()" @auth-updated="handlePlaybackAuthUpdated" @play-history="continuePlayback" @delete-history="removeHistory" @logout="handleLogout" />
       <MobileTabBar :active-tab="mobileTab" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
     </div>
-    <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" @resolved="resolveCatalogItem" :in-library="!!findCatalogMedia(catalogDetail, allMediaList)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
+    <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" @resolved="resolveCatalogItem" :in-library="!!detailCopy" :play-label="playLabel(detailCopy?.quarkFid)" :owned-episodes="detailPlayable?.localEpisodeNumbers" @episode="detailPlayable && playSearchLibraryMedia(detailPlayable, $event)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
     <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" :requested-episode="requestedLibraryEpisode" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
-    <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :saving-message="archiveImportMessage" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" :saved-batch="transferBatch" :batch-preview="archiveBatchPreview" @stop-batch="stopBatch" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
+    <Teleport defer to="#discovery-results" :disabled="!inlineFind">
+<QuarkTransferModal :inline="inlineFind" :saved-play-label="playLabel(transferSavedMedia?.quarkFid)" ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :saving-message="archiveImportMessage" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" :saved-batch="transferBatch" :batch-preview="archiveBatchPreview" @stop-batch="stopBatch" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
+    </Teleport>
     <DeleteMediaConfirm :open="!!deletingMedia" :media="deletingMedia" :deleting="isDeletingMedia" @cancel="closeDeleteDialog" @confirm="confirmDeleteMedia" />
     <CategoryPickerSheet :open="!!categoryMedia" :media="categoryMedia" :saving="isSavingCategory" @cancel="closeCategoryPicker" @select="selectMediaCategory" />
     <MediaActionSheet :open="!!actionMedia" :media="actionMedia" @cancel="closeMediaActions" @edit-category="editActionMediaCategory" @re-search="reSearchActionMedia" @update-library="updateActionMedia" @delete="deleteActionMedia" />
@@ -734,7 +765,9 @@ const showSavedLibrary = () => {
 
 <style scoped>
 .page-container { position: relative; z-index: 1; }
-.archive-batches { display: grid; gap: 10px; margin: 0 0 18px; }
+.archive-batches { margin: 0 0 18px; }
+.archive-batches > summary { width: fit-content; padding: 12px 0; color: var(--text-secondary); cursor: pointer; }
+.archive-batches > .archive-batch-status + .archive-batch-status { margin-top: 10px; }
 .archive-batch-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); }
 .archive-batch-status strong { color: var(--text-primary); font-size: .88rem; }.archive-batch-status p { margin: 4px 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }.archive-batch-status small { color: var(--text-tertiary); }
 .archive-batch-status button { flex-shrink: 0; min-height: 40px; padding: 0 14px; border: 1px solid var(--divider); border-radius: 20px; color: var(--text-primary); background: var(--glass-bg); }

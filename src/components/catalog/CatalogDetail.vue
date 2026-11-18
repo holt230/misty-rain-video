@@ -8,12 +8,15 @@ import MediaPoster from '../common/MediaPoster.vue';
 import CatalogPersonAvatar from './CatalogPersonAvatar.vue';
 import CatalogPersonDetail from './CatalogPersonDetail.vue';
 import CatalogComments from './CatalogComments.vue';
-const props = defineProps<{ item: CatalogItem; inLibrary: boolean; unversionedLibrary?: boolean }>();
-const emit = defineEmits<{ (event: 'close'): void; (event: 'play'): void; (event: 'sources'): void; (event: 'resolved', item: CatalogItem): void }>();
+const props = defineProps<{ item: CatalogItem; inLibrary: boolean; playLabel?: string; ownedEpisodes?: number[]; unversionedLibrary?: boolean }>();
+const emit = defineEmits<{ (event: 'close'): void; (event: 'play'): void; (event: 'sources'): void; (event: 'episode', episode: number): void; (event: 'resolved', item: CatalogItem): void }>();
 const root = ref<HTMLElement | null>(null);
 const selectedPerson = ref<CatalogCredit | null>(null);
 const expandedSummary = ref(false);
 const expandedCast = ref(false);
+const episodesOpen = ref(false);
+const hasEpisodes = computed(() => Boolean((props.inLibrary || props.unversionedLibrary) && props.ownedEpisodes?.length
+  && (props.item.category === 'tv' || props.item.category === 'anime')));
 const summaryText = ref<HTMLElement | null>(null);
 const summaryOverflow = ref(false);
 let summaryObserver: ResizeObserver | undefined;
@@ -90,7 +93,7 @@ const selectPerson = (person: CatalogCredit, event: MouseEvent) => {
   personTrigger = event.currentTarget as HTMLElement;
   selectedPerson.value = person;
 };
-watch(() => props.item.catalogId, () => { selectedPerson.value = null; expandedSummary.value = false; expandedCast.value = false; });
+watch(() => props.item.catalogId, () => { selectedPerson.value = null; expandedSummary.value = false; expandedCast.value = false; episodesOpen.value = false; });
 useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson(); else emit('close'); });
 </script>
 <template>
@@ -100,14 +103,29 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
     <div class="detail-stage">
       <MediaPoster :src="item.backdrop || item.poster" alt="" class="detail-backdrop" />
       <div class="detail-stage-shade"></div>
-      <div class="detail-overview"><MediaPoster :src="item.poster" :alt="item.title + '海报'" class="detail-poster" /><div><span class="eyebrow">{{ item.year || '发现好故事' }}</span><h1 id="catalog-detail-title">{{ item.title }}</h1><p>{{ item.status || '影片资料' }}</p><span v-if="item.rating" class="detail-score">{{ item.rating.toFixed(1) }}<small>{{ item.ratingSource || '豆瓣' }}评分</small></span></div></div>
+      <div class="detail-overview">
+        <MediaPoster :src="item.poster" alt="" class="detail-poster" />
+        <div class="detail-title-copy">
+          <h1 id="catalog-detail-title">{{ item.title }}</h1>
+          <p v-if="item.year || details?.genres.length || item.rating" class="detail-meta">
+            <span v-if="item.year">{{ item.year }}</span>
+            <span v-if="details?.genres.length">{{ details.genres.slice(0, 2).join(' / ') }}</span>
+            <span v-if="item.rating">{{ item.ratingSource || '豆瓣' }} {{ item.rating.toFixed(1) }}</span>
+          </p>
+          <p v-if="hasEpisodes" class="detail-availability">{{ unversionedLibrary && !inLibrary ? '同名影片 · ' : '' }}{{ ownedEpisodes?.length }} 集可看</p>
+        </div>
+      </div>
     </div>
     <div class="detail-body">
-      <button type="button" class="cinema-button primary play-feature" @click="emit('play')"><Play fill="currentColor" />{{ inLibrary ? '立即播放 / 续播' : unversionedLibrary ? '播放片库中的同名影片' : '找源并播放' }}</button>
-      <p class="detail-play-note">{{ inLibrary ? '从你的个人片库播放，自动恢复观看进度' : unversionedLibrary ? item.year ? '片库已有同名影片，旧记录未标注年份；点击播放已有版本。' : '当前推荐尚未确认年份；点击播放片库中已有的同名版本。' : '自动查找匹配资源，验证后加入个人片库并播放' }}</p>
-      <dl v-if="facts.length" class="detail-facts"><div v-for="field in facts" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl>
-      <p v-else class="detail-brief">{{ item.subtitle || '发现下一部喜欢的作品' }}</p>
-      <button type="button" class="cinema-button secondary" @click="emit('sources')"><Search />自己选择片源</button>
+      <div class="detail-actions">
+        <button type="button" class="cinema-button primary play-feature" @click="emit('play')"><Play fill="currentColor" />{{ inLibrary ? playLabel || '立即播放' : unversionedLibrary ? '播放同名影片' : '查找并加入片库' }}</button>
+        <button v-if="hasEpisodes" type="button" class="cinema-button detail-episode-toggle" :aria-expanded="episodesOpen" aria-controls="detail-episode-list" @click="episodesOpen = !episodesOpen">选集<ChevronDown aria-hidden="true" /></button>
+      </div>
+      <p v-if="unversionedLibrary && !inLibrary" class="detail-play-note">同名影片未标注年份，可能是另一个版本。</p>
+      <div v-if="hasEpisodes" v-show="episodesOpen" id="detail-episode-list" class="detail-episodes" role="group" :aria-label="inLibrary ? '选集' : '同名影片选集'">
+        <button v-for="episode in ownedEpisodes" :key="episode" type="button" :aria-label="`播放第 ${episode} 集`" @click="emit('episode', episode)">{{ episode }}</button>
+      </div>
+      <button type="button" class="text-link detail-versions" @click="emit('sources')"><Search aria-hidden="true" />查看其他版本</button>
     </div>
     <div class="detail-extras" :aria-busy="loading">
       <p v-if="loading && !details" class="metadata-loading" role="status">正在加载剧情与演职人员…</p>
@@ -119,6 +137,10 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
         <div v-else class="summary-placeholder" aria-hidden="true"><i></i><i></i><i></i></div>
         <button v-if="summaryOverflow || expandedSummary" type="button" class="text-link summary-toggle" :aria-expanded="expandedSummary" @click="expandedSummary = !expandedSummary">{{ expandedSummary ? '收起简介' : '展开简介' }}<ChevronUp v-if="expandedSummary" /><ChevronDown v-else /></button>
       </section>
+      <details v-if="facts.length" class="detail-metadata">
+        <summary>影片资料</summary>
+        <dl class="detail-facts"><div v-for="field in facts" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl>
+      </details>
       <section v-if="people.length" class="detail-information detail-credits" aria-labelledby="detail-credits-title">
         <div class="credits-heading"><h2 id="detail-credits-title">演职人员</h2><span>{{ people.length }} 位</span></div>
         <div class="credit-grid">
@@ -138,8 +160,34 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
   </section>
 </template>
 <style scoped>
+.detail-title-copy { min-width: 0; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.detail-overview .detail-availability { margin-top: 8px; color: var(--text-primary); }
+.detail-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.detail-actions .play-feature { width: auto; margin: 0; min-height: 44px; padding: 8px 18px; border-radius: 12px; }
+.detail-episode-toggle { min-height: 44px; gap: 5px; padding: 8px 10px; color: var(--text-secondary); background: transparent; }
+.detail-episode-toggle[aria-expanded='true'] { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
+.detail-episode-toggle[aria-expanded='true'] :deep(svg) { transform: rotate(180deg); }
+.detail-actions :deep(svg), .detail-versions :deep(svg) { flex-shrink: 0; }
+.detail-play-note { margin: 8px 0 0; text-align: left; color: var(--text-secondary); }
+.detail-versions { min-height: 44px; margin-top: 4px; }
+.detail-episodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 8px; margin-top: 12px; max-height: 252px; overflow: auto; scrollbar-width: thin; }
+.detail-metadata { border-bottom: 1px solid var(--divider); }
+.detail-metadata summary { padding: 12px 0; cursor: pointer; }
+.detail-episodes button { appearance: none; min-height: 44px; padding: 0 4px; border: 0; border-radius: 10px; background: var(--surface-2); color: var(--text-primary); font-size: 14px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.detail-episodes button:focus-visible { outline-offset: -2px; }
+@media (hover: hover) { .detail-episodes button:hover { background: var(--surface-3); } }
+.detail-episodes button:active { color: var(--liquid-accent); background: var(--liquid-accent-subtle); }
 .detail-extras { grid-column: 1 / -1; width: 100%; max-width: 948px; min-width: 0; padding: 0 24px calc(32px + var(--safe-area-bottom)); margin-inline: auto; }
 .detail-facts { display: grid; gap: 12px; margin: 24px 0; }
+@media (max-width: 767px) {
+  .detail-stage { padding: 24px 20px 16px; }
+  .detail-overview { align-items: center; gap: 14px; }
+  .detail-poster { width: 92px; box-shadow: none; }
+  .detail-overview h1 { margin: 0 0 8px; letter-spacing: 0; }
+  .detail-body { padding-bottom: 0; }
+  .detail-extras .detail-synopsis { padding: 16px 0 12px; margin: 0; border: 0; border-radius: 0; background: transparent; }
+}
 .detail-facts > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; }
 .detail-facts dt { color: var(--text-tertiary); font-size: 12px; line-height: 1.8; }
 .detail-facts dd { font-size: 13px; line-height: 1.8; color: var(--text-primary); overflow-wrap: anywhere; }

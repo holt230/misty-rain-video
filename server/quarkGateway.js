@@ -487,6 +487,7 @@ const publicUpdateStatus = status => ({
   quarkFid: status.quarkFid,
   title: status.title,
   localEpisodeCount: status.localEpisodeCount,
+  ...(status.localEpisodeNumbers ? { localEpisodeNumbers: status.localEpisodeNumbers } : {}),
   sourceEpisodeCount: status.sourceEpisodeCount,
   latestEpisodeNumber: status.latestEpisodeNumber,
   latestEpisodeTitle: status.latestEpisodeTitle,
@@ -824,12 +825,12 @@ export class QuarkGateway {
         const index = cursor;
         cursor += 1;
         try {
-          results[index] = await this.#inspectLibraryUpdate(candidates[index], principal, cookie, force);
+          results[index] = await this.#inspectLibraryUpdate(candidates[index], principal, cookie, force, owned => { results[index] = owned; });
         } catch (error) {
           // 仅在整个账号确实退出时中止检查。单个失效分享、风控或目录变化
           // 应只影响对应卡片，避免一次失败让整页更新功能不可用。
           if (isCredentialAuthFailure(error)) throw error;
-          results[index] = libraryUpdateFailureStatus(candidates[index], error);
+          results[index] = { ...libraryUpdateFailureStatus(candidates[index], error), ...results[index] };
         }
       }
     };
@@ -1716,7 +1717,7 @@ export class QuarkGateway {
     return `${user.username}:${card.quarkFid}:${String(card.quarkShareUrl || '')}:${JSON.stringify(card.quarkSelectionFids || null)}`;
   }
 
-  async #inspectLibraryUpdate(card, user, cookie, force) {
+  async #inspectLibraryUpdate(card, user, cookie, force, onLocal) {
     const cacheKey = this.#libraryUpdateCacheKey(card, user);
     const cached = this.libraryUpdateCache.get(cacheKey);
     if (!force && cached && Date.now() - cached.checkedAt < LIBRARY_UPDATE_CACHE_MS) return cached.status;
@@ -1730,9 +1731,15 @@ export class QuarkGateway {
       this.driveEpisodeCache.set(card.quarkFid, { checkedAt: Date.now(), episodes: localEpisodes });
     }
 
+    // Keep the owned file list usable when the separate share lookup fails.
+    const numbers = localEpisodes.map(item => item.episodeNumber);
+    const owned = { localEpisodeCount: localEpisodes.length,
+      ...(numbers.every(n => Number.isInteger(n) && n > 0) && new Set(localEpisodes.map(item => item.seasonNumber || 1)).size <= 1
+        ? { localEpisodeNumbers: [...new Set(numbers)].sort((a, b) => a - b) } : {}) };
+    onLocal?.(owned);
     if (card.quarkArchiveImported) {
       const latest = [...localEpisodes].sort((a,b)=>b.episodeNumber-a.episodeNumber)[0];
-      return { quarkFid:card.quarkFid,title:card.title,localEpisodeCount:localEpisodes.length,sourceEpisodeCount:localEpisodes.length,
+      return { quarkFid:card.quarkFid,title:card.title,...owned,sourceEpisodeCount:localEpisodes.length,
         latestEpisodeNumber:latest?.episodeNumber||0,latestEpisodeTitle:latest?.episodeTitle||'',newEpisodeCount:0,
         updateCheckedAt:new Date().toISOString(),updateCheckAvailable:false,code:'ARCHIVE_UPDATE_REQUIRES_EXTRACTION',
         missingEpisodes:[],message:'压缩包来源需重新解压核对；当前显示片库实际集数。' };
@@ -1743,7 +1750,7 @@ export class QuarkGateway {
       const status = {
         quarkFid: card.quarkFid,
         title: card.title,
-        localEpisodeCount: localEpisodes.length,
+        ...owned,
         sourceEpisodeCount: localEpisodes.length,
         latestEpisodeNumber: latest?.episodeNumber || 0,
         latestEpisodeTitle: latest?.episodeTitle || '',
@@ -1774,7 +1781,7 @@ export class QuarkGateway {
     const status = {
       quarkFid: card.quarkFid,
       title: card.title,
-      localEpisodeCount: localEpisodes.length,
+      ...owned,
       sourceEpisodeCount: sourceEpisodes.length,
       latestEpisodeNumber: latest?.episodeNumber || 0,
       latestEpisodeTitle: latest?.episodeTitle || '',

@@ -237,6 +237,9 @@ test('分享读取途中取消在 HTTP 200 或 400 下也计为失效，预览�
     f.setDetail({ code: 999, message: '好友已取消了分享' }, httpStatus);
     const [status] = await f.gateway.checkLibraryUpdates([imported.item], user, { force: true });
     assert.equal(status.code, 'QUARK_SHARE_UNAVAILABLE');
+    assert.equal(status.updateCheckAvailable, false);
+    assert.equal(status.localEpisodeCount, 2);
+    assert.deepEqual(status.localEpisodeNumbers, [1, 2]);
     await assert.rejects(f.gateway.getShareDetails({ shareUrl: f.input.quarkShareUrl }), { code: 'QUARK_SHARE_UNAVAILABLE' });
   }
 });

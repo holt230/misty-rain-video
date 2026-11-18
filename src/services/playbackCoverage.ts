@@ -8,7 +8,7 @@ export function playbackCoverage(episodes: Array<{ episodeNumber: number; fileNa
   const multipleSeasons = seasons.size > 1;
   const episodic = category === 'tv' || category === 'anime';
   const summary = !episodes.length ? '' : episodic && numbers.length && !multipleSeasons
-    ? `片库已存 ${numbers.length} 集 · ${episodeRangeLabel(numbers)}` : `片库已有 ${episodes.length} 个视频`;
+    ? `可看${episodeRangeLabel(numbers)}` : `片库已有 ${episodes.length} 个视频`;
   const target = Math.max(numbers[numbers.length - 1] || 0, Math.min(5000, Math.max(0, officialLatest)));
   const saved = new Set(numbers);
   const missing = category === 'tv' && !multipleSeasons ? Array.from({ length: target }, (_, index) => index + 1).filter(n => !saved.has(n)) : [];
