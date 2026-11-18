@@ -7,7 +7,7 @@ const episodes=numbers=>numbers.map(n=>({episodeNumber:n,fileName:`第01季 第$
 
 test('线上尚公主35至40集应显示片库已存6集和缺1至34集，不把6当全剧集数',()=>{
  const data=playbackCoverage(episodes([35,36,37,38,39,40]),'tv',40);
- assert.equal(data.count,6);assert.match(data.summary,/片库已存 6 集.*35～40/);
+ assert.equal(data.count,6);assert.equal(data.summary,'可看第 35～40 集');
  assert.deepEqual(data.missing,Array.from({length:34},(_,i)=>i+1));assert.match(data.missingLabel,/1～34/);
 });
 test('官方更新高于当前片库时包含前中后缺集，重复画质不能增加剧集数',()=>{

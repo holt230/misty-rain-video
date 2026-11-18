@@ -9,7 +9,7 @@ import CatalogCard from './CatalogCard.vue';
 import MediaPoster from '../common/MediaPoster.vue';
 import { searchIntent } from '../../services/searchIntent';
 import { resourceTitleKey } from '../../services/resourceTitles';
-const props = defineProps<{ library: MediaItem[]; catalog: CatalogItem[]; username: string; busy: boolean; error?: LibrarySaveFeedback | null }>();
+const props = defineProps<{ library: MediaItem[]; catalog: CatalogItem[]; username: string; busy: boolean; playLabel?: (fid?: string) => string; showResults?: boolean; searching?: boolean; error?: LibrarySaveFeedback | null }>();
 const emit = defineEmits<{
   (event: 'search', keyword: string, category: SearchCategory): void;
   (event: 'select', item: CatalogItem): void;
@@ -17,6 +17,7 @@ const emit = defineEmits<{
   (event: 'save', item: MediaItem): void;
   (event: 'auth'): void;
   (event: 'clear-error'): void;
+  (event: 'criteria-change'): void;
 }>();
 const query = ref('');
 const category = ref<SearchCategory>('all');
@@ -33,7 +34,7 @@ watch(storageKey, () => {
   try { const saved = JSON.parse(localStorage.getItem(storageKey.value) || '[]'); recent.value = Array.isArray(saved) ? saved.filter(value => typeof value === 'string').slice(0, 10) : []; }
   catch { recent.value = []; }
 }, { immediate: true });
-watch([query, category], () => { ownedSearchSubmitted.value = false; emit('clear-error'); });
+watch([query, category], () => { ownedSearchSubmitted.value = false; emit('clear-error'); emit('criteria-change'); }, { flush: 'sync' });
 const parsed = computed(() => parseLibraryInput(query.value));
 const shareNeedsCategory = computed(() => parsed.value.kind === 'share' && category.value === 'all');
 const intent = computed(() => searchIntent(query.value));
@@ -80,10 +81,10 @@ defineExpose({ focus: () => input.value?.focus(), search: (keyword: string) => {
     <form class="discovery-search cinema-search-field" role="search" @submit.prevent="submit">
       <Search /><input ref="input" v-model="query" type="search" placeholder="搜索片名或粘贴链接" aria-label="搜索片名或分享链接" enterkeyhint="search" :disabled="busy" @keydown.enter="($event.isComposing || $event.keyCode === 229) && $event.preventDefault()" />
       <button v-if="query" type="button" class="icon-control" aria-label="清空搜索" :disabled="busy" @click="query = ''; input?.focus()"><X /></button>
-      <button type="submit" :disabled="busy || !query.trim() || shareNeedsCategory || parsed.kind === 'invalid'" class="search-submit">{{ busy ? '添加中' : parsed.kind === 'share' ? '添加' : '搜索' }}</button>
+      <button type="submit" :disabled="busy || searching || !query.trim() || shareNeedsCategory || parsed.kind === 'invalid'" class="search-submit">{{ busy ? '请稍候' : searching ? '搜索中…' : parsed.kind === 'share' ? '添加' : '搜索' }}</button>
     </form>
     <div class="search-category-filter" role="group" aria-label="搜索与保存分类"><button v-for="item in categories" :key="item.id" type="button" :data-category="item.id" :aria-pressed="category === item.id" :class="{ active: category === item.id }" :disabled="busy" @click="category = item.id">{{ item.label }}</button></div>
-    <p v-if="intent.episode && parsed.kind === 'search'" class="search-episode-help">将核对第 {{ intent.episode }} 集，未找到会明确提示。</p>
+    <div id="discovery-results" v-show="showResults"></div>
     <p v-if="parsed.kind === 'share'" class="feed-notice"><Link />{{ shareNeedsCategory ? '已识别分享链接，请先选择影视分类后添加。' : '已识别分享链接，添加时读取真实片名并验证资源。' }}</p>
     <p v-if="parsed.kind === 'invalid'" role="alert" class="feed-notice">链接格式不正确，请输入完整的夸克分享链接。</p>
     <div v-if="error" class="inline-feedback" role="alert"><strong>{{ error.title }}</strong><p>{{ error.message }}</p><button v-if="error.needsAuth" type="button" @click="emit('auth')">前往认证设置</button></div>
@@ -96,9 +97,8 @@ defineExpose({ focus: () => input.value?.focus(), search: (keyword: string) => {
         </span>
       </div>
     </section>
-    <section v-if="libraryMatches.length" ref="ownedResults" class="content-section owned-search-results" aria-label="片库搜索结果"><div class="section-heading"><div><h2>你的片库中有</h2><p role="status">{{ ownedSearchSubmitted ? `找到 ${libraryMatches.length} 部已保存影片，点击即可播放` : '直接播放，无需再次添加' }}</p></div></div><div class="continue-rail"><button v-for="item in libraryMatches" :key="item.id" type="button" class="resume-card" :disabled="busy" @click="emit('play', item, intent.episode)"><MediaPoster :src="item.poster" alt="" /><span><strong>{{ item.title }}</strong><small>{{ intent.episode ? `核对并播放第 ${intent.episode} 集` : '已入库 · 播放 / 续播' }}</small></span></button></div><button type="button" class="cinema-button secondary" :disabled="busy" @click="searchExternal">继续查找其他片源</button></section>
-    <section v-if="catalogMatches.length && parsed.kind !== 'share'" class="content-section"><div class="section-heading"><div><h2>{{ query.trim() ? '相关影片' : '热门推荐' }}</h2></div></div><div class="catalog-grid"><CatalogCard v-for="item in catalogMatches" :key="item.id" :item="item" @select="emit('select', $event)" /></div></section>
-    <p v-if="query.trim() && !catalogMatches.length && !libraryMatches.length && parsed.kind !== 'share'" class="search-hint">目录中暂未收录，点击“搜索”继续查找外部资源。</p>
+    <section v-if="!showResults && libraryMatches.length" ref="ownedResults" class="content-section owned-search-results" aria-label="片库搜索结果"><div class="section-heading"><div><h2>你的片库中有</h2><p role="status">{{ ownedSearchSubmitted ? `找到 ${libraryMatches.length} 部已保存影片，点击即可播放` : '直接播放，无需再次添加' }}</p></div></div><div class="continue-rail"><button v-for="item in libraryMatches" :key="item.id" type="button" class="resume-card" :disabled="busy" @click="emit('play', item, intent.episode)"><MediaPoster :src="item.poster" alt="" /><span><strong>{{ item.title }}</strong><small>{{ intent.episode ? `播放第 ${intent.episode} 集` : (playLabel?.(item.quarkFid) || '立即播放') }}</small></span></button></div><button type="button" class="cinema-button secondary" :disabled="busy" @click="searchExternal">查找其他版本</button></section>
+    <section v-if="!showResults && catalogMatches.length && parsed.kind !== 'share'" class="content-section"><div class="section-heading"><div><h2>{{ query.trim() ? '相关影片' : '热门推荐' }}</h2></div></div><div class="catalog-grid"><CatalogCard v-for="item in catalogMatches" :key="item.id" :item="item" @select="emit('select', $event)" /></div></section>
   </main>
 </template>
 <style scoped>

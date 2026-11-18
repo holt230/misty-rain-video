@@ -16,7 +16,6 @@ const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; hist
 const emit = defineEmits<{
   (e: 'logout'): void;
   (e: 'auth-updated'): void;
-  (e: 'back'): void;
   (e: 'play-history', entry: PlaybackHistoryEntry): void;
   (e: 'delete-history', id: string): void;
   (e: 'retry-history'): void;
@@ -36,12 +35,20 @@ const tvTokenExchangeOrigin = ref('');
 const isSaving = ref(false);
 const showCredentialForm = ref(false);
 const historyExpanded = ref(false);
-const section = ref<'overview' | 'history' | 'playback' | 'appearance' | 'device'>('overview');
-const titles = { overview: '我的', history: '观看历史', playback: '播放与片库', appearance: '外观设置', device: '桌面安装' };
-watch(section, value => emit('section-change', value));
+const titles = { overview: '我的', account: '账户', history: '观看历史', playback: '播放与网盘', appearance: '外观设置', device: '桌面安装' };
+const section = ref<keyof typeof titles>('overview');
+const accountRole = computed(() => props.user.role === 'admin' ? '管理员账户' : '片库账户');
+const profileEntry = ref<HTMLButtonElement | null>(null);
+const pageTitle = ref<HTMLHeadingElement | null>(null);
+const advancedOpen = ref(false);
+watch(section, (value, previous) => {
+  emit('section-change', value);
+  if (value === 'account') nextTick(() => pageTitle.value?.focus());
+  if (previous === 'account' && value === 'overview') nextTick(() => profileEntry.value?.focus());
+});
 const restoreSection = (value: string) => { section.value = Object.prototype.hasOwnProperty.call(titles, value) ? value as keyof typeof titles : 'overview'; };
 const showHistory = () => { section.value = 'history'; historyExpanded.value = true; window.scrollTo({ top: 0 }); };
-const back = () => { if (section.value === 'overview') emit('back'); else section.value = 'overview'; };
+const back = () => { section.value = 'overview'; };
 let touchStartX = 0;
 let touchStartY = 0;
 let touchStartTime = 0;
@@ -131,7 +138,7 @@ const focusAuth = async () => {
   section.value = 'playback';
   await nextTick();
   if (loadingStatus.value) await refreshStatus();
-  if (props.user.role === 'admin') showCredentialForm.value = true;
+  if (props.user.role === 'admin') { advancedOpen.value = true; showCredentialForm.value = true; }
   await nextTick();
   authSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
@@ -149,40 +156,31 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
   <main class="account-page" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">
     <div class="account-content">
     <header class="page-heading">
-      <div class="heading-copy">
-        <button type="button" class="back-button" aria-label="返回上一页" @click="back">
-          <ChevronLeft aria-hidden="true" />
-        </button>
-        <div>
-        <span class="heading-kicker">个人中心</span>
-        <h1>{{ titles[section] }}</h1>
-        </div>
-      </div>
+      <button v-if="section !== 'overview'" type="button" class="back-button" aria-label="返回我的" @click="back">
+        <ChevronLeft aria-hidden="true" />
+      </button>
+      <h1 ref="pageTitle" tabindex="-1">{{ titles[section] }}</h1>
     </header>
 
-    <section v-if="section === 'overview'" class="profile-card" aria-labelledby="profile-title">
-      <UserAvatar class="profile-avatar" :username="user.username" />
-      <div class="profile-copy">
-        <small>{{ user.role === 'admin' ? '管理员账户' : '片库账户' }}</small>
-        <h2 id="profile-title">{{ user.username }}</h2>
-        <p>收藏喜欢的影片，接着上次的故事。</p>
-      </div>
-      <span class="folder-chip">专属片库</span>
-    </section>
+    <button v-if="section === 'overview'" ref="profileEntry" type="button" class="profile-row profile-entry" @click="section = 'account'">
+      <UserAvatar class="profile-avatar" :username="user.username" aria-hidden="true" />
+      <span class="profile-copy">
+        <strong>{{ user.username }}</strong>
+        <small>{{ accountRole }}</small>
+      </span>
+      <span class="profile-link">账户<ChevronRight class="chevron" aria-hidden="true" /></span>
+    </button>
 
     <nav v-if="section === 'overview'" class="account-menu" aria-label="个人中心功能">
-      <button type="button" @click="showHistory"><span class="account-menu-icon"><Clock3 /></span><span class="account-menu-copy"><strong>观看历史</strong><small>找回每一段观影时光</small></span><ChevronRight class="account-menu-arrow" /></button>
-      <button type="button" @click="section = 'playback'"><span class="account-menu-icon"><ShieldCheck /></span><span class="account-menu-copy"><strong>播放与片库</strong><small>认证、直连与自动追更</small></span><ChevronRight class="account-menu-arrow" /></button>
-      <button type="button" @click="section = 'appearance'"><span class="account-menu-icon"><Palette /></span><span class="account-menu-copy"><strong>外观设置</strong><small>切换你喜欢的主题</small></span><ChevronRight class="account-menu-arrow" /></button>
-      <button type="button" @click="section = 'device'"><span class="account-menu-icon"><Download /></span><span class="account-menu-copy"><strong>安装到桌面</strong><small>随时回来，接着看</small></span><ChevronRight class="account-menu-arrow" /></button>
+      <button type="button" @click="showHistory"><span class="account-menu-icon" aria-hidden="true"><Clock3 /></span><span class="account-menu-copy"><strong>观看历史</strong><small>找回每一段观影时光</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
+      <button type="button" @click="section = 'playback'"><span class="account-menu-icon" aria-hidden="true"><ShieldCheck /></span><span class="account-menu-copy"><strong>播放与网盘</strong><small>查看网盘连接</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
+      <button type="button" @click="section = 'appearance'"><span class="account-menu-icon" aria-hidden="true"><Palette /></span><span class="account-menu-copy"><strong>外观设置</strong><small>切换你喜欢的主题</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
+      <button type="button" @click="section = 'device'"><span class="account-menu-icon" aria-hidden="true"><Download /></span><span class="account-menu-copy"><strong>安装到桌面</strong><small>随时回来，接着看</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
     </nav>
 
     <section v-if="section === 'overview' && continueHistory.length" class="continue-history-section" aria-labelledby="continue-history-title">
       <div class="section-title-row compact">
-        <div>
-          <span>接着看</span>
-          <h2 id="continue-history-title">继续观看</h2>
-        </div>
+        <h2 id="continue-history-title">继续观看</h2>
       </div>
       <div class="continue-history-scroll">
         <button
@@ -252,8 +250,7 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
     <section v-show="section === 'playback'" ref="authSection" class="settings-section auth-section" aria-labelledby="auth-title">
       <div class="section-title-row">
         <div>
-          <span>设置</span>
-          <h2 id="auth-title">播放与片库</h2>
+          <h2 id="auth-title">网盘连接</h2>
         </div>
         <div class="status-pill" :class="{ ready: libraryConnected && playbackConnected && !statusError }">
           <span class="status-dot" aria-hidden="true"></span>
@@ -278,7 +275,8 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
         </div>
       </div>
 
-      <template v-if="user.role === 'admin'">
+      <details v-if="user.role === 'admin'" class="advanced-account" :open="advancedOpen" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
+        <summary>管理员高级设置</summary>
         <div v-if="loadingStatus" class="credential-loading" role="status">
           <span class="status-spinner" aria-hidden="true"></span>
           正在加载认证设置
@@ -321,16 +319,15 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
             </div>
           </form>
         </div>
-      </template>
-
-      <p v-else class="managed-hint">播放认证由管理员统一维护。如无法读取内容，请联系管理员更新。</p>
-      <LibraryMaintenanceStatus />
+      <LibraryMaintenanceStatus v-if="advancedOpen && section === 'playback'" />
       <TvPlaybackAuth
-        v-if="user.role === 'admin' && !loadingStatus && !statusError"
+        v-if="advancedOpen && section === 'playback' && !loadingStatus && !statusError"
         :connected="directPlaybackConnected"
         :exchange-origin="tvTokenExchangeOrigin"
         @confirmed="refreshStatus(); emit('auth-updated'); toast.show('直连认证已保存', '✓')"
       />
+      </details>
+      <p v-else-if="!libraryConnected || !playbackConnected" class="managed-hint">网盘连接由管理员管理，无法播放时请联系管理员。</p>
     </section>
 
     <section v-if="section === 'appearance'" class="settings-section theme-section" aria-labelledby="theme-title">
@@ -354,38 +351,51 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
       </a>
     </section>
 
-    <button v-if="section === 'overview'" type="button" class="logout-button" @click="emit('logout')">
-      <LogOut aria-hidden="true" />
-      退出登录
-    </button>
+    <section v-if="section === 'account'" class="account-session" aria-label="账户信息">
+      <div class="profile-row">
+        <UserAvatar class="profile-avatar" :username="user.username" aria-hidden="true" />
+        <div class="profile-copy">
+          <strong>{{ user.username }}</strong>
+          <small>{{ accountRole }}</small>
+        </div>
+      </div>
+      <button type="button" class="logout-button" @click="emit('logout')">
+        <LogOut aria-hidden="true" />
+        退出登录
+      </button>
+    </section>
     </div>
   </main>
 </template>
 
 <style scoped>
+.advanced-account { margin-top: 16px; }
+.advanced-account > summary { padding: 12px 0; color: var(--text-secondary); cursor: pointer; }
 .account-content { display: flex; flex-direction: column; gap: 24px; max-width: 1080px; min-width: 0; margin-inline: auto; }
-.page-heading, .heading-copy { display: flex; align-items: center; gap: 13px; }
-.page-heading { justify-content: space-between; }
-.back-button { display: grid; width: 46px; height: 46px; flex-shrink: 0; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-bg); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.page-heading { display: flex; align-items: center; gap: 4px; }
+.back-button { display: grid; width: 44px; height: 44px; margin-inline-start: -10px; flex-shrink: 0; place-items: center; border: 0; border-radius: 50%; color: var(--text-primary); background: transparent; }
 .back-button svg { width: 22px; height: 22px; }
-.heading-kicker { color: var(--text-tertiary); font-size: .72rem; }
-.page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.05em; }
+.page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.03em; }
+.page-heading h1:focus { outline: none; }
 .profile-avatar { width: 64px; height: 64px; flex-shrink: 0; border: 1px solid var(--divider); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
-.profile-card { position: relative; display: flex; align-items: center; gap: 20px; padding: 28px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-panel); background: radial-gradient(ellipse at 100% 0, rgb(var(--accent-rgb) / .08), transparent 70%), var(--surface-1); }
-.profile-copy { min-width: 0; flex: 1 1 160px; }
-.profile-copy small { display: block; padding-right: 80px; color: var(--liquid-accent); font-size: .73rem; font-weight: 600; }
-.profile-copy h2 { margin: 5px 0; overflow-wrap: anywhere; font-size: 1.3rem; font-weight: 750; letter-spacing: -.03em; }
-.profile-copy p { color: var(--text-tertiary); font-size: .79rem; }
-.folder-chip { position: absolute; top: 24px; right: 24px; max-width: 100%; padding: 8px 12px; overflow: hidden; border-radius: 12px; color: var(--text-secondary); background: var(--glass-bg); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.profile-row { display: flex; align-items: center; gap: 16px; }
+.profile-entry { min-height: 64px; padding: 20px 24px; border: 0; border-radius: 16px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
+.profile-entry:active { background: var(--surface-2); }
+.profile-copy { display: grid; flex: 1; min-width: 0; gap: 4px; }
+.profile-copy strong { overflow-wrap: anywhere; font-size: 1.2rem; font-weight: 750; letter-spacing: -.03em; }
+.profile-copy small, .profile-link { color: var(--text-secondary); font-size: .8rem; }
+.profile-link { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; }
+.profile-link svg { width: 16px; height: 16px; }
+.account-session { display: grid; gap: 20px; width: min(100%, 460px); padding: 20px; border-radius: 16px; background: var(--surface-1); }
 .account-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.account-menu button { position: relative; display: flex; flex-direction: column; align-items: start; gap: 16px; min-width: 0; min-height: 142px; padding: 24px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); color: var(--text-primary); background: var(--surface-1); text-align: left; transition: border-color .2s, background .2s; }
+.account-menu button { position: relative; display: flex; flex-direction: column; align-items: start; gap: 16px; min-width: 0; min-height: 142px; padding: 24px; border: 0; border-radius: var(--cinema-radius-card); color: var(--text-primary); background: var(--surface-1); text-align: left; transition: border-color .2s, background .2s; }
 .account-menu-icon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 14px; background: var(--liquid-accent-subtle); color: var(--liquid-accent); }
 .account-menu-icon svg { width: 22px; height: 22px; }
 .account-menu-copy { display: grid; gap: 6px; min-width: 0; }
 .account-menu-copy strong { font-size: 15px; font-weight: 650; }
 .account-menu-copy small { font-size: 12px; line-height: 1.7; color: var(--text-tertiary); }
 .account-menu-arrow { position: absolute; top: 26px; right: 18px; width: 18px; height: 18px; color: var(--text-tertiary); }
-.settings-section { padding: 28px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-panel); background: var(--surface-1); }
+.settings-section { padding: 28px; border: 0; border-radius: var(--cinema-radius-panel); background: var(--surface-1); }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
 .section-title-row > div > span { color: var(--text-tertiary); font-size: .71rem; }
 .section-title-row h2 { margin-top: 2px; color: var(--text-primary); font-size: 1.08rem; font-weight: 700; letter-spacing: -.025em; }
@@ -440,13 +450,14 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 .row-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .row-copy strong { font-size: .88rem; font-weight: 650; }
 .row-copy small { color: var(--text-tertiary); font-size: .73rem; }
-.logout-button { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-control); color: var(--danger); background: var(--surface-1); font-size: .9rem; font-weight: 600; }
-.logout-button svg { width: 19px; height: 19px; }
+.logout-button { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 2px; border: 0; border-top: 1px solid var(--divider); color: var(--danger); background: transparent; font-size: 15px; font-weight: 550; text-align: left; }
+.logout-button svg { width: 20px; height: 20px; }
+.logout-button:focus-visible { outline-offset: -2px; }
+.logout-button:active { background: var(--danger-surface); }
 :global(html.ios-standalone .app-section) { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 1024px) {
   .account-menu { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .logout-button { width: 180px; }
 }
 @media (min-width: 768px) {
   .theme-section { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
@@ -454,20 +465,29 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
   .theme-section :deep(.theme-switch) { width: min(480px, 65%); }
 }
 @media (min-width: 1024px) and (max-width: 1279px) { .account-menu { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 767px) {
+  .profile-row { gap: 14px; }
+  .profile-entry { padding: 4px 0; background: transparent; }
+  .profile-avatar { width: 52px; height: 52px; border: 0; box-shadow: none; }
+  .profile-copy strong { font-size: 1.16rem; }
+  .account-menu-copy small { display: none; }
+  .account-menu { grid-template-columns: 1fr; gap: 0; }
+  .account-menu button { flex-direction: row; align-items: center; gap: 12px; min-height: 52px; padding: 0 2px; border-radius: 0; background: transparent; }
+  .account-menu button::after { position: absolute; inset: auto 0 0 38px; height: 1px; background: var(--divider); content: ''; }
+  .account-menu button:last-child::after { content: none; }
+  .account-menu button:active { background: var(--surface-1); }
+  .account-menu-icon { width: 24px; height: 24px; background: transparent; }
+  .account-menu-icon svg { width: 20px; height: 20px; }
+  .account-menu-copy strong { font-weight: 550; }
+  .account-menu-arrow { position: static; width: 16px; height: 16px; flex-shrink: 0; margin-inline-start: auto; }
+  .continue-history-section .section-title-row { margin-bottom: 12px; }
+  .continue-history-scroll { padding: 2px 2px 6px; scrollbar-width: none; }
+  .continue-history-card { width: 180px; height: 120px; flex-basis: 180px; border: 0; border-radius: var(--cinema-radius-control); }
+  .continue-history-card:focus-visible { outline-offset: -3px; }
+}
 @media (max-width: 640px) {
-  .account-content { gap: 24px; }
   .page-heading h1 { font-size: 1.75rem; }
-  .profile-card { padding: 22px; gap: 16px; }
-  .profile-avatar { width: 52px; height: 52px; }
-  .profile-copy { flex-basis: 140px; }
-  .folder-chip { top: 18px; right: 18px; }
-  .account-menu { gap: 12px; }
-  .account-menu button { padding: 18px; gap: 14px; min-height: 148px; }
-  .account-menu-arrow { top: 23px; right: 14px; width: 16px; height: 16px; }
-  .account-menu-copy strong { font-size: 14px; }
-  .account-menu-copy small { font-size: 11px; }
   .settings-section { padding: 22px; }
-  .continue-history-card { width: 200px; height: 136px; flex-basis: 200px; }
   .history-main { gap: 10px; }
   .history-main .chevron { display: none; }
 }

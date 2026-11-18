@@ -4,7 +4,7 @@ import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitl
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Expand, Shrink, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; fullscreen?: boolean; nativeVideoFullscreen?: boolean; desktop?: boolean; title?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; loading?: boolean; fullscreen?: boolean; nativeVideoFullscreen?: boolean; desktop?: boolean; title?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
 const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'web-fullscreen'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
 const visible = ref(true);
 const paused = ref(true);
@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
       <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
       <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
     </div>
-    <div v-if="!locked" class="playback-actions" role="group" aria-label="播放控制">
+    <div v-if="!locked && !loading" class="playback-actions" role="group" aria-label="播放控制">
       <button type="button" class="seek-step" aria-label="快退10秒" title="快退10秒" :disabled="!duration" @click="seekBy(-10)"><span class="seek-symbol"><RotateCcw /><span>10</span></span></button>
       <button type="button" class="play-toggle" :aria-label="paused ? '播放' : '暂停'" @click="togglePlay"><Play v-if="paused" /><Pause v-else /></button>
       <button type="button" class="seek-step" aria-label="快进10秒" title="快进10秒" :disabled="!duration" @click="seekBy(10)"><span class="seek-symbol"><RotateCw /><span>10</span></span></button>

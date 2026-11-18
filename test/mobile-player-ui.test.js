@@ -51,6 +51,19 @@ function mount() {
   return { app, props, media, get toggles() { return toggles; } };
 }
 
+test('video loading hides the center controls but keeps the player mounted', async () => {
+  const view = mount();
+  try {
+    view.props.loading = true;
+    await nextTick();
+    assert.equal(document.querySelector('.playback-actions'), null);
+    view.props.loading = false;
+    await nextTick();
+    assert.ok(document.querySelector('.playback-actions'));
+    assert.equal(document.querySelector('video'), view.media);
+  } finally { view.app.unmount(); }
+});
+
 test('mobile controls play, pause, seek without time updates overriding a drag, and toggle one fullscreen entry', async () => {
   const view = mount();
   try {

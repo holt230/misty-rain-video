@@ -16,6 +16,8 @@ import { useDialog } from '../../composables/useDialog';
 
 const props = defineProps<{
   isOpen: boolean;
+  inline?: boolean;
+  savedPlayLabel?: string;
   isAnalyzing: boolean;
   media: MediaItem | null;
   currentCategory: CategoryType;
@@ -89,7 +91,6 @@ const filterOptions: Array<{ value: ResultFilter; label: string }> = [
 const cleanTitle = resourceHeading;
 const targetTitle = computed(() => searchIntent(props.searchKeyword || props.media?.title || '').title);
 const soleResult = computed(() => rankedQuarkResources.value.length === 1);
-const officialTime = computed(() => props.officialCheckedAt ? new Date(props.officialCheckedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 const officialAvailability = computed(() => {
   const latest = props.officialProgress?.latestEpisode;
   if (!latest || searchBusy.value) return '';
@@ -124,7 +125,7 @@ const resourceAction = (resource: ResourceItem) => {
   if (props.failedResourceId === resource.id && props.saveError) return props.saveError.needsSearch ? '重新搜索' : '重新核对';
   if (resource.batchEligible) {
     const preview = props.batchPreview?.resourceId === resource.id ? props.batchPreview.plan : null;
-    return preview?.canStart ? '开始补齐' : preview ? '重新检查' : '补齐剧集';
+    return preview?.canStart ? '开始补齐' : preview ? '重新检查' : replacingSource.value && props.officialProgress ? '检查缺集' : '检查可存集数';
   }
   if (resource.archivePreparation && usesArchiveAction(resource)) {
     return `保存第 ${resource.archivePreparation.episode} 集`;
@@ -192,23 +193,23 @@ const saveDetails = (selectedFids?: string[]) => {
   if (props.media && detailResource.value) emit('save-to-cards', props.media, saveCategory(detailResource.value), detailResource.value, selectedFids);
 };
 const dialogRef = ref<HTMLElement | null>(null);
-useDialog(dialogRef, () => props.isOpen, requestBack);
+useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
 </script>
 
 <template>
   <div
-    class="liquid-dialog-backdrop"
+    :class="inline ? 'find-results' : 'liquid-dialog-backdrop active'"
     ref="dialogRef"
-    :class="{ active: isOpen }"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="resource-dialog-title"
-    @keydown.esc.stop="requestBack"
-    @click.self="requestClose"
+    :role="inline ? 'region' : 'dialog'"
+    :aria-modal="inline ? undefined : true"
+    :aria-label="inline ? '查找结果' : undefined"
+    :aria-labelledby="inline ? undefined : 'resource-dialog-title'"
+    @keydown.esc.stop="!inline && requestBack()"
+    @click.self="!inline && requestClose()"
   >
-    <div class="liquid-dialog glass-rim" v-if="media" :aria-busy="isSaving || searchBusy">
+    <div :class="inline ? 'find-results-content' : 'liquid-dialog glass-rim'" v-if="media" :aria-busy="isSaving || searchBusy">
       <!-- 弹窗顶栏 -->
-      <div class="dialog-header">
+      <div v-if="!inline" class="dialog-header">
         <div class="media-meta-row">
 <MediaPoster :src="media.poster" :alt="media.title" class="dialog-poster" />
           <div class="dialog-meta-info">
@@ -246,7 +247,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         </div>
       </div>
 
-      <form v-if="!detailResource && !savedMedia" class="result-search cinema-search-field" role="search" @submit.prevent="submitSearch">
+      <form v-if="!inline && !detailResource && !savedMedia" class="result-search cinema-search-field" role="search" @submit.prevent="submitSearch">
         <Search class="result-search-icon" aria-hidden="true" />
         <input
           ref="searchInput"
@@ -280,23 +281,21 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         </button>
       </form>
 
-      <section v-if="!detailResource && !savedMedia && !['movie', 'variety'].includes(searchCategory || '')" class="official-progress" aria-label="官方更新进度" aria-live="polite">
+      <section v-if="!detailResource && !savedMedia && officialProgress && !searchBusy && !['movie', 'variety'].includes(searchCategory || '')" class="official-progress" aria-label="官方更新进度" aria-live="polite">
         <template v-if="officialProgress">
           <div class="official-progress-top"><strong>{{ officialProgress.completed ? `官方已完结 · 全 ${officialProgress.latestEpisode} 集` : `官方更新至第 ${officialProgress.latestEpisode} 集` }}</strong><a :href="officialProgress.sourceUrl" target="_blank" rel="noopener noreferrer">{{ officialProgress.platform }}</a></div>
-          <p>{{ officialProgress.title }}<span v-if="officialTime"> · 核对于 {{ officialTime }}</span></p>
           <p v-if="officialAvailability && !batchPreview" class="official-availability">{{ officialAvailability }}</p>
         </template>
-        <p v-else>{{ searchPhase === 'searching' ? '正在查询官方更新进度…' : officialNotice || '官方进度暂未确认。' }}</p>
       </section>
 
       <div v-if="!detailResource && searchBusy && !savedMedia" class="search-status" role="status" aria-live="polite">
         <LoaderCircle class="search-spinner" aria-hidden="true" />
-        <div><strong>{{ searchPhase === 'verifying' ? verificationProgress || '正在核对实际剧集…' : automaticStatus || `正在搜索《${searchKeyword || media.title}》` }}</strong><p>{{ searchPhase === 'verifying' ? '确认分享可用与剧集范围后，即可保存。' : automaticStatus ? '正在核对资源，请稍候。' : '搜索请求进行中，请稍候。' }}</p></div>
+        <strong>{{ searchPhase === 'verifying' ? verificationProgress || '正在检查剧集…' : automaticStatus || `正在搜索《${searchKeyword || media.title}》` }}</strong>
       </div>
       <div v-if="!detailResource && !savedMedia && !searchBusy && !searchError && rankedQuarkResources.length > 1" class="result-summary" aria-live="polite">
         <span>找到</span>
         <strong>{{ rankedQuarkResources.length }}</strong>
-        <span>个可保存的结果</span>
+        <span>个结果</span>
       </div>
       <p v-if="!detailResource && !savedMedia && !searchBusy && searchNotice && rankedQuarkResources.length" class="result-summary" role="status">{{ searchNotice }}</p>
 
@@ -321,9 +320,9 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
       <div ref="resultsBody" class="dialog-body" :class="{ 'showing-details': detailResource }" :aria-busy="searchBusy" @scroll.passive="handleBodyScroll">
         <section v-if="savedMedia" class="save-receipt" role="status" :aria-label="savedBatch ? '补集任务' : '保存成功'">
           <span class="receipt-icon"><LoaderCircle v-if="savedBatch?.status === 'running'" class="search-spinner" aria-hidden="true" /><X v-else-if="savedBatch && savedBatch.status !== 'success'" aria-hidden="true" /><Check v-else aria-hidden="true" /></span>
-          <h2>{{ savedBatch ? savedBatch.status === 'running' ? '正在补集' : savedBatch.status === 'success' ? '已补齐片库' : '补集已暂停' : '已保存到片库' }}</h2><strong>{{ savedMedia.title }}</strong><p>{{ savedSummary }}</p>
+          <h2>{{ savedBatch ? savedBatch.status === 'running' ? '正在补集' : savedBatch.status === 'success' ? '已补齐片库' : '补集已暂停' : batchPreview ? '剧集已齐' : '已保存到片库' }}</h2><strong>{{ savedMedia.title }}</strong><p>{{ savedSummary }}</p>
           <p v-if="savedBatch">已完成 {{ savedBatch.completedEpisodes.length }} / {{ savedBatch.total }} 集<span v-if="savedBatch.currentEpisode"> · 当前第 {{ savedBatch.currentEpisode }} 集</span></p>
-          <div class="receipt-actions"><button v-if="savedMedia.quarkFid" type="button" class="btn-action btn-transfer" @click="emit('play-saved')"><Play aria-hidden="true" />立即播放</button><button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button><button v-if="savedBatch?.status === 'running'" type="button" class="btn-action btn-details" @click="emit('stop-batch', savedBatch.id)">停止补集</button></div>
+          <div class="receipt-actions"><button v-if="savedMedia.quarkFid" type="button" class="btn-action btn-transfer" @click="emit('play-saved')"><Play aria-hidden="true" /> {{ savedPlayLabel || '立即播放' }}</button><button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button><button v-if="savedBatch?.status === 'running'" type="button" class="btn-action btn-details" @click="emit('stop-batch', savedBatch.id)">停止补集</button></div>
         </section>
         <QuarkResourceDetails v-else-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
@@ -352,8 +351,8 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
             >
               <div class="row-left">
                 <div class="row-info">
-                  <div class="row-title" :title="cleanTitle(res.title)">
-                    {{ cleanTitle(res.title) }}
+                  <div class="row-title">
+                    {{ res.workTitle || (res.verification ? targetTitle : cleanTitle(res.title)) }}
                   </div>
                   <div v-if="saveError && failedResourceId === res.id" class="inline-feedback resource-save-error" role="alert">
                     <strong>{{ saveError.title }}</strong>
@@ -367,11 +366,10 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <span v-if="res.year" class="tag-meta">{{ res.year }}</span>
                     <span class="tag-badge">{{ res.quality }}</span>
                     <span v-if="res.size" class="tag-meta">{{ res.size }}</span>
-                    <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
-                    <span v-if="res.datetime" class="tag-meta">{{ res.datetime }}</span>
                   </div>
-                  <p v-if="res.archivePreparation && usesArchiveAction(res) && batchPreview?.resourceId !== res.id" class="verification-notice">{{ res.archivePreparation.notice }}</p>
-                  <p v-if="res.verification?.notice" class="verification-notice">{{ res.verification.notice }}</p>
+                  <details v-if="res.workTitle && res.workTitle !== cleanTitle(res.title)" class="version-details"><summary>版本详情</summary><p>{{ cleanTitle(res.title) }}</p></details>
+                  <p v-if="res.archivePreparation && usesArchiveAction(res) && batchPreview?.resourceId !== res.id && failedResourceId !== res.id && !res.batchEligible" class="verification-notice">{{ res.archivePreparation.notice }}</p>
+                  <p v-if="res.verification?.notice && !res.batchEligible && failedResourceId !== res.id" class="verification-notice">{{ res.verification.notice }}</p>
                   <div v-if="batchPreview?.resourceId === res.id" class="archive-batch-plan" role="status">
                     <strong v-if="batchPreview.plan.plannedEpisodes.length">计划补齐{{ episodeRangeLabel(batchPreview.plan.plannedEpisodes) }} · 共 {{ batchPreview.plan.plannedEpisodes.length }} 集</strong>
                     <strong v-else>片库已有 {{ batchPreview.plan.existingEpisodes.length }} 集</strong>
@@ -419,12 +417,18 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 </template>
 
 <style scoped>
+.find-results { margin: 18px 0; }
+.find-results .dialog-body { max-height: none; overflow: visible; padding: 12px 0; }
+.find-results .official-progress, .find-results .search-status { margin: 10px 0; }
+.version-details { margin-top: 8px; color: var(--text-secondary); font-size: .78rem; }
+.version-details summary { width: fit-content; cursor: pointer; padding: 4px 0; }
+.version-details p { overflow-wrap: anywhere; }
 .liquid-dialog-backdrop { position: fixed; inset: 0; z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; visibility: hidden; }
 .liquid-dialog-backdrop.active { opacity: 1; visibility: visible; }
 .liquid-dialog { display: flex; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; flex-direction: column; overflow: hidden; border: var(--glass-border); border-radius: 32px; color: var(--text-primary); background: var(--glass-sheet-material); backdrop-filter: var(--glass-blur-heavy); -webkit-backdrop-filter: var(--glass-blur-heavy); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-lg); }
 .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 24px 24px 16px; flex-shrink: 0; }
 .media-meta-row { display: flex; min-width: 0; align-items: center; gap: 14px; flex: 1; }
-.dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 14px; box-shadow: var(--glass-shadow-sm); }
+.dialog-poster { width: 54px; height: 74px; flex-shrink: 0; object-fit: cover; border-radius: 12px; }
 .dialog-meta-info { display: grid; min-width: 0; flex: 1; gap: 7px; }
 .dialog-title { overflow: hidden; color: var(--text-primary); font-size: 1.22rem; font-weight: 750; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
 .cat-selector-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
@@ -433,12 +437,12 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .category-picker-trigger svg { width: 15px; height: 15px; transition: transform .2s; }
 .category-picker-trigger[aria-expanded='true'] svg { transform: rotate(180deg); }
 .cat-pill-group { display: flex; flex-wrap: wrap; gap: 4px; }
-.cat-select-pill { min-height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .77rem; white-space: nowrap; }
-.cat-select-pill.active { border-color: rgb(255 255 255 / .14); color: var(--liquid-accent); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); font-weight: 700; }
+.cat-select-pill { min-height: 44px; padding: 0 12px; border: 0; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .77rem; white-space: nowrap; }
+.cat-select-pill.active { color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-weight: 700; }
 .dialog-top-actions { flex-shrink: 0; }
-.btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: var(--glass-border); border-radius: 50%; color: var(--text-secondary); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner), var(--glass-shadow-sm); }
+.btn-close-dialog { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 50%; color: var(--text-secondary); background: var(--surface-2); }
 .btn-close-dialog svg { width: 20px; height: 20px; }
-.result-search { display: flex; align-items: center; gap: 8px; margin: 0 24px; min-height: 56px; padding: 6px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); flex-shrink: 0; }
+.result-search { display: flex; align-items: center; gap: 8px; margin: 0 24px; min-height: 56px; padding: 6px; border: 0; border-radius: var(--cinema-radius-control); background: var(--surface-2); flex-shrink: 0; }
 .result-search-icon { width: 19px; height: 19px; color: var(--text-tertiary); flex-shrink: 0; }
 .result-search input { width: 100%; min-width: 0; flex: 1; min-height: 44px; padding: 6px; border: 0; color: var(--text-primary); background: transparent; font-size: 16px; outline: none; }
 .result-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
@@ -453,15 +457,15 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .submit-search-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .submit-search-button .search-spinner { width: 16px; height: 16px; }
 .result-summary strong { color: var(--text-primary); font-size: .92rem; }
-.official-progress { margin: 16px 24px 0; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); flex-shrink: 0; }
+.official-progress { margin: 16px 24px 0; padding: 14px 16px; border: 0; border-radius: 16px; background: var(--surface-1); flex-shrink: 0; }
 .official-progress-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .official-progress strong { font-size: .86rem; }.official-progress a { color: var(--text-secondary); font-size: .75rem; text-decoration: none; }
 .official-progress p { color: var(--text-tertiary); font-size: .75rem; line-height: 1.6; }.official-progress-top + p { margin-top: 5px; }
 .official-progress .official-availability { margin-top: 6px; color: var(--text-secondary); }
 .result-filters { display: flex; align-items: center; gap: 6px; padding: 6px 24px 12px; overflow-x: auto; flex-shrink: 0; }
 .result-filters > svg { width: 18px; height: 18px; margin-right: 4px; color: var(--text-tertiary); flex-shrink: 0; }
-.filter-chip { min-height: 44px; padding: 0 17px; border: 1px solid transparent; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .8rem; flex-shrink: 0; }
-.filter-chip.active { color: var(--liquid-accent); border-color: rgb(255 255 255 / .14); background: var(--surface-elevated); box-shadow: var(--glass-shadow-sm); font-weight: 650; }
+.filter-chip { min-height: 44px; padding: 0 17px; border: 0; border-radius: 22px; color: var(--text-secondary); background: transparent; font-size: .8rem; flex-shrink: 0; }
+.filter-chip.active { color: var(--liquid-accent); background: var(--liquid-accent-subtle); font-weight: 650; }
 .dialog-body { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
 .dialog-body.showing-details { display: flex; overflow: hidden; }
 .resource-rows { display: grid; gap: 16px; }
@@ -474,24 +478,24 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .save-receipt h2 { font-size: 22px; }.save-receipt p { color: var(--text-secondary); font-size: 14px; }
 .receipt-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 12px; }
 .receipt-actions button { gap: 8px; min-height: 48px; }.receipt-actions svg { width: 18px; }
-.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 24px; border: 1px solid var(--divider); background: var(--surface-1); }
+.liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 24px; border: 0; background: var(--surface-1); }
 .row-left { min-width: 0; flex: 1; }
 .row-info { min-width: 0; }
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
 .row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
 .verification-notice { margin-top: 12px; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
-.archive-batch-plan { display: grid; gap: 6px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); color: var(--text-secondary); font-size: .75rem; line-height: 1.55; }
+.archive-batch-plan { display: grid; gap: 6px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); color: var(--text-secondary); font-size: .75rem; line-height: 1.55; }
 .archive-batch-plan strong { color: var(--text-primary); font-weight: 600; }
-.tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
+.tag-badge { padding: 1px 6px; background: var(--surface-2); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
 .update-badge { color: var(--liquid-accent); font-size: .78rem; font-weight: 650; }
 .row-right { display: flex; gap: 8px; flex-shrink: 0; }
 .btn-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .81rem; font-weight: 600; }
-.btn-details { color: var(--liquid-accent); background: transparent; border: 1px solid var(--liquid-accent-subtle); }
-.btn-action:hover:not(:disabled) { background: var(--glass-bg-hover); }
+.btn-details { color: var(--liquid-accent); background: transparent; }
+.btn-details:hover:not(:disabled) { background: var(--glass-bg-hover); }
 .resource-save-error { margin-top: 12px; }
 .empty-notice { padding: 40px 16px; color: var(--text-secondary); text-align: center; font-size: .9rem; }
 .empty-notice > span { display: block; }
-.retry-search-button, .load-more-button { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 7px; margin-top: 16px; padding: 0 18px; border: var(--glass-border); border-radius: 24px; color: var(--liquid-accent); background: var(--surface-elevated); font-size: .84rem; }
+.retry-search-button, .load-more-button { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 7px; margin-top: 16px; padding: 0 18px; border: 0; border-radius: var(--cinema-radius-control); color: var(--liquid-accent); background: transparent; font-size: .84rem; }
 .retry-search-button svg { width: 17px; height: 17px; }
 .load-more-button { width: 100%; margin-top: 0; }
 .loading-bar { display: flex; align-items: center; gap: 10px; padding: 24px 0; color: var(--text-secondary); font-size: .88rem; }
@@ -539,6 +543,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .dialog-header { padding-top: calc(18px + var(--safe-area-top)); }
 .dialog-poster { border-radius: 12px; }
 .btn-transfer { border-radius: var(--cinema-radius-control); color: var(--accent-ink); background: var(--liquid-accent); }
+.btn-transfer:hover:not(:disabled) { filter: brightness(1.08); }
 .liquid-resource-row { border-radius: var(--cinema-radius-card); box-shadow: none; }
 @media (min-width: 900px) {
   .dialog-header, .result-summary, .result-filters, .dialog-body { width: 100%; }

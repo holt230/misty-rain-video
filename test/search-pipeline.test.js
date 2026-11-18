@@ -132,7 +132,7 @@ test('电视剧先展示补集范围和空间，再启动后台任务并提供�
  const view=mount({searchKeyword:'折月亮',searchCategory:'tv',currentCategory:'tv',media,quarkResources:[item]},
   {onSaveToCards:()=>actions.push('preview-or-start'),onStopBatch:id=>actions.push(id)});
  try{
-  await nextTick();assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'补齐剧集');
+  await nextTick();assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'检查可存集数');
   document.querySelector('.btn-transfer').click();assert.deepEqual(actions,['preview-or-start']);
   view.state.batchPreview={resourceId:'0',plan:{officialLatest:27,existingEpisodes:Array.from({length:9},(_,i)=>i+19),
    plannedEpisodes:Array.from({length:18},(_,i)=>i+1),missingEpisodes:[],totalArchiveBytes:36.6*1024**3,recommendedFreeBytes:75.4*1024**3,freeBytes:100*1024**3,qualities:['4K HDR'],canStart:true,reason:''}};

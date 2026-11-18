@@ -61,8 +61,8 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
               <Download />
             </span>
             <span class="action-copy">
-              <strong>更新 {{ media.newEpisodeCount }} 集</strong>
-              <small>{{ media.latestEpisodeNumber ? `片源已更新至第 ${media.latestEpisodeNumber} 集` : '片源发现新的正片内容' }}</small>
+              <strong>补齐 {{ media.newEpisodeCount }} 集</strong>
+              <small>保存到当前片库</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -83,8 +83,7 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
               <RefreshCw />
             </span>
             <span class="action-copy">
-              <strong>更换资源</strong>
-              <small>重新检索并选择片源</small>
+              <strong>查找其他版本</strong>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>
@@ -95,7 +94,6 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
             </span>
             <span class="action-copy">
               <strong>移出片库</strong>
-              <small>删除前会再次向你确认</small>
             </span>
             <ChevronRight class="chevron" aria-hidden="true" />
           </button>

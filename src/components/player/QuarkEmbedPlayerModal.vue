@@ -271,14 +271,11 @@ const episodeStatus = computed(() => {
   const episode = currentEpisode.value;
   if (!episode) return episodes.value.length ? `片库 ${libraryCoverage.value.count} 集` : '';
   const currentLabel = episode.episodeNumber > 0 ? `第 ${episode.episodeNumber} 集` : episode.episodeTitle;
-  return `${currentLabel} · 片库 ${libraryCoverage.value.count} 集`;
+  return currentLabel;
 });
 const loadingTitle = computed(() => phase.value === 'resolving'
   ? '正在载入片库'
   : `正在准备${currentEpisode.value?.episodeTitle || '当前剧集'}`);
-const loadingHint = computed(() => phase.value === 'resolving'
-  ? '正在整理剧集与可用画质'
-  : '正在获取最佳画质，请稍候');
 const playActionLabel = computed(() => {
   const episode = currentEpisode.value;
   if (!episode) return '开始播放';
@@ -1315,16 +1312,16 @@ defineExpose({ retry, dismissLayer });
 
         <div class="header-actions">
           <button class="text-action" type="button" @click="emit('re-search', media)">
-            换源
+            其他版本
           </button>
 
         </div>
       </header>
 
       <div v-if="settingsExpanded || episodeSheetOpen" class="player-sheet-shade" @click="settingsExpanded = false; episodeSheetOpen = false"></div>
-      <div class="player-layout" :class="{ 'single-column': !episodes.length }">
+      <div class="player-layout" :class="{ 'single-column': !episodes.length }" :style="{ '--video-ratio': videoAspectRatio }">
         <main class="video-column">
-          <div class="video-stage" :style="{ '--video-ratio': videoAspectRatio }">
+          <div class="video-stage">
             <video
               :key="videoInstanceKey"
               ref="videoRef"
@@ -1365,7 +1362,7 @@ defineExpose({ retry, dismissLayer });
 
             <MobilePlaybackControls
               v-if="videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :hls="hlsRef" :username="username" :expanded="immersive" :fullscreen="fullscreen" :native-video-fullscreen="nativeVideoFullscreen" :desktop="!isMobilePlaybackDevice"
+              :video="videoRef" :loading="playbackStarting" :hls="hlsRef" :username="username" :expanded="immersive" :fullscreen="fullscreen" :native-video-fullscreen="nativeVideoFullscreen" :desktop="!isMobilePlaybackDevice"
               :title="`${media.title}${currentEpisode ? ' · ' + currentEpisode.episodeTitle : ''}`" :picture-fit="pictureFit"
               @fullscreen="toggleFullscreen" @web-fullscreen="toggleWebFullscreen" @back="back" @picture-fit="pictureFit = pictureFit === 'contain' ? 'cover' : 'contain'"
               @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
@@ -1378,7 +1375,6 @@ defineExpose({ retry, dismissLayer });
               <div class="loading-content">
                 <span class="loading-wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
                 <strong>{{ loadingTitle }}</strong>
-                <p>{{ loadingHint }}</p>
               </div>
             </div>
 
@@ -1398,7 +1394,7 @@ defineExpose({ retry, dismissLayer });
                   v-if="phase === 'error' && selectedSource?.delivery === 'direct' && compatibleSource"
                   type="button" class="secondary-button" @click="useCompatibleSource"
                 >
-                  使用兼容画质（服务器中转）
+                  换个画质试试
                 </button>
               </div>
             </div>
@@ -1435,28 +1431,29 @@ defineExpose({ retry, dismissLayer });
             </div>
           </div>
 
-          <DanmakuControls
-            v-if="phase === 'ready' && videoRef && currentEpisode && media"
-            :video="videoRef"
-            :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
-          />
-
-          <div v-if="phase === 'ready' && sources.length" class="player-toolbar" aria-label="播放操作">
-            <button
-              ref="settingsToggleRef"
-              type="button"
-              :aria-expanded="settingsExpanded"
-              aria-controls="playback-settings"
-              @click="settingsExpanded = !settingsExpanded"
-            >
-              <SlidersHorizontal aria-hidden="true" />
-              <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ selectedSoundEffect?.label || '原声' }}</small></span>
-              <ChevronDown class="toolbar-chevron" aria-hidden="true" />
-            </button>
-            <button type="button" @click="openEpisodeSheet">
-              <ListVideo aria-hidden="true" />
-              <span><strong>选集</strong><small>{{ episodeStatus }}</small></span>
-            </button>
+          <div v-if="phase === 'ready'" class="playback-actions">
+            <DanmakuControls
+              v-if="videoRef && currentEpisode && media"
+              :video="videoRef"
+              :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
+            />
+            <div v-if="sources.length" class="player-toolbar" aria-label="播放操作">
+              <button
+                ref="settingsToggleRef"
+                type="button"
+                :aria-expanded="settingsExpanded"
+                aria-controls="playback-settings"
+                @click="settingsExpanded = !settingsExpanded"
+              >
+                <SlidersHorizontal aria-hidden="true" />
+                <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ selectedSoundEffect?.label || '原声' }}</small></span>
+                <ChevronDown class="toolbar-chevron" aria-hidden="true" />
+              </button>
+              <button type="button" @click="openEpisodeSheet">
+                <ListVideo aria-hidden="true" />
+                <span><strong>选集</strong></span>
+              </button>
+            </div>
           </div>
 
           <div
@@ -1612,7 +1609,7 @@ defineExpose({ retry, dismissLayer });
         <aside v-if="episodes.length" ref="episodePanelRef" class="episode-panel" :class="{ 'sheet-open': episodeSheetOpen }" :role="episodeSheetOpen ? 'dialog' : undefined" :aria-modal="episodeSheetOpen || undefined" aria-label="选集">
           <div class="episode-coverage" role="status" aria-live="polite">
             <strong>{{ libraryCoverage.summary }}</strong>
-            <span v-if="officialWork">{{ officialWork.completed ? `官方共 ${officialWork.latestEpisode} 集` : `官方已更新至第 ${officialWork.latestEpisode} 集` }} · {{ officialWork.platform }}</span>
+            <span v-if="officialWork && libraryCoverage.missing.length">已更新至第 {{ officialWork.latestEpisode }} 集 · {{ officialWork.platform }}</span>
             <span v-if="libraryCoverage.missingLabel">{{ libraryCoverage.missingLabel }}</span>
             <button v-if="media?.category === 'tv' && libraryCoverage.missingLabel" type="button" class="episode-coverage-action" @click="emit('re-search', media)">补齐缺少的剧集</button>
           </div>
@@ -1620,7 +1617,6 @@ defineExpose({ retry, dismissLayer });
             <div class="episode-heading-title">
               <div class="episode-heading-main">
                 <strong>剧集</strong>
-                <span>{{ episodeStatus }}</span>
               </div>
               <small v-if="latestEpisodeUpdateLabel" class="episode-update-time">{{ latestEpisodeUpdateLabel }}</small>
             </div>
@@ -1738,6 +1734,7 @@ defineExpose({ retry, dismissLayer });
 .loading-wave i:nth-child(2) { animation-delay: .12s; }
 .loading-wave i:nth-child(3) { animation-delay: .24s; }
 .loading-wave i:nth-child(4) { animation-delay: .36s; }
+.playback-actions { display: contents; }
 .player-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex-shrink: 0; gap: 9px; padding: 14px 0; }
 .player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
 .player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); border-color: rgb(var(--accent-rgb) / .25); }
@@ -1850,8 +1847,7 @@ defineExpose({ retry, dismissLayer });
 .landscape-inline .player-layout, .landscape-inline .video-column { display: block; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .landscape-inline .video-column { padding: 0; background: #000; }
 .landscape-inline .video-stage { width: 100%; height: 100%; min-height: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
-.landscape-inline .video-column > .danmaku-controls,
-.landscape-inline .player-toolbar,
+.landscape-inline .playback-actions,
 .landscape-inline .playback-settings,
 .landscape-inline .episode-panel { display: none; }
 
@@ -1878,13 +1874,26 @@ defineExpose({ retry, dismissLayer });
   .episode-heading { padding: 24px 16px 16px; }
 }
 @media (max-width: 820px) {
-  .player-header { min-height: calc(74px + var(--safe-area-top)); padding: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)) 12px 12px; }
-  .player-layout { display: block; }
+  .player-window { --playback-left: max(16px, var(--safe-area-left)); --playback-right: max(16px, var(--safe-area-right)); }
+  .player-header { min-height: calc(74px + var(--safe-area-top)); gap: 8px; padding: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)) var(--playback-right) 12px var(--playback-left); }
+  .title-block { gap: 8px; }
+  .player-back-button { margin-inline-start: -8px; }
+  .player-layout { display: block; scroll-padding-top: min(calc(100vw / var(--video-ratio)), calc(var(--player-height, 100dvh) * .55)); }
   .video-column { display: contents; }
   .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: var(--video-ratio, 16 / 9); min-height: 0; max-height: calc(var(--player-height, 100dvh) * .55); }
-  .video-column > :deep(.danmaku-controls) { margin: 0 16px; }
-  .player-toolbar { margin: 0 16px; }
-  .episode-panel { margin: 8px 16px calc(24px + var(--safe-area-bottom)); }
+  .playback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px var(--playback-right) 12px var(--playback-left); }
+  .playback-actions:empty { display: none; }
+  .playback-actions :deep(.danmaku-row) { padding-top: 0; gap: 6px; }
+  .playback-actions :deep(.danmaku-toggle[aria-checked='false']) { padding-inline: 4px; background: transparent; }
+  .playback-actions :deep(.danmaku-controls:has(.danmaku-toggle[aria-checked='true'])) { flex-basis: 100%; }
+  .player-toolbar { flex: 1 1 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 0; }
+  .player-toolbar button { min-height: 44px; padding: 4px 8px; background: transparent; white-space: nowrap; }
+  .episode-panel { margin: 0 var(--playback-right) calc(24px + var(--safe-area-bottom)) var(--playback-left); }
+  .episode-panel:not(.sheet-open) .episode-coverage { margin: 0; padding: 12px 0 0; border: 0; border-top: 1px solid var(--divider); border-radius: 0; background: transparent; }
+  .episode-panel:not(.sheet-open) .episode-coverage strong { color: var(--text-secondary); font-weight: 550; }
+  .episode-panel:not(.sheet-open) .episode-heading { padding: 8px 0 10px; }
+  .episode-panel:not(.sheet-open) .episode-ranges { padding-inline: 0; }
+  .episode-panel:not(.sheet-open) .episode-list { gap: 8px; padding: 4px 0 16px; }
   .playback-settings { inset: auto max(12px, var(--safe-area-right)) max(12px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); width: auto; max-height: calc(84% - var(--safe-area-bottom)); border-radius: 24px; }
   .episode-panel.sheet-open { inset: auto max(12px, var(--safe-area-right)) max(12px, var(--safe-area-bottom)) max(12px, var(--safe-area-left)); width: auto; height: 65%; border-radius: 24px; padding-bottom: 12px; }
   .episode-panel.sheet-open .episode-list { flex: 1; min-height: 0; overflow-y: auto; }

@@ -117,7 +117,7 @@ test('尚公主等旧片库无年份时明确提供个人片库播放，不把�
  const view=mount();
  try{
   view.props.unversionedLibrary=true;await flush();
-  assert.match(document.querySelector('.play-feature').textContent,/播放片库中的同名影片/);
+    assert.match(document.querySelector('.play-feature').textContent,/播放同名影片/);
   assert.match(document.querySelector('.detail-play-note').textContent,/未标注年份/);
   document.querySelector('.play-feature').click();assert.equal(view.plays,1);
   view.props.inLibrary=true;await nextTick();assert.match(document.querySelector('.play-feature').textContent,/立即播放/);

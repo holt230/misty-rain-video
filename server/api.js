@@ -134,6 +134,7 @@ const readLibrarySources = async (context, user, userData) => {
       ...item,
       quarkShareUrl: saved.quarkShareUrl || item.quarkShareUrl || '',
       quarkPasscode: saved.quarkPasscode || item.quarkPasscode || '',
+      quarkArchiveImported: saved.quarkFid === item.quarkFid && saved.quarkArchiveImported === true,
       quarkSelectionFids: saved.quarkSelectionFids
     };
   });
