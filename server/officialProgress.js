@@ -1,7 +1,7 @@
 import { TencentCatalog, parseTencentEpisodes } from './danmaku/tencentCatalog.js';
 import { isExactWorkTitle } from './searchTitles.js';
 import { readWebResponseText } from './http.js';
-import { discoverOfficialPlatforms, OfficialPlatformCatalog } from './officialPlatforms.js';
+import { discoverOfficialPlatforms, officialPlatformUrl, OfficialPlatformCatalog } from './officialPlatforms.js';
 
 const clean = value => String(value || '').replace(/<[^>]*>/g, '').trim().slice(0, 160);
 const categories = { '动漫': 'anime', '电视剧': 'tv' };
@@ -95,7 +95,15 @@ export class OfficialProgressService {
       if (target.protocol !== 'https:' || target.port || target.username || target.password || ![
         'pbaccess.video.qq.com', 'v.youku.com', 'pcw-api.iqiyi.com', 'pcweb.api.mgtv.com'
       ].includes(target.hostname)) throw new Error('官方数据地址无效');
-      const response = await this.fetchImpl(target.href, { ...options, headers: { 'User-Agent': 'Mozilla/5.0', ...options.headers }, signal: controller.signal, redirect: 'error' });
+      const requestOptions = { ...options, headers: { 'User-Agent': 'Mozilla/5.0', ...options.headers }, signal: controller.signal, redirect: 'manual' };
+      let response = await this.fetchImpl(target.href, requestOptions);
+      if (target.hostname === 'v.youku.com' && target.pathname === '/video' && [301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get('location');
+        await response.body?.cancel();
+        const destination = location && officialPlatformUrl(new URL(location, target).href, 'youku');
+        if (!destination) throw new Error('优酷作品跳转地址无效');
+        response = await this.fetchImpl(destination, requestOptions);
+      }
       if (!response.ok) throw new Error('官方目录暂时无法访问');
       const body = await readWebResponseText(response, { maxBytes: 4 * 1024 * 1024, idleTimeoutMs: this.timeoutMs });
       return format === 'text' ? body : JSON.parse(body);
@@ -137,7 +145,8 @@ export class OfficialProgressService {
         ]),
         new Promise(resolve => { timer = setTimeout(() => { timedOut = true; controller.abort(); resolve(); }, this.timeoutMs); })
       ]);
-      const works = [...confirmed].sort((a, b) => a.title.localeCompare(b.title) || a.platform.localeCompare(b.platform) || a.id.localeCompare(b.id));
+      const works = [...new Map(confirmed.map(work => [work.platform + ':' + work.id, work])).values()]
+        .sort((a, b) => a.title.localeCompare(b.title) || a.platform.localeCompare(b.platform) || a.id.localeCompare(b.id));
       return { status: works.length ? 'confirmed' : timedOut || searchFailed ? 'unavailable' : 'unknown', works, checkedAt: works.length || !timedOut ? new Date().toISOString() : '',
         message: works.length ? '' : timedOut || searchFailed ? '官方进度暂时无法读取，已找到的资源仍按实际文件核对。' : '暂未在腾讯视频、优酷、芒果TV或爱奇艺确认到对应版本的正片进度。' };
     } catch {

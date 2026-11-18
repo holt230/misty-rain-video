@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { archiveImportMessage, importArchiveResource, listArchiveBatches, previewArchiveBatch, startArchiveBatch, stopArchiveBatch,
+import { archiveImportMessage, continueArchiveBatch, importArchiveResource, listArchiveBatches, previewArchiveBatch, startArchiveBatch, stopArchiveBatch,
   type ArchiveBatchJob, type ArchiveBatchPreview } from './services/archiveImport';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Plus, RefreshCw } from '@lucide/vue';
@@ -112,12 +112,13 @@ const transferSavedSummary = ref('');
 const archiveBatchPreview = ref<{ resourceId: string; plan: ArchiveBatchPreview } | null>(null);
 const archiveBatchJobs = ref<ArchiveBatchJob[]>([]);
 const transferBatchId = ref('');
+const batchResumeError = ref('');
 const transferBatch = computed(() => archiveBatchJobs.value.find(job => job.id === transferBatchId.value));
 const attentionJobs = computed(() => archiveBatchJobs.value.filter(job => job.status !== 'success' || job.cleanupPendingCount));
 const inlineFind = ref(false);
 watch(isTransferOpen, open => { if (!open) inlineFind.value = false; }, { flush: 'sync' });
 watch([isTransferOpen, searchPending], () => {
-  if (!isTransferOpen.value || searchPending.value) { transferSavedMedia.value = null; transferSavedSummary.value = ''; transferBatchId.value = ''; }
+  if (!isTransferOpen.value || searchPending.value) { transferSavedMedia.value = null; transferSavedSummary.value = ''; transferBatchId.value = ''; batchResumeError.value = ''; }
   if (!isTransferOpen.value || searchPending.value) archiveBatchPreview.value = null;
   if (searchPending.value) { saveError.value = null; failedResourceId.value = ''; }
 });
@@ -151,6 +152,7 @@ const failedResourceId = ref('');
 const actionMedia = ref<MediaItem | null>(null);
 const mobileTab = ref<MobileDockTab>('home');
 const stoppingArchiveBatch = ref('');
+const resumingArchiveBatch = ref('');
 let archiveBatchTimer: ReturnType<typeof setTimeout> | undefined;
 let archiveBatchRefreshing = false;
 let archiveBatchOwner = '';
@@ -160,18 +162,22 @@ const refreshArchiveBatches = async () => {
   const username = user.value.username;
   const requestedAt = Date.now();
   try {
-    const previous = new Map(archiveBatchJobs.value.map(job => [job.id, job.status]));
+    const previous = new Map(archiveBatchJobs.value.map(job => [job.id, job]));
     const jobs = await listArchiveBatches();
     if (username !== user.value?.username) return;
-    const justStarted = archiveBatchJobs.value.filter(job => job.status === 'running'
-      && Date.parse(job.updatedAt) >= requestedAt - 1000 && !jobs.some(item => item.id === job.id));
-    archiveBatchJobs.value = [...justStarted, ...jobs];
-    const receipt = jobs.find(job => job.id === transferBatchId.value);
+    const changed = archiveBatchJobs.value.filter(job => {
+      const fromServer = jobs.find(item => item.id === job.id);
+      return !fromServer
+        ? job.status === 'running' && Date.parse(job.updatedAt) >= requestedAt - 1000
+        : job !== previous.get(job.id) && job.updatedAt >= fromServer.updatedAt;
+    });
+    archiveBatchJobs.value = [...changed, ...jobs.filter(job => !changed.some(item => item.id === job.id))];
+    const receipt = transferBatch.value;
     if (receipt) {
       transferSavedSummary.value = receipt.message;
       if (transferSavedMedia.value && receipt.targetFid) transferSavedMedia.value = { ...transferSavedMedia.value, quarkFid: receipt.targetFid };
     }
-    if (jobs.some(job => previous.get(job.id) === 'running' && job.status !== 'running')) {
+    if (archiveBatchJobs.value.some(job => previous.get(job.id)?.status === 'running' && job.status !== 'running')) {
       void refreshList(true); void checkLibraryUpdates(true);
     }
   } catch { /* Keep the last known status and retry while a task is running. */ }
@@ -193,7 +199,14 @@ watch([authenticated, () => user.value?.username, mobileTab], ([ready]) => {
   if (ready && user.value) void refreshArchiveBatches();
   else { clearTimeout(archiveBatchTimer); archiveBatchJobs.value = []; }
 }, { immediate: true });
-onBeforeUnmount(() => clearTimeout(archiveBatchTimer));
+const refreshBatchesOnReturn = () => {
+  if (document.visibilityState === 'visible') void refreshArchiveBatches();
+};
+onMounted(() => document.addEventListener('visibilitychange', refreshBatchesOnReturn));
+onBeforeUnmount(() => {
+  clearTimeout(archiveBatchTimer);
+  document.removeEventListener('visibilitychange', refreshBatchesOnReturn);
+});
 const stopBatch = async (id: string) => {
   if (stoppingArchiveBatch.value) return;
   stoppingArchiveBatch.value = id;
@@ -382,11 +395,33 @@ const handleReSearch = (media: MediaItem) => {
   openTransferModal(media);
   setMobileHistoryLayer('transfer', replaceHistory);
 };
-const resumeArchiveBatch = (job: ArchiveBatchJob) => {
-  const item = allMediaList.value.find(media => media.quarkFid === job.targetFid)
-    || allMediaList.value.find(media => media.category === 'tv' && media.title === job.title)
-    || { id: `search-batch-${job.id}`, title: job.title, category: 'tv' as const, tag: '', poster: '' };
-  handleReSearch(item);
+const resumeArchiveBatch = async (id: string) => {
+  if (resumingArchiveBatch.value || isSavingTransfer.value || !user.value) return;
+  const username = user.value.username;
+  resumingArchiveBatch.value = id;
+  batchResumeError.value = '';
+  try {
+    const job = await continueArchiveBatch(id);
+    if (username !== user.value?.username) return;
+    archiveBatchJobs.value = [job, ...archiveBatchJobs.value.filter(item => item.id !== job.id)];
+    if (transferBatchId.value === id) {
+      transferBatchId.value = job.id;
+      transferSavedSummary.value = job.message;
+      if (transferSavedMedia.value && job.targetFid) transferSavedMedia.value = { ...transferSavedMedia.value, quarkFid: job.targetFid };
+    } else {
+      toast.show(job.message, '✓');
+    }
+    if (job.status === 'success') void refreshList(true);
+    void refreshArchiveBatches();
+  } catch (error) {
+    if (username !== user.value?.username) return;
+    const message = error instanceof Error && error.name !== 'AbortError' ? getLibrarySaveFeedback(error).message : '暂时无法确认任务状态，请稍后重试。';
+    if (transferBatchId.value === id) batchResumeError.value = message;
+    else toast.show(message, '×');
+    void refreshArchiveBatches();
+  } finally {
+    resumingArchiveBatch.value = '';
+  }
 };
 
 let catalogOrigin: { page: MobileDockTab; top: number } | null = null;
@@ -696,7 +731,7 @@ watch([isAnalyzing, searchPending, quarkResources], async () => {
   if (sequence !== automaticSequence) return;
   automaticStatus.value = '';
   if (result.status === 'manual') automaticNotice.value = result.message || '';
-  if (result.status === 'failed') automaticNotice.value = '自动添加未完成，请查看失败原因后重试，或选择其他片源。';
+  if (result.status === 'failed' && !saveError.value) automaticNotice.value = '自动添加未完成，请查看失败原因后重试，或选择其他片源。';
 });
 const searchTransferResources = (keyword: string, category?: SearchCategory) => {
   cancelAutomatic(); pendingCatalog.value = null; playAfterTransfer.value = false;
@@ -731,7 +766,7 @@ const showSavedLibrary = () => {
           <div v-for="job in attentionJobs" :key="job.id" class="archive-batch-status" role="status">
             <div><strong>{{ job.title }} · {{ job.status === 'running' ? '正在补集' : job.status === 'success' ? '已补齐' : '补集未完成' }}</strong><p>{{ job.message }}</p><small>已完成 {{ job.completedEpisodes.length }} / {{ job.total }} 集<span v-if="job.cleanupPendingCount"> · 部分临时文件未清理，可能占用网盘空间</span></small></div>
             <button v-if="job.status === 'running'" type="button" :disabled="stoppingArchiveBatch === job.id" @click="stopBatch(job.id)">停止补集</button>
-            <button v-else-if="job.status !== 'success'" type="button" @click="resumeArchiveBatch(job)">继续补集</button>
+            <button v-else-if="job.status !== 'success'" type="button" :disabled="!!resumingArchiveBatch" @click="resumeArchiveBatch(job.id)">{{ resumingArchiveBatch === job.id ? '正在核对…' : '继续补齐' }}</button>
           </div>
         </details>
         <div class="category-toolbar"><CategoryTabs v-model="currentCategory" :counts="categoryCounts" /></div>
@@ -754,7 +789,7 @@ const showSavedLibrary = () => {
     <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" @resolved="resolveCatalogItem" :in-library="!!detailCopy" :play-label="playLabel(detailCopy?.quarkFid)" :owned-episodes="detailPlayable?.localEpisodeNumbers" @episode="detailPlayable && playSearchLibraryMedia(detailPlayable, $event)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
     <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" :requested-episode="requestedLibraryEpisode" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
     <Teleport defer to="#discovery-results" :disabled="!inlineFind">
-<QuarkTransferModal :inline="inlineFind" :saved-play-label="playLabel(transferSavedMedia?.quarkFid)" ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :saving-message="archiveImportMessage" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" :saved-batch="transferBatch" :batch-preview="archiveBatchPreview" @stop-batch="stopBatch" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
+<QuarkTransferModal :inline="inlineFind" :saved-play-label="playLabel(transferSavedMedia?.quarkFid)" ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :saving-message="archiveImportMessage" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" :saved-batch="transferBatch" :batch-preview="archiveBatchPreview" :resuming-batch="!!resumingArchiveBatch" :batch-resume-error="batchResumeError" @stop-batch="stopBatch" @resume-batch="resumeArchiveBatch" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
     </Teleport>
     <DeleteMediaConfirm :open="!!deletingMedia" :media="deletingMedia" :deleting="isDeletingMedia" @cancel="closeDeleteDialog" @confirm="confirmDeleteMedia" />
     <CategoryPickerSheet :open="!!categoryMedia" :media="categoryMedia" :saving="isSavingCategory" @cancel="closeCategoryPicker" @select="selectMediaCategory" />

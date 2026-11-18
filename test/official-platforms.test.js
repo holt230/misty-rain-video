@@ -47,6 +47,37 @@ test('优酷风控页或错片不能伪装为进度，不执行网页中的JavaS
   }
 });
 
+test('优酷专辑链接跳转后，谷雨的全30集排期不等于已更新集数', async () => {
+  const album = 'aedc393daa324207acea';
+  const videoId = 'XNjU4NDA0NjMwNA==';
+  const lastId = 'XNjU4OTEzNjkyMA==';
+  const known = [{ id: 'youku', providerId: album, name: '优酷', title: '谷雨', category: 'tv',
+    url: 'https://v.youku.com/video?s=' + album }];
+  const page = {
+    pageMap: { extra: { showId: album, videoId, showName: '谷雨', showCategory: '电视剧', videoType: '正片',
+      showReleaseTime: '0000-00-00', episodeLast: 26, episodeTotal: 30, completed: false } },
+    moduleList: [{ components: [{ type: 10013, more: false, subtitle: '30集全，11月21日至24日每天更新1集。',
+      itemList: [26, 30].map((stage, index) => ({ stage, videoType: '正片', episodeInfo: { isZp: true },
+        action: { type: 'JUMP_TO_VIDEO', value: index ? videoId : lastId, extra: { showId: album } } })) }] }]
+  };
+  let location = '/v_show/id_' + videoId + '.html?s=' + album;
+  const service = new OfficialProgressService({ fetchImpl: async input => {
+    const url = new URL(input);
+    if (url.hostname === 'pbaccess.video.qq.com') throw new Error('search unavailable');
+    assert.equal(url.hostname, 'v.youku.com');
+    return url.pathname === '/video' ? new Response(null, { status: 302, headers: { location } }) : new Response(html(page));
+  } });
+  const progress = await service.lookup('谷雨', { category: 'tv', known });
+  assert.equal(progress.status, 'confirmed');
+  assert.equal(progress.works[0].latestEpisode, 26);
+  assert.equal(progress.works[0].completed, false);
+  assert.match(progress.works[0].sourceUrl, new RegExp(lastId));
+  page.moduleList[0].components[0].itemList.shift();
+  assert.deepEqual((await service.lookup('谷雨', { category: 'tv', known })).works, []);
+  location = 'https://example.test/v_show/id_' + videoId + '.html';
+  assert.deepEqual((await service.lookup('谷雨', { category: 'tv', known })).works, []);
+});
+
 test('爱奇艺正片ID与专辑相互核对；动漫99集不使用计划104集或预告列表', () => {
   assert.equal(iqiyiVideoId(candidate('唐朝诡事录').url), String(fixture.iqiyiInfo.data.tvId));
   const tv = parseIqiyiWork(fixture.iqiyiInfo, candidate('唐朝诡事录'), '唐朝诡事录');
