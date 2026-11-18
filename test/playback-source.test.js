@@ -5,7 +5,8 @@ import { transform } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
 const { code } = await transform(fs.readFileSync('src/services/playbackSource.ts', 'utf8'), { loader: 'ts', format: 'esm' });
-const { configureVideoRequest, playbackSourceLabel, selectInitialPlaybackSource } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const { configureVideoRequest, describeNativeAudioTracks, enableOnlyAudioTrack, findStereoAudioTrack,
+  playbackSourceLabel, selectInitialPlaybackSource } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const direct = { id: 'dv', resolution: 'dolby_vision', label: '4K', width: 3840, height: 2160, delivery: 'direct', isHls: false };
 const hls4k = { ...direct, id: 'hls4k', resolution: '4k', delivery: 'proxy', isHls: true };
 const compatible = { ...hls4k, id: 'super', resolution: 'super', label: '超高清', width: 1440, height: 810 };
@@ -65,4 +66,25 @@ test('不自动选择格式兼容性未知的原文件，空列表安全返回',
 test('两个 4K 选项能够区分杜比视界和中转', () => {
   assert.equal(playbackSourceLabel(direct), '4K 杜比视界 · 直连');
   assert.equal(playbackSourceLabel(hls4k), '4K · 中转');
+});
+
+test('原生播放器将同一来源的真实音轨与声道对应，并且只启用选中的立体声', () => {
+  const native = [{ id: '2', label: '', language: 'und', enabled: true }, { id: '3', label: '', language: 'und', enabled: false }];
+  const metadata = [{ id: '1', channels: '6', codec: 'aac' }, { id: '2', channels: '2', codec: 'aac' }];
+  const tracks = describeNativeAudioTracks(native, metadata);
+  assert.deepEqual(tracks.map(track => [track.id, track.channels]), [['2', '6'], ['3', '2']]);
+  const stereo = findStereoAudioTrack(tracks, 0);
+  assert.equal(stereo, 1);
+  assert.equal(enableOnlyAudioTrack(native, stereo), true);
+  assert.deepEqual(native.map(track => track.enabled), [false, true]);
+  assert.equal(enableOnlyAudioTrack(native, 0), true);
+  assert.deepEqual(native.map(track => track.enabled), [true, false]);
+});
+
+test('音轨清单不一致或立体声属于另一语言时保留当前音轨', () => {
+  const metadata = [{ channels: '6', language: 'zh' }, { channels: '2', language: 'en' }];
+  assert.equal(findStereoAudioTrack(metadata, 0), -1);
+  assert.equal(describeNativeAudioTracks([{ id: '1' }], metadata)[0].channels, '');
+  const native = [{ id: '1', language: 'und' }, { id: '2', language: 'und' }];
+  assert.equal(findStereoAudioTrack(describeNativeAudioTracks(native, metadata), 0), -1);
 });

@@ -50,6 +50,33 @@ test('TV MP4 优先直连，公开数据不包含上游地址或网盘凭证', a
   assert.doesNotMatch(JSON.stringify(result), /private-cookie|private-token|media\.example|upstreamUrl|requestCookie/);
 });
 
+test('播放准备按来源返回内嵌音轨，只标记 Dolby Vision Profile 5 的 H.264 转码', async () => {
+  const gateway = makeGateway();
+  const tracks = [
+    { index: '1', codec_name: 'aac', channels: '6', lang: 'und' },
+    { index: '2', codec_name: 'aac', channel_layout: 'stereo', lang: 'und' }
+  ];
+  let profile = 5;
+  gateway.tvPlaybackClient.getStreaming = async () => ({ video_list: [
+    { resolution: 'super', video_info: { url: 'https://media.example.test/multi.mp4', codec: 'h264', streams: { audio_stream_list: tracks } } },
+    { resolution: 'high', video_info: { url: 'https://media.example.test/stereo.mp4', codec: 'avc1.640028', audio: { channels: 2, codec: 'aac' } } },
+    { resolution: 'dolby_vision', video_info: { url: 'https://media.example.test/video.mkv', codec: 'hevc', dolby_vision: { profile } } }
+  ] });
+  const result = await gateway.prepareEpisode('session', 'episode');
+  const source = resolution => result.sources.find(item => item.resolution === resolution);
+  assert.deepEqual(source('super').audioTracks.map(track => [track.id, track.codec, track.channels]), [
+    ['1', 'aac', '6'], ['2', 'aac', 'stereo']
+  ]);
+  assert.deepEqual(source('high').audioTracks.map(track => track.channels), ['2']);
+  assert.equal(source('super').colorCompatibilityRisk, true);
+  assert.equal(source('high').colorCompatibilityRisk, true);
+  assert.equal(source('dolby_vision').colorCompatibilityRisk, undefined);
+  assert.deepEqual(result.audioTracks, []);
+  profile = 8;
+  const hdr = await gateway.prepareEpisode('session', 'episode');
+  assert.ok(hdr.sources.every(item => !item.colorCompatibilityRisk));
+});
+
 test('直连 GET 和 HEAD 只返回 302，不请求或转发媒体内容', async () => {
   const gateway = makeGateway();
   const result = await gateway.prepareEpisode('session', 'episode');
