@@ -102,6 +102,8 @@ const manualPlayRequired = ref(false);
 const playbackHasStarted = ref(false);
 const detectedAudioTracks = ref<PlaybackAudioTrack[]>([]);
 const selectedAudioIndex = ref(-1);
+const checkingCompatibleAudio = ref(false);
+const compatibleAudioError = ref('');
 const playbackAutomationStorageKey = `misty_rain_playback_automation:${encodeURIComponent(props.username || 'guest')}`;
 const savingPreferences = ref(false);
 const preferencesError = ref('');
@@ -268,6 +270,8 @@ const audioTracks = computed(() => detectedAudioTracks.value.length
   ? detectedAudioTracks.value
   : (selectedSource.value?.audioTracks || playback.value?.audioTracks || []));
 const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1);
+const canTryCompatibleAudio = computed(() => selectedSource.value?.delivery === 'direct' && !audioSwitchable.value
+  && (isIOSPlaybackDevice || Boolean(videoRef.value && getNativeAudioTracks(videoRef.value))));
 const audioChannelLabel = computed(() => audioTrackChannelLabel(detectedAudioTracks.value[selectedAudioIndex.value]?.channels || ''));
 const selectedSoundEffect = computed(() => soundEffectOptions.find(option => option.value === soundEffectMode.value));
 const libraryCoverage = computed(() => playbackCoverage(episodes.value, props.media?.category, officialWork.value?.latestEpisode));
@@ -389,7 +393,7 @@ const observeNativeAudioTracks = (video: HTMLVideoElement, source: PlaybackSourc
     if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
     const detected = describeNativeAudioTracks(tracks, source.audioTracks || []);
     const current = Array.from(tracks).findIndex(track => track.enabled);
-    if (selectDefault && isIOSPlaybackDevice && !nativeAudioManuallySelected && detected.length > 1) {
+    if (selectDefault && (isIOSPlaybackDevice || source.audioCompatibility) && !nativeAudioManuallySelected && detected.length > 1) {
       const stereo = findStereoAudioTrack(detected, current);
       if (stereo >= 0) enableOnlyAudioTrack(tracks, stereo);
     }
@@ -1046,6 +1050,7 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
   phase.value = 'preparing';
   playback.value = null;
   selectedSourceId.value = '';
+  compatibleAudioError.value = '';
   errorMessage.value = '';
   stopVideo();
   announce(`正在准备${episode.episodeTitle}`);
@@ -1163,12 +1168,50 @@ const changeQuality = async (source: PlaybackSource) => {
   const resumeAt = video?.currentTime || 0;
   const shouldPlay = Boolean(video && !video.paused);
   selectedSourceId.value = source.id;
-  mobileQualityManuallySelected = true;
-  localStorage.setItem('misty_rain_player_quality', source.resolution);
-  if (source.delivery) localStorage.setItem('misty_rain_player_delivery', source.delivery);
-  else localStorage.removeItem('misty_rain_player_delivery');
+  compatibleAudioError.value = '';
+  if (!source.audioCompatibility) {
+    mobileQualityManuallySelected = true;
+    localStorage.setItem('misty_rain_player_quality', source.resolution);
+    if (source.delivery) localStorage.setItem('misty_rain_player_delivery', source.delivery);
+    else localStorage.removeItem('misty_rain_player_delivery');
+  }
   announce(`已切换到${playbackSourceLabel(source)}`);
   await attachSource(source, resumeAt, shouldPlay);
+};
+
+const tryCompatibleAudio = async () => {
+  const activeSession = session.value;
+  const episode = currentEpisode.value;
+  const activePlayback = playback.value;
+  const original = selectedSource.value;
+  if (checkingCompatibleAudio.value || !canTryCompatibleAudio.value || !activeSession || !episode || !activePlayback || !original) return;
+  checkingCompatibleAudio.value = true;
+  compatibleAudioError.value = '';
+  const isCurrent = () => props.isOpen && phase.value === 'ready' && playback.value === activePlayback && selectedSourceId.value === original.id;
+  try {
+    let alternatives = activePlayback.sources.filter(source => source.audioCompatibility);
+    if (!alternatives.length) {
+      const result = await QuarkStreamService.prepareEpisode(activeSession.sessionId, episode.fid, {
+        nativeHls: nativeHlsSupported,
+        audioCompatibility: true
+      });
+      alternatives = result.sources.filter(source => source.audioCompatibility);
+    }
+    if (!isCurrent()) return;
+    const source = alternatives.find(item => item.resolution === original.resolution)
+      || selectInitialPlaybackSource(alternatives, { mobile: isMobilePlaybackDevice, respectPreference: false });
+    if (!source) {
+      compatibleAudioError.value = '当前剧集暂未找到兼容的立体声音轨';
+      return;
+    }
+    if (!activePlayback.sources.some(item => item.id === source.id)) activePlayback.sources.push(...alternatives);
+    await changeQuality(source);
+  } catch (error) {
+    if (isCurrent()) compatibleAudioError.value = error instanceof QuarkServiceError && error.code === 'QUARK_STEREO_UNAVAILABLE'
+      ? error.message : '暂时无法读取兼容音频，请稍后重试';
+  } finally {
+    checkingCompatibleAudio.value = false;
+  }
 };
 
 const useCompatibleSource = async () => {
@@ -1523,18 +1566,18 @@ defineExpose({ retry, dismissLayer });
               </div>
               <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">当前画质经服务器加载，带宽较低时可降低画质。若有“原画直连”，可尝试切换；部分设备不支持原画格式。</p>
               <p v-else-if="selectedSource?.resolution === 'original'" class="delivery-hint">原画直接从网盘加载，播放效果取决于设备对原始视频与音频格式的支持。</p>
-              <div v-if="selectedSource?.colorCompatibilityRisk" class="color-compatibility">
+              <div v-if="selectedSource?.colorCompatibilityRisk" class="compatibility-actions">
                 <p>这份视频转码后可能偏绿或偏紫。遇到偏色时，可换一个版本。</p>
                 <button type="button" class="text-action" @click="emit('re-search', media)">查找其他版本</button>
               </div>
             </div>
 
-            <div v-if="audioTracks.length" class="setting-group">
+            <div v-if="audioTracks.length || canTryCompatibleAudio" class="setting-group">
               <div class="setting-heading">
                 <span>音频</span>
-                <small>{{ audioSwitchable ? '可切换音轨' : audioTracks.length > 1 ? '当前浏览器暂不支持切换' : '当前音轨' }}</small>
+                <small>{{ audioSwitchable ? '可切换音轨' : audioTracks.length > 1 ? '当前浏览器暂不支持切换' : audioTracks.length ? '当前音轨' : '未识别到音轨信息' }}</small>
               </div>
-              <div class="option-scroll" role="group" aria-label="音轨">
+              <div v-if="audioTracks.length" class="option-scroll" role="group" aria-label="音轨">
                 <button
                   v-for="(track, index) in audioTracks"
                   :key="track.id"
@@ -1547,6 +1590,12 @@ defineExpose({ retry, dismissLayer });
                 >
                   {{ track.label }}{{ audioTrackChannelLabel(track.channels) ? ` · ${audioTrackChannelLabel(track.channels)}` : '' }}
                 </button>
+              </div>
+              <div v-if="canTryCompatibleAudio" class="compatibility-actions">
+                <button type="button" class="text-action" :disabled="checkingCompatibleAudio" @click="tryCompatibleAudio">
+                  {{ checkingCompatibleAudio ? '正在检查音轨…' : '试用兼容音频' }}
+                </button>
+                <p v-if="compatibleAudioError" role="status">{{ compatibleAudioError }}</p>
               </div>
             </div>
 
@@ -1706,8 +1755,8 @@ defineExpose({ retry, dismissLayer });
 .skip-durations .preferences-error { color: var(--danger); }
 
 .delivery-hint { margin-top: 9px; color: var(--text-tertiary); font-size: .73rem; line-height: 1.6; }
-.color-compatibility { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; color: var(--text-secondary); font-size: .76rem; line-height: 1.6; }
-.color-compatibility .text-action { padding-inline: 10px; color: var(--liquid-accent); background: transparent; }
+.compatibility-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; color: var(--text-secondary); font-size: .76rem; line-height: 1.6; }
+.compatibility-actions .text-action { padding-inline: 10px; color: var(--liquid-accent); background: transparent; }
 .player-backdrop { position: fixed; top: var(--player-top, 0px); left: var(--player-left, 0px); width: var(--player-width, 100%); height: var(--player-height, 100dvh); z-index: 1400; display: grid; place-items: center; padding: 0; background: var(--liquid-canvas); opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s; }
 .player-backdrop.active { opacity: 1; visibility: visible; }
 .player-backdrop:not(.active) { display: none; }
