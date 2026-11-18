@@ -61,10 +61,13 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
           const expectedLatest = options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
           const missingEpisodes = !options.episode && Number.isInteger(expectedLatest) && expectedLatest > 0 && expectedLatest <= 5000
             ? Array.from({ length: expectedLatest }, (_, i) => i + 1).filter(episode => !availableEpisodes.includes(episode)) : [];
-          const missingNotice = missingEpisodes.length ? `${episodeRangeLabel(missingEpisodes)}压缩包未找到。` : '';
-          accepted.push({ ...resource, category, archivePreparation: { archiveFid: file.fid, episode: archiveEpisode, fileName: file.name, bytes: file.size,
-            availableEpisodes, missingEpisodes, summary: `压缩包：${episodeRangeLabel(availableEpisodes)} · 需解压核对`,
-            requiredMembership: '夸克SVIP', notice: `${missingNotice}本次仅解压第 ${archiveEpisode} 集，核对实际视频后才会入库；临时占用压缩包与视频两份空间。` } });
+          const missingNotice = missingEpisodes.length ? `${episodeRangeLabel(missingEpisodes)}暂未找到。` : '';
+          accepted.push({ ...resource, category, batchEligible: category === 'tv' && !options.episode, archivePreparation: { archiveFid: file.fid, episode: archiveEpisode, fileName: file.name, bytes: file.size,
+            availableEpisodes, missingEpisodes, summary: `已找到${episodeRangeLabel(availableEpisodes)}的资源`,
+            batchEligible: category === 'tv' && !options.episode,
+            requiredMembership: '夸克SVIP', notice: category === 'tv' && !options.episode
+              ? `${missingNotice}可以检查并补齐缺少的剧集。`
+              : `${missingNotice}保存时会确认视频是否可播放，并占用网盘空间。` } });
         }
         if (!details.entries.some(entry => entry.isVideo && !ancillary.test(entry.name))) {
           reasons.push('分享中没有识别到正片视频文件。'); return;
@@ -79,11 +82,12 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
             latestEpisode: options.episode, requestedEpisode: options.episode, selectedFids: [files[0].fid], requiredEpisodes: [options.episode], shareTitle: details.title, complete: true } });
           return;
         }
-        const coverage = resourceCompleteness(details, category, options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title));
+        const target = category === 'tv' ? options.officialLatest || 0 : options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
+        const coverage = resourceCompleteness(details, category, target);
         if (!coverage.available) {
           reasons.push('视频文件未标明可识别的集数，暂时无法确认剧集范围。'); return;
         }
-        accepted.push({ ...resource, category, verification: {
+        accepted.push({ ...resource, category, batchEligible: category === 'tv', verification: {
           summary: category === 'movie' ? '已核对可用正片文件' : `已核对${episodeRangeLabel(coverage.episodes)}，共 ${coverage.available} 集`,
           episodeCount: coverage.available, latestEpisode: coverage.actualLatest,
           selectedFids: category === 'movie' || !coverage.complete ? coverage.selectedFids : undefined,
@@ -108,7 +112,11 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
   }
   if (options.signal.aborted) return { resources: [], message: '' };
   if (needsAuth) return { resources: [], message: '', error: '需要有效的网盘认证才能核对视频文件，请先完成认证。', needsAuth: true };
-  const verified = rows.filter(row => accepted.some(item => item.url === row.url)).map(row => accepted.find(item => item.url === row.url && item.verification) || accepted.find(item => item.url === row.url)!)
+  const verified = rows.filter(row => accepted.some(item => item.url === row.url)).map(row => {
+    const video = accepted.find(item => item.url === row.url && item.verification);
+    const archive = accepted.find(item => item.url === row.url && item.archivePreparation);
+    return video && archive ? { ...video, archivePreparation: archive.archivePreparation } : video || archive!;
+  })
     .sort((a, b) => Number(Boolean(b.verification)) - Number(Boolean(a.verification))
       || (b.verification?.latestEpisode || b.archivePreparation?.episode || 0) - (a.verification?.latestEpisode || a.archivePreparation?.episode || 0)
       || (b.verification?.episodeCount || 0) - (a.verification?.episodeCount || 0) || a.url.localeCompare(b.url));

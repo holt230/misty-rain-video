@@ -10,6 +10,8 @@ import { resourceHeading } from '../../services/resourceTitles';
 import { searchIntent } from '../../services/searchIntent';
 import SkeletonCard from '../common/SkeletonCard.vue';
 import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
+import { archiveBytes, type ArchiveBatchJob, type ArchiveBatchPreview } from '../../services/archiveImport';
+import { episodeRangeLabel } from '../../services/resourceCompleteness';
 import { useDialog } from '../../composables/useDialog';
 
 const props = defineProps<{
@@ -35,6 +37,8 @@ const props = defineProps<{
   searchNeedsAuth?: boolean;
   savedMedia?: MediaItem | null;
   savedSummary?: string;
+  savedBatch?: ArchiveBatchJob;
+  batchPreview?: { resourceId: string; plan: ArchiveBatchPreview } | null;
   officialProgress?: OfficialWorkProgress;
   officialCheckedAt?: string;
   officialNotice?: string;
@@ -49,6 +53,7 @@ const emit = defineEmits<{
   (e: 'search', keyword: string, category: SearchCategory): void;
   (e: 'play-saved'): void;
   (e: 'view-library'): void;
+  (e: 'stop-batch', id: string): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
 }>();
 
@@ -90,7 +95,7 @@ const officialAvailability = computed(() => {
   if (!latest || searchBusy.value) return '';
   if (props.searchError) return '片源查询未完成，暂时无法确认最新一集是否可用。';
   const found = props.quarkResources.some(resource => resource.verification?.requiredEpisodes.includes(latest));
-  if (!found && props.quarkResources.some(resource=>resource.archivePreparation?.episode===latest)) return '已找到第 ' + latest + ' 集压缩包，需解压后核对正片。';
+  if (!found && props.quarkResources.some(resource=>resource.archivePreparation?.episode===latest)) return '已找到第 ' + latest + ' 集资源，保存时会确认是否可播放。';
   return found ? `本次已找到官方最新第 ${latest} 集。` : `本次暂未找到官方最新第 ${latest} 集。`;
 });
 const saveCategory = (resource: ResourceItem): CategoryType => targetCategory.value === 'all' ? resource.category || props.media?.category || props.currentCategory : targetCategory.value;
@@ -103,7 +108,7 @@ const filteredResources = computed(() => {
   const resources = rankedQuarkResources.value.filter(resource => {
     const title = cleanTitle(resource.title);
     if (resultFilter.value === '4k') return resource.is4k || /4k/i.test(title);
-    if (resultFilter.value === 'complete') return resource.verification ? resource.verification.complete === true : /全集|完结|全\s*\d+\s*集/i.test(title);
+    if (resultFilter.value === 'complete') return resource.verification?.complete === true;
     return true;
   });
   if (resultFilter.value !== 'episodes') return resources;
@@ -111,6 +116,21 @@ const filteredResources = computed(() => {
 });
 const visibleResources = computed(() => filteredResources.value.slice(0, visibleCount.value));
 const hasMoreResources = computed(() => visibleResources.value.length < filteredResources.value.length);
+const usesArchiveAction = (resource: ResourceItem) => Boolean(resource.archivePreparation
+  && (!resource.verification || (resource.archivePreparation.batchEligible && resource.verification.complete === false)));
+const resourceAction = (resource: ResourceItem) => {
+  if (props.isSaving && props.savingResourceId === resource.id) return resource.batchEligible || usesArchiveAction(resource)
+    ? props.savingMessage || '正在核对…' : '正在保存到片库…';
+  if (props.failedResourceId === resource.id && props.saveError) return props.saveError.needsSearch ? '重新搜索' : '重新核对';
+  if (resource.batchEligible) {
+    const preview = props.batchPreview?.resourceId === resource.id ? props.batchPreview.plan : null;
+    return preview?.canStart ? '开始补齐' : preview ? '重新检查' : '补齐剧集';
+  }
+  if (resource.archivePreparation && usesArchiveAction(resource)) {
+    return `保存第 ${resource.archivePreparation.episode} 集`;
+  }
+  return replacingSource.value ? '保存并替换片源' : '保存到片库';
+};
 
 watch([() => props.media?.id, () => props.currentCategory, () => props.searchCategory], () => {
   targetCategory.value = props.searchCategory || props.media?.category || props.currentCategory;
@@ -264,7 +284,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
         <template v-if="officialProgress">
           <div class="official-progress-top"><strong>{{ officialProgress.completed ? `官方已完结 · 全 ${officialProgress.latestEpisode} 集` : `官方更新至第 ${officialProgress.latestEpisode} 集` }}</strong><a :href="officialProgress.sourceUrl" target="_blank" rel="noopener noreferrer">{{ officialProgress.platform }}</a></div>
           <p>{{ officialProgress.title }}<span v-if="officialTime"> · 核对于 {{ officialTime }}</span></p>
-          <p v-if="officialAvailability" class="official-availability">{{ officialAvailability }}</p>
+          <p v-if="officialAvailability && !batchPreview" class="official-availability">{{ officialAvailability }}</p>
         </template>
         <p v-else>{{ searchPhase === 'searching' ? '正在查询官方更新进度…' : officialNotice || '官方进度暂未确认。' }}</p>
       </section>
@@ -299,10 +319,11 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 
       <!-- 列表内容 -->
       <div ref="resultsBody" class="dialog-body" :class="{ 'showing-details': detailResource }" :aria-busy="searchBusy" @scroll.passive="handleBodyScroll">
-        <section v-if="savedMedia" class="save-receipt" role="status" aria-label="保存成功">
-          <span class="receipt-icon"><Check aria-hidden="true" /></span>
-          <h2>已保存到片库</h2><strong>{{ savedMedia.title }}</strong><p>{{ savedSummary }}</p>
-          <div class="receipt-actions"><button type="button" class="btn-action btn-transfer" @click="emit('play-saved')"><Play aria-hidden="true" />立即播放</button><button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button></div>
+        <section v-if="savedMedia" class="save-receipt" role="status" :aria-label="savedBatch ? '补集任务' : '保存成功'">
+          <span class="receipt-icon"><LoaderCircle v-if="savedBatch?.status === 'running'" class="search-spinner" aria-hidden="true" /><X v-else-if="savedBatch && savedBatch.status !== 'success'" aria-hidden="true" /><Check v-else aria-hidden="true" /></span>
+          <h2>{{ savedBatch ? savedBatch.status === 'running' ? '正在补集' : savedBatch.status === 'success' ? '已补齐片库' : '补集已暂停' : '已保存到片库' }}</h2><strong>{{ savedMedia.title }}</strong><p>{{ savedSummary }}</p>
+          <p v-if="savedBatch">已完成 {{ savedBatch.completedEpisodes.length }} / {{ savedBatch.total }} 集<span v-if="savedBatch.currentEpisode"> · 当前第 {{ savedBatch.currentEpisode }} 集</span></p>
+          <div class="receipt-actions"><button v-if="savedMedia.quarkFid" type="button" class="btn-action btn-transfer" @click="emit('play-saved')"><Play aria-hidden="true" />立即播放</button><button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button><button v-if="savedBatch?.status === 'running'" type="button" class="btn-action btn-details" @click="emit('stop-batch', savedBatch.id)">停止补集</button></div>
         </section>
         <QuarkResourceDetails v-else-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
@@ -323,7 +344,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 
         <template v-else>
           <div v-if="visibleResources.length > 0" class="resource-rows" :class="{ 'verified-single': soleResult }">
-            <div v-if="soleResult && visibleResources[0]?.verification" class="ready-heading" role="status"><Check aria-hidden="true" /><div><strong>已找到，可以保存到片库</strong><p>实际视频已核对，保存后即可从片库播放。</p></div></div>
+            <div v-if="soleResult && visibleResources[0]?.verification" class="ready-heading" role="status"><Check aria-hidden="true" /><div><strong>{{ visibleResources[0].batchEligible ? '已找到剧集资源' : '已找到，可以保存到片库' }}</strong><p>{{ visibleResources[0].batchEligible ? '继续核对官方进度与片库缺集。' : '实际视频已核对，保存后即可从片库播放。' }}</p></div></div>
             <div
               v-for="res in visibleResources"
               :key="res.id"
@@ -340,7 +361,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往认证设置</button>
                   </div>
                   <div class="row-tags">
-                    <span v-if="res.archivePreparation && !res.verification" class="update-badge">{{ res.archivePreparation.summary || `第 ${res.archivePreparation.episode} 集 · 需解压核对` }}</span>
+                    <span v-if="res.archivePreparation && usesArchiveAction(res)" class="update-badge">{{ res.archivePreparation.summary || `第 ${res.archivePreparation.episode} 集 · 需解压核对` }}</span>
                     <span v-if="res.verification" class="update-badge">{{ res.verification.summary }}</span>
                     <span v-if="res.category" class="tag-meta">{{ categories.find(category => category.value === res.category)?.label }}</span>
                     <span v-if="res.year" class="tag-meta">{{ res.year }}</span>
@@ -349,8 +370,17 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
                     <span v-if="res.datetime" class="tag-meta">{{ res.datetime }}</span>
                   </div>
-                  <p v-if="res.archivePreparation && !res.verification" class="verification-notice">{{ res.archivePreparation.notice }}</p>
+                  <p v-if="res.archivePreparation && usesArchiveAction(res) && batchPreview?.resourceId !== res.id" class="verification-notice">{{ res.archivePreparation.notice }}</p>
                   <p v-if="res.verification?.notice" class="verification-notice">{{ res.verification.notice }}</p>
+                  <div v-if="batchPreview?.resourceId === res.id" class="archive-batch-plan" role="status">
+                    <strong v-if="batchPreview.plan.plannedEpisodes.length">计划补齐{{ episodeRangeLabel(batchPreview.plan.plannedEpisodes) }} · 共 {{ batchPreview.plan.plannedEpisodes.length }} 集</strong>
+                    <strong v-else>片库已有 {{ batchPreview.plan.existingEpisodes.length }} 集</strong>
+                    <span>片库已有 {{ batchPreview.plan.existingEpisodes.length }} 集，已更新至第 {{ batchPreview.plan.officialLatest }} 集。</span>
+                    <span v-if="batchPreview.plan.missingEpisodes.length">暂未找到{{ episodeRangeLabel(batchPreview.plan.missingEpisodes) }}，无法补齐。</span>
+                    <span v-if="batchPreview.plan.plannedEpisodes.length">建议预留约 {{ archiveBytes(batchPreview.plan.recommendedFreeBytes) }} 网盘空间，当前可用 {{ batchPreview.plan.freeBytes == null ? '未确认' : archiveBytes(batchPreview.plan.freeBytes) }}。</span>
+                    <span v-if="batchPreview.plan.plannedEpisodes.length && batchPreview.plan.totalArchiveBytes">补齐后可在片库观看，临时文件会进入回收站。</span>
+                    <span v-if="batchPreview.plan.reason">{{ batchPreview.plan.reason }}</span>
+                  </div>
                 </div>
               </div>
 
@@ -363,7 +393,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                   @click="failedResourceId === res.id && saveError?.needsSearch ? emit('retry-search') : emit('save-to-cards', media, saveCategory(res), res, res.verification?.selectedFids)"
                 >
                   <LoaderCircle v-if="isSaving && savingResourceId === res.id" class="search-spinner" aria-hidden="true" />
-                  {{ isSaving && savingResourceId === res.id ? res.archivePreparation && !res.verification ? savingMessage || '正在云端解压核对…' : '正在保存到片库…' : failedResourceId === res.id && saveError ? saveError.needsSearch ? '重新搜索' : '重新保存' : res.archivePreparation && !res.verification ? `解压第 ${res.archivePreparation.episode} 集` : replacingSource ? '保存并替换片源' : '保存到片库' }}
+                  {{ resourceAction(res) }}
                 </button>
               </div>
             </div>
@@ -450,6 +480,8 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
 .row-title { overflow-wrap: anywhere; color: var(--text-primary); font-size: .94rem; font-weight: 650; line-height: 1.5; }
 .row-tags { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 8px; color: var(--text-tertiary); font-size: .73rem; overflow-wrap: anywhere; }
 .verification-notice { margin-top: 12px; color: var(--text-secondary); font-size: .78rem; line-height: 1.6; }
+.archive-batch-plan { display: grid; gap: 6px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); color: var(--text-secondary); font-size: .75rem; line-height: 1.55; }
+.archive-batch-plan strong { color: var(--text-primary); font-weight: 600; }
 .tag-badge { padding: 1px 6px; border: 1px solid rgb(85 113 158 / .14); border-radius: 5px; color: var(--text-secondary); font-size: .67rem; }
 .update-badge { color: var(--liquid-accent); font-size: .78rem; font-weight: 650; }
 .row-right { display: flex; gap: 8px; flex-shrink: 0; }

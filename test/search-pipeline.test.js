@@ -124,3 +124,28 @@ test('线上部分来源失败且无可用分享时保留官方进度，提供�
  const view=mount({searchError:'片源查询未完成：部分来源无法访问。',officialProgress:{title:'斗破苍穹年番',platform:'腾讯视频',latestEpisode:219,completed:true,sourceUrl:'https://v.qq.com/x/cover/test/latest.html'}},{onRetrySearch:()=>retried++});
  try{await nextTick();assert.match(document.querySelector('.official-availability').textContent,/无法确认/);assert.equal(document.querySelector('.btn-transfer'),null);document.querySelector('.retry-search-button').click();assert.equal(retried,1);}finally{view.app.unmount();}
 });
+
+test('电视剧先展示补集范围和空间，再启动后台任务并提供停止入口',async()=>{
+ const item={...resource('折月亮 (2026)',0),workTitle:'折月亮',category:'tv',year:'2026',batchEligible:true,
+  archivePreparation:{episode:27,batchEligible:true,summary:'已找到第 1～27 集的资源',notice:'可以检查并补齐缺少的剧集。'}};
+ const actions=[];const media={id:'quark:old',quarkFid:'old',title:'折月亮',category:'tv',poster:'',tag:''};
+ const view=mount({searchKeyword:'折月亮',searchCategory:'tv',currentCategory:'tv',media,quarkResources:[item]},
+  {onSaveToCards:()=>actions.push('preview-or-start'),onStopBatch:id=>actions.push(id)});
+ try{
+  await nextTick();assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'补齐剧集');
+  document.querySelector('.btn-transfer').click();assert.deepEqual(actions,['preview-or-start']);
+  view.state.batchPreview={resourceId:'0',plan:{officialLatest:27,existingEpisodes:Array.from({length:9},(_,i)=>i+19),
+   plannedEpisodes:Array.from({length:18},(_,i)=>i+1),missingEpisodes:[],totalArchiveBytes:36.6*1024**3,recommendedFreeBytes:75.4*1024**3,freeBytes:100*1024**3,qualities:['4K HDR'],canStart:true,reason:''}};
+  await nextTick();const plan=document.querySelector('.archive-batch-plan').textContent;
+  assert.match(plan,/已有 9 集/);assert.match(plan,/1～18/);assert.match(plan,/81 GB/);
+  assert.doesNotMatch(plan,/压缩包|解压|GiB|FID/);
+  assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'开始补齐');
+  document.querySelector('.btn-transfer').click();assert.equal(actions.length,2);
+  view.state.savedMedia=media;view.state.savedBatch={id:'job-1',status:'running',completedEpisodes:[1,2],total:18,currentEpisode:3};
+  view.state.savedSummary='正在补充第 3 集';await nextTick();
+  assert.match(document.querySelector('.save-receipt').textContent,/正在补集/);
+  assert.match(document.querySelector('.save-receipt').textContent,/2 \/ 18/);
+  [...document.querySelectorAll('.receipt-actions button')].find(button=>button.textContent.includes('停止补集')).click();
+  assert.equal(actions.at(-1),'job-1');
+ }finally{view.app.unmount();}
+});

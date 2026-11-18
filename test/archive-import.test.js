@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs/promises';
-import { selectArchiveEpisode, requireArchiveCapacity, supportedArchive } from '../server/archivePolicy.js';
+import { selectArchiveEpisode, requireArchiveCapacity, supportedArchive, mergeArchiveMetadata } from '../server/archivePolicy.js';
 import { parseForumResources } from '../server/forumResourceSearch.js';
 import { ArchiveImportService } from '../server/archiveImport.js';
 
@@ -12,6 +12,14 @@ test('archive import requires supported format, valid account capability and eno
  assert.equal(supportedArchive('167.zip'),true);assert.equal(supportedArchive('E167.RAR'),true);assert.equal(supportedArchive('E167.iso'),false);
  for(const cap of [{isAuthenticated:false},{isAuthenticated:true,isSvip:false},{isAuthenticated:true,isSvip:true},{isAuthenticated:true,isSvip:true,freeBytes:200}])assert.throws(()=>requireArchiveCapacity(cap,100));
  assert.doesNotThrow(()=>requireArchiveCapacity({isAuthenticated:true,isSvip:true,freeBytes:300},100));
+});
+test('补充压缩包时保留原片库的来源、封面和自动更新信息',()=>{
+ const original={quarkFid:'old',quarkShareUrl:'https://pan.quark.cn/s/original',quarkPasscode:'1234',quarkSelectionFids:['keep'],poster:'old-poster',catalogId:'old-id'};
+ const item={quarkFid:'old',quarkShareUrl:'https://pan.quark.cn/s/archive',quarkArchiveImported:true,quarkArchiveEpisode:1,poster:''};
+ const merged=mergeArchiveMetadata(item,{poster:'new-poster',catalogId:'new-id'},original);
+ assert.equal(merged.quarkShareUrl,original.quarkShareUrl);assert.equal(merged.quarkPasscode,'1234');
+ assert.deepEqual(merged.quarkSelectionFids,['keep']);assert.equal(merged.poster,'old-poster');assert.equal(merged.catalogId,'old-id');
+ assert.equal(merged.quarkArchiveImported,undefined);assert.equal(merged.quarkArchiveEpisode,undefined);
 });
 test('unpacked files must be actual requested episodes with fresh exact publication, correct year and no conflicting work or extras',()=>{
  assert.equal(selectArchiveEpisode([episode],input,publication).fid,'v167');
@@ -37,7 +45,8 @@ test('archive jobs revalidate source, isolate users, coalesce clicks and only wr
   finalizeArchiveImport:async()=>({item:{id:'quark:new',quarkFid:'new',title:'仙逆',category:'anime'},state:{owner:'one',published:true}}),
   cleanupArchiveStage:async()=>true
  };
- const service=new ArchiveImportService(dir,{gateway,resourceSearch:{search:async()=>({merged_by_type:{quark:[{...publication,url:'https://pan.quark.cn/s/source'}]}})},userContext:()=>({mediaRepository:{save(){writes++;}}})});
+ const original={quarkFid:'new',quarkPasscode:'1234'};
+ const service=new ArchiveImportService(dir,{gateway,resourceSearch:{search:async()=>({merged_by_type:{quark:[{...publication,url:'https://pan.quark.cn/s/source'}]}})},userContext:()=>({mediaRepository:{all:()=>[original],save(item){assert.equal(item.quarkPasscode,'1234');writes++;}}})});
  const args={...input,shareUrl:'https://pan.quark.cn/s/source',archiveFid:'a167'};
  const [first,same]=await Promise.all([service.start(args,user),service.start(args,user)]);
  assert.equal(first.id,same.id);assert.equal(writes,0);
@@ -47,4 +56,5 @@ test('archive jobs revalidate source, isolate users, coalesce clicks and only wr
  const finished=await service.get(first.id,user);assert.equal(finished.status,'success');assert.equal(writes,1);
  await service.start(args,user);assert.equal(preparations,1);assert.equal(writes,1);
  assert.doesNotMatch(JSON.stringify(finished),/stageFid|passcode|archivePassword|savedArchive/);
+ assert.doesNotMatch(await fs.readFile(`${dir}/archive-jobs/${first.id}.json`,'utf8'),/quarkPasscode/);
 });

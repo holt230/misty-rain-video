@@ -4,6 +4,7 @@ import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { assertVerifiedImport } from './verifiedImport.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
+import { searchTitleKey } from './searchTitles.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 
 dns.setDefaultResultOrder('ipv4first');
@@ -686,6 +687,7 @@ export class QuarkGateway {
     passcode = '',
     quarkPasscode = '',
     quarkFid: replaceQuarkFid = '',
+    appendToFid = '',
     quarkSelectionFids,
     quarkRequiredEpisodes,
     quarkVerifiedShareTitle
@@ -729,11 +731,15 @@ export class QuarkGateway {
     }
     const mediaTitle = resolveMediaTitle(title, share.title);
     const replacementFid = String(replaceQuarkFid || '').trim();
+    const appendFid = String(appendToFid || '').trim();
     if (replacementFid.length > 240) {
       throw new QuarkApiError('原影片目录标识无效，无法换源', {
         code: 'INVALID_MEDIA_FID',
         statusCode: 400
       });
+    }
+    if (appendFid.length > 240 || (appendFid && replacementFid)) {
+      throw new QuarkApiError('补集目标不正确', { code: 'INVALID_MEDIA_FID', statusCode: 400 });
     }
     const mutationKeys = [libraryTitleMutationKey(principal, category, mediaTitle)];
     if (replacementFid) mutationKeys.push(libraryFidMutationKey(principal, replacementFid));
@@ -755,8 +761,8 @@ export class QuarkGateway {
       }
       assertVerifiedImport({ expectedTitle: quarkVerifiedShareTitle, shareTitle: share.title, requiredEpisodes: quarkRequiredEpisodes },
         shareItems.filter(item => !ancillaryVideoPattern.test(item.fileName || item.file_name || '')).map(item => item.episodeNumber || extractEpisodeNumber(item.fileName || item.file_name)));
-      const userRoot = await this.#getUserRoot(cookie, principal, true);
-      const categoryFolder = await this.#ensureDriveFolder(userRoot.fid, folderName, cookie);
+      const userRoot = appendFid ? null : await this.#getUserRoot(cookie, principal, true);
+      const categoryFolder = userRoot ? await this.#ensureDriveFolder(userRoot.fid, folderName, cookie) : null;
 
       if (replacementFid) {
         return await this.#replaceLibrarySource({
@@ -773,7 +779,8 @@ export class QuarkGateway {
         });
       }
 
-      const mediaFolder = await this.#ensureDriveFolder(categoryFolder.fid, mediaTitle, cookie);
+      const existingTarget = appendFid ? await this.describeArchiveLibrary({ title: mediaTitle, category, quarkFid: appendFid }, principal) : null;
+      const mediaFolder = existingTarget ? { fid: existingTarget.quarkFid } : await this.#ensureDriveFolder(categoryFolder.fid, mediaTitle, cookie);
       releaseFolder = acquireLibraryMutationLocks(this.libraryMutationLocks, [libraryFidMutationKey(principal, mediaFolder.fid)]);
       const existing = await this.#walkDriveDirectory(mediaFolder.fid, cookie);
       const missing = missingLibraryEpisodes(existing, shareItems, { title: mediaTitle, category });
@@ -925,6 +932,28 @@ export class QuarkGateway {
       freeBytes: Number.isFinite(totalBytes) && Number.isFinite(usedBytes) ? Math.max(0, totalBytes - usedBytes) : undefined };
   }
 
+  /** Resolve an existing movie folder without creating or replacing anything. */
+  async describeArchiveLibrary({ title, category, quarkFid = '' }, user = SYSTEM_USER) {
+    const name = sanitizeFolderName(title);
+    if (!name || !QUARK_LIBRARY_FOLDERS[category] || typeof quarkFid !== 'string' || quarkFid.length > 240) {
+      throw archiveError('影片目录信息不正确', 'INVALID_ARCHIVE_REQUEST', 400);
+    }
+    const library = await this.listLibrary(user);
+    const matches = library.filter(item => item.category === category && searchTitleKey(item.title) === searchTitleKey(name));
+    const target = quarkFid ? matches.find(item => item.quarkFid === quarkFid) : matches.length === 1 ? matches[0] : null;
+    if (quarkFid && !target) throw archiveError('原片库目录已变化或不属于当前账号，请重新搜索。', 'ARCHIVE_TARGET_CHANGED', 409);
+    if (!quarkFid && matches.length > 1) throw archiveError('片库存在多个同名目录，请先选择要补集的影片。', 'ARCHIVE_TARGET_AMBIGUOUS', 409);
+    if (!target) return { quarkFid: '', episodes: [] };
+    const episodes = await this.#walkDriveDirectory(target.quarkFid, this.#requireCookie());
+    const seasons = new Set(episodes.filter(item => item.episodeNumber > 0).map(item => item.seasonNumber || 1));
+    if (seasons.size > 1) throw archiveError('该片库包含多个季度，暂时无法安全确定要补充的集数。', 'ARCHIVE_SEASON_AMBIGUOUS', 409);
+    const requestedSeason = seasonNumber(name), actualSeason = [...seasons][0];
+    if ((requestedSeason && actualSeason && requestedSeason !== actualSeason) || (!requestedSeason && actualSeason > 1)) {
+      throw archiveError('该片库的季度尚未确认，无法安全补集。', 'ARCHIVE_SEASON_AMBIGUOUS', 409);
+    }
+    return { quarkFid: target.quarkFid, episodes: episodes.map(item => ({ episodeNumber: item.episodeNumber, seasonNumber: item.seasonNumber || 0 })) };
+  }
+
   /** Stage one archive in an account-owned system folder. No library record is created here. */
   async prepareArchiveImport({ shareUrl, archiveFid, episode = 0, passcode = '', archivePassword = '', operationId }, user = SYSTEM_USER,
     { state = {}, checkpoint = async () => {}, progress = () => {}, timeoutMs = 180000 } = {}) {
@@ -936,7 +965,7 @@ export class QuarkGateway {
     state.owner = principal.username;
     const persist = async () => checkpoint({ ...state });
     const cookie = this.#requireCookie();
-    progress('checking', '正在检查网盘权限与剩余容量…');
+    progress('checking', '正在检查网盘空间…');
     const capability = await this.getArchiveCapabilities();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
     const tree = await this.#readShareTree(share, cookie);
@@ -958,7 +987,7 @@ export class QuarkGateway {
     state.outputFid = output.fid;
     await persist();
     if (!state.savedArchiveFid) {
-      progress('saving', '正在将所选压缩包存入临时目录…');
+      progress('saving', '正在保存，请稍候…');
       const prior = (await this.#listDriveFolder(stage.fid, this.#requireCookie())).filter(item => item.file_name === archive.file_name && Number(item.size) === Number(archive.size));
       if (prior.length > 1) throw archiveError('临时目录中存在多个同名压缩包，请检查任务记录', 'ARCHIVE_STAGE_AMBIGUOUS', 409);
       state.savedArchiveFid = prior[0]?.fid;
@@ -974,7 +1003,7 @@ export class QuarkGateway {
     if (!episodes.length) {
       if (!state.unarchiveTaskId) {
         if (state.submissionUnconfirmed) throw archiveError('上次解压提交结果未确认，已保留临时目录；请稍后重试检查，不会重复提交。', 'ARCHIVE_SUBMISSION_UNCONFIRMED', 409);
-        progress('extracting', '正在请求网盘云端解压…');
+        progress('extracting', '正在保存，请稍候…');
         state.submissionUnconfirmed = true; await persist();
         const response = await this.#requestJson(createDriveOperationUrl('archive/unarchive'), {
           method: 'POST', cookie: this.#requireCookie(), userAgent: QUARK_DESKTOP_USER_AGENT,
@@ -986,7 +1015,7 @@ export class QuarkGateway {
         }
         state.unarchiveTaskId = response.data.task_id; state.submissionUnconfirmed = false; await persist();
       }
-      progress('extracting', '云端正在解压，视频不会下载到应用服务器…');
+      progress('extracting', '正在保存，请稍候…');
       const deadline = Date.now() + timeoutMs;
       let finished = false;
       for (let retry = 0; Date.now() < deadline; retry++) {
@@ -1001,7 +1030,7 @@ export class QuarkGateway {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       if (!finished) throw archiveError('云端解压仍在进行，任务和临时目录已保留，可稍后继续检查。', 'ARCHIVE_TASK_PENDING', 409);
-      progress('verifying', '解压完成，正在读取实际视频文件…');
+      progress('verifying', '正在检查保存的剧集…');
       episodes = await this.#walkDriveDirectory(output.fid, this.#requireCookie());
     }
     state.prepared = true; await persist();
@@ -1033,9 +1062,14 @@ export class QuarkGateway {
     const releaseTitle = acquireLibraryMutationLocks(this.libraryMutationLocks, [libraryTitleMutationKey(principal, input.category, mediaTitle)]);
     let releaseFolder;
     try {
-      progress('publishing', '视频和集数已核对，正在加入片库…');
-      const category = await this.#ensureDriveFolder(root.fid, folderName, this.#requireCookie());
-      const target = await this.#ensureDriveFolder(category.fid, mediaTitle, this.#requireCookie());
+      progress('publishing', '正在加入片库…');
+      const existingTarget = await this.describeArchiveLibrary({ title: mediaTitle, category: input.category,
+        quarkFid: input.quarkFid || state.targetFid || '' }, principal);
+      let target = existingTarget.quarkFid ? { fid: existingTarget.quarkFid } : null;
+      if (!target) {
+        const category = await this.#ensureDriveFolder(root.fid, folderName, this.#requireCookie());
+        target = await this.#ensureDriveFolder(category.fid, mediaTitle, this.#requireCookie());
+      }
       if (state.targetFid && state.targetFid !== target.fid) throw archiveError('目标片库目录已变化，任务已停止。', 'ARCHIVE_TARGET_CHANGED', 409);
       state.targetFid = target.fid;
       releaseFolder = acquireLibraryMutationLocks(this.libraryMutationLocks, [libraryFidMutationKey(principal, target.fid)]);

@@ -121,6 +121,20 @@ test('旧目录继续递归读取，只补缺失集；同集不同画质不重�
   assert.equal(f.deletions.length, 0);
 });
 
+test('已核对的直接视频可补入指定旧片库目录，不替换或移动原有剧集', async t => {
+  const f = fakeDrive(t);
+  f.drive.set('legacy-series', folder('legacy-series', '测试剧', 'category'));
+  f.drive.set('old-episode', video('old-episode', '第19集.mp4', 'legacy-series', 200));
+  const imported = await f.gateway.importShare({ ...f.input, appendToFid: 'legacy-series',
+    quarkSelectionFids: ['ep1'], quarkRequiredEpisodes: [1], quarkVerifiedShareTitle: '测试剧' }, user);
+  assert.equal(imported.item.quarkFid, 'legacy-series'); assert.equal(imported.transferredCount, 1);
+  assert.equal(f.drive.get('old-episode').pdir_fid, 'legacy-series');
+  assert.deepEqual(f.saves, ['ep1']); assert.deepEqual(f.deletions, []);
+  await assert.rejects(f.gateway.importShare({ ...f.input, appendToFid: 'category',
+    quarkSelectionFids: ['ep2'], quarkRequiredEpisodes: [2], quarkVerifiedShareTitle: '测试剧' }, user), { code: 'ARCHIVE_TARGET_CHANGED' });
+  assert.deepEqual(f.saves, ['ep1']);
+});
+
 test('只有第一集的新剧也不会顺带转存未编号的介绍视频；电影保留原片名', async t => {
   const f = fakeDrive(t);
   f.share.clear();
@@ -317,6 +331,9 @@ test('分享者封禁只拒绝该分享，不误判当前账号认证，也不�
 test('单集ZIP解压后核对再入库，失败不写片库，重试不重复解压或复制；临时目录按账号隔离', async t=>{
  const f=fakeDrive(t);f.share.clear();
  f.share.set('a167',video('a167','167.zip','0',100));
+ f.drive.set('anime-category',folder('anime-category','动漫','user'));
+ f.drive.set('existing-series',folder('existing-series','仙逆','anime-category'));
+ f.drive.set('old-episode',video('old-episode','165.mkv','existing-series',200));
  f.gateway.getArchiveCapabilities=async()=>({isAuthenticated:true,isSvip:true,freeBytes:100000});
  const base=globalThis.fetch;let extracts=0,moves=0;
  t.mock.method(globalThis,'fetch',async(url,init)=>{
@@ -334,10 +351,12 @@ test('单集ZIP解压后核对再入库，失败不写片库，重试不重复�
  let state={};const options={state,checkpoint:async value=>{state=value;}};
  const prepared=await f.gateway.prepareArchiveImport({shareUrl:f.input.quarkShareUrl,archiveFid:'a167',episode:167,operationId:'test-archive-167'},user,options);
  assert.equal(prepared.episodes[0].episodeNumber,167);assert.equal(extracts,1);
- const result=await f.gateway.finalizeArchiveImport(prepared,{title:'仙逆',category:'anime',episode:167,year:'2023'},{work_title:'仙逆',category:'anime',year:'2023'},user,{checkpoint:async value=>state=value});
- assert.equal(result.item.title,'仙逆');assert.equal(moves,1);
+ const result=await f.gateway.finalizeArchiveImport(prepared,{title:'仙逆',category:'anime',episode:167,year:'2023',quarkFid:'existing-series'},{work_title:'仙逆',category:'anime',year:'2023'},user,{checkpoint:async value=>state=value});
+ assert.equal(result.item.title,'仙逆');assert.equal(result.item.quarkFid,'existing-series');assert.equal(moves,1);
+ assert.equal(f.drive.get('old-episode').pdir_fid,'existing-series');
+ await assert.rejects(f.gateway.describeArchiveLibrary({title:'仙逆',category:'anime',quarkFid:'category'},user),{code:'ARCHIVE_TARGET_CHANGED'});
  const repeat=await f.gateway.prepareArchiveImport({shareUrl:f.input.quarkShareUrl,archiveFid:'a167',episode:167,operationId:'test-archive-167'},user,{state,checkpoint:async value=>state=value});
- const same=await f.gateway.finalizeArchiveImport(repeat,{title:'仙逆',category:'anime',episode:167,year:'2023'},{work_title:'仙逆',category:'anime',year:'2023'},user,{checkpoint:async value=>state=value});
+ const same=await f.gateway.finalizeArchiveImport(repeat,{title:'仙逆',category:'anime',episode:167,year:'2023',quarkFid:'existing-series'},{work_title:'仙逆',category:'anime',year:'2023'},user,{checkpoint:async value=>state=value});
  assert.equal(same.item.quarkFid,result.item.quarkFid);assert.equal(extracts,1);assert.equal(moves,1);
  await assert.rejects(f.gateway.finalizeArchiveImport(prepared,{title:'仙逆',category:'anime',episode:167},{work_title:'仙逆',category:'anime'}, {username:'other',folder:'other'}),{code:'ARCHIVE_JOB_FORBIDDEN'});
 });
