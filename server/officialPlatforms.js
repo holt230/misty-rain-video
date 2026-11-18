@@ -1,4 +1,4 @@
-import { parse } from 'parse5';
+import { scriptData } from './officialCatalogData.js';
 import { isExactWorkTitle } from './searchTitles.js';
 
 const clean = value => String(value || '').replace(/<[^>]*>/g, '').normalize('NFKC').trim().slice(0, 160);
@@ -61,23 +61,12 @@ function matchesWork(candidate, keyword, title, category) {
 }
 
 export function parseYoukuProgress(html, candidate, keyword) {
-  let data;
-  // This is JSON from the official SSR document; do not execute page scripts.
-  const doc = parse(html);
-  const walk = node => {
-    if (data) return;
-    if (node.tagName === 'script') {
-      const text = (node.childNodes || []).map(child => child.value || '').join('');
-      const match = text.match(/^\s*window\.__INITIAL_DATA__\s*=\s*([\s\S]+?)\s*;?\s*$/);
-      if (match) { try { data = JSON.parse(match[1]); } catch { throw unavailable(); } }
-    }
-    for (const child of node.childNodes || []) walk(child);
-  };
-  walk(doc);
+  const data = scriptData(html, '__INITIAL_DATA__');
   const info = data?.pageMap?.extra;
   const category = kindOf(info?.showCategory), title = clean(info?.showName), year = String(info?.showReleaseTime || '').match(/^(?:19|20)\d{2}/)?.[0] || '';
   if (!info || !matchesWork(candidate, keyword, title, category, year) || !/^[a-z0-9]{10,40}$/i.test(info.showId || '')) throw unavailable();
-  const requestedId = candidate.url.match(/id_([^/]+)\.html$/)?.[1];
+  if (candidate.albumId && info.showId !== candidate.albumId) throw unavailable();
+  const requestedId = candidate.albumId ? info.videoId : candidate.url.match(/id_([^/]+)\.html$/)?.[1];
   if (info.videoId !== requestedId || info.videoType !== '正片') throw unavailable();
   const latest = episodeNumber(info.episodeLast);
   if (!latest) throw unavailable();

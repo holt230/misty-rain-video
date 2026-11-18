@@ -31,6 +31,10 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
       continue;
     }
     checked.add(resource.url);
+    if (resource.archivePreparation && !resource.verification) {
+      lastSourceError = '已找到压缩包，可在结果中点击解压按钮，核对实际视频后入库。';
+      continue;
+    }
     if (resource.verification) {
       if (resource.verification.complete === false && item.category !== 'anime') {
         lastSourceError = resource.verification.notice || '只找到部分剧集，可查看实际集数后手动保存。';

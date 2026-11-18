@@ -129,3 +129,18 @@ test('同批次慢平台触发总期限也保留已经核对成功的平台',asy
  const result=await service.lookup('斗破苍穹');
  assert.equal(result.status,'confirmed');assert.equal(result.works.length,1);assert.equal(result.works[0].latestEpisode,219);
 });
+
+test('known homepage platform IDs remain usable when Tencent discovery fails', async () => {
+  const known = { id: 'iqiyi', providerId: String(fixture.iqiyiAnimeInfo.data.albumId), name: '爱奇艺',
+    title: '大主宰年番', category: 'anime', year: '2023', url: candidate('大主宰年番').url };
+  const service = new OfficialProgressService({ fetchImpl: async input => {
+    const url = new URL(input);
+    if (url.hostname === 'pbaccess.video.qq.com') throw Error('Tencent unavailable');
+    if (url.pathname.includes('/baseinfo/')) return Response.json(fixture.iqiyiAnimeInfo);
+    if (url.pathname.endsWith('/avlistinfo')) return Response.json(fixture.iqiyiAnimeList);
+    assert.fail('Unexpected request');
+  } });
+  const result = await service.lookup('大主宰年番', { category: 'anime', known: [known] });
+  assert.equal(result.status, 'confirmed'); assert.equal(result.works[0].platform, '爱奇艺');
+  assert.equal(result.works[0].latestEpisode, 99);
+});

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowRight, ChevronLeft, ChevronRight, Play, RefreshCw } from '@lucide/vue';
-import type { CatalogBrowseState, CatalogChannel, CatalogFeed, CatalogItem } from '../../types/catalog';
+import type { CatalogBrowseState, CatalogChannel, CatalogFeed, CatalogItem, CatalogPlatform } from '../../types/catalog';
 import type { MediaItem, PlaybackHistoryEntry } from '../../types/media';
 import { catalogChannels } from '../../composables/useCatalog';
 import { findCatalogMedia } from '../../services/catalogMatching';
@@ -11,14 +11,19 @@ import MediaPoster from '../common/MediaPoster.vue';
 const props = defineProps<{
   feeds: Partial<Record<CatalogChannel, CatalogFeed>>; loading: CatalogChannel[];
   browse: Partial<Record<CatalogChannel, CatalogBrowseState>>;
-  library: MediaItem[]; history: PlaybackHistoryEntry[]; active?: boolean;
+  library: MediaItem[]; history: PlaybackHistoryEntry[]; active?: boolean; platform?: CatalogPlatform | 'all';
 }>();
 const emit = defineEmits<{
+  (event: 'platform', platform: CatalogPlatform | 'all'): void;
   (event: 'select', item: CatalogItem): void; (event: 'play', item: MediaItem): void;
   (event: 'continue', entry: PlaybackHistoryEntry): void; (event: 'search'): void;
   (event: 'history'): void; (event: 'refresh'): void;
   (event: 'load-more', channel: CatalogChannel): void; (event: 'refresh-channel', channel: CatalogChannel): void;
 }>();
+const platforms: { id: CatalogPlatform | 'all'; label: string; compact: string }[] = [
+  { id: 'all', label: '全部平台', compact: '全部' }, { id: 'qq', label: '腾讯视频', compact: '腾讯' }, { id: 'mango', label: '芒果TV', compact: '芒果' },
+  { id: 'youku', label: '优酷', compact: '优酷' }, { id: 'iqiyi', label: '爱奇艺', compact: '爱奇艺' }
+];
 const selected = ref<CatalogChannel | 'all'>('all');
 const channelNav = ref<HTMLElement | null>(null);
 const carouselRoot = ref<HTMLElement | null>(null);
@@ -38,6 +43,10 @@ const channelDate = (channel: CatalogChannel) => {
   const value = props.feeds[channel]?.updatedAt;
   return value ? new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }).format(new Date(value)) : '';
 };
+watch(() => props.platform, () => {
+  channelScroll.clear(); carousel.select(0);
+}, { flush: 'post' });
+const platformNav = ref<HTMLElement | null>(null);
 const channelScroll = new Map<CatalogChannel | 'all', number>();
 let navigation = 0;
 async function selectChannel(channel: CatalogChannel | 'all') {
@@ -62,9 +71,10 @@ onBeforeUnmount(() => { navigation++; });
     <nav ref="channelNav" class="channel-nav" aria-label="影视频道">
       <button v-for="tab in tabs" :key="tab.id" type="button" :class="{ active: selected === tab.id }" :aria-pressed="selected === tab.id" @click="selectChannel(tab.id)">{{ tab.label }}</button>
     </nav>
+    <nav ref="platformNav" class="platform-nav" aria-label="播出平台"><button v-for="platform in platforms" :key="platform.id" type="button" :aria-label="platform.label" :aria-pressed="(props.platform || 'all') === platform.id" :class="{ active: (props.platform || 'all') === platform.id }" @click="emit('platform', platform.id)"><span class="platform-full">{{ platform.label }}</span><span class="platform-compact" aria-hidden="true">{{ platform.compact }}</span></button></nav>
     <div ref="carouselRoot" class="feature-carousel" role="region" aria-roledescription="轮播图" aria-label="首页精选推荐" @pointerenter="carousel.enter" @pointerleave="carousel.leave" @focusin="carousel.focus" @focusout="carousel.blur" @pointerdown="carousel.press" @pointerup="carousel.release" @pointercancel="carousel.release">
     <section v-if="hero" class="feature-film" aria-label="焦点影片" :aria-live="autoplayRunning ? 'off' : 'polite'">
-      <Transition name="hero-art"><MediaPoster :key="hero.id" :src="hero.poster" alt="" class="feature-art" fetchpriority="high" /></Transition>
+      <Transition name="hero-art"><MediaPoster :key="hero.id" :src="hero.backdrop || hero.poster" alt="" class="feature-art" fetchpriority="high" /></Transition>
       <div class="feature-shade"></div>
       <Transition name="hero-copy" mode="out-in"><div :key="hero.id" class="feature-copy">
         <span class="eyebrow">今晚 · 看点好故事</span>
@@ -72,7 +82,7 @@ onBeforeUnmount(() => { navigation++; });
         <p>{{ hero.subtitle || hero.status || '在这里，发现下一部喜欢的作品' }}</p>
         <div class="feature-actions">
           <button class="cinema-button primary" type="button" @click="emit('select', hero)"><Play fill="currentColor" />查看影片</button>
-          <span v-if="hero.rating" class="feature-rating">{{ hero.rating.toFixed(1) }}<small>豆瓣评分</small></span>
+          <span v-if="hero.rating" class="feature-rating">{{ hero.rating.toFixed(1) }}<small>{{ hero.ratingSource || '豆瓣' }}评分</small></span>
         </div>
       </div></Transition>
       <div v-if="heroes.length > 1" class="feature-controls">
@@ -107,13 +117,14 @@ onBeforeUnmount(() => { navigation++; });
       <div class="continue-rail"><button v-for="item in updates" :key="item.id" type="button" class="resume-card" @click="emit('play', item)"><MediaPoster :src="item.poster" alt="" loading="lazy" /><span><strong>{{ item.title }}</strong><small>发现 {{ item.newEpisodeCount }} 集新内容 · 可在更多中补集</small></span><Play /></button></div>
     </section>
     <section v-for="section in sections" :key="section.id" class="content-section">
-      <div class="section-heading"><div><h2>{{ section.title }}</h2><p>{{ section.subtitle }}</p></div><span v-if="feeds[section.id]?.items.length" class="source-caption">豆瓣 · 同步于 {{ channelDate(section.id) }}</span></div>
-      <p v-if="feeds[section.id]?.message" class="feed-notice" role="status">{{ feeds[section.id]?.message }}</p>
+      <div class="section-heading"><div><h2>{{ section.title }}</h2><p>{{ section.subtitle }}</p></div><span v-if="feeds[section.id]?.items.length" class="source-caption">{{ feeds[section.id]?.sourceName || '影片目录' }} · 更新于 {{ channelDate(section.id) }}</span></div>
+      <div v-if="feeds[section.id]?.sources?.length" class="platform-health"><span v-for="source in feeds[section.id]!.sources" :key="source.id" :class="{ outdated: source.status !== 'success' }" :title="source.updatedAt ? '获取于 ' + new Date(source.updatedAt).toLocaleString('zh-CN') : '暂未获取成功'">{{ source.name }}{{ source.status !== 'success' ? ' · 暂未更新' : '' }}</span></div>
+      <p v-if="feeds[section.id]?.message && channelItems(section.id).length" class="feed-notice" role="status">{{ feeds[section.id]?.message }}</p>
       <div v-if="channelItems(section.id).length" class="catalog-grid">
         <CatalogCard v-for="item in channelItems(section.id)" :key="item.id" :item="item" :in-library="hasMedia(item)" @select="emit('select', $event)" />
       </div>
       <div v-else-if="loading.includes(section.id)" class="catalog-grid" aria-label="正在加载影片"><div v-for="n in 6" :key="n" class="poster-skeleton skeleton-surface"></div></div>
-      <div v-else class="catalog-empty"><p>暂时没有获取到这个频道的内容</p><button type="button" class="cinema-button secondary" :disabled="loading.length > 0" @click="emit('refresh')"><RefreshCw />重新加载</button><button type="button" class="text-link" @click="emit('search')">搜索想看的影片<ArrowRight /></button></div>
+      <div v-else class="catalog-empty"><p>{{ feeds[section.id]?.message || '暂时没有获取到这个频道的内容' }}</p><button type="button" class="cinema-button secondary" :disabled="loading.length > 0" @click="emit('refresh')"><RefreshCw />重新加载</button><button type="button" class="text-link" @click="emit('search')">搜索想看的影片<ArrowRight /></button></div>
       <button v-if="selected === 'all' && feeds[section.id]?.items.length" type="button" class="more-films" @click="selectChannel(section.id)">更多{{ section.title }}<ArrowRight /></button>
       <div v-if="selected !== 'all' && channelItems(section.id).length" class="catalog-page-footer">
         <div v-if="browse[section.id]?.needsRefresh" class="catalog-update-note" role="status"><span>目录已有新内容，当前列表已保留。</span><button type="button" class="text-link" :disabled="loading.includes(section.id)" @click="refreshChannel(section.id)"><RefreshCw />更新此频道</button></div>
@@ -126,10 +137,19 @@ onBeforeUnmount(() => { navigation++; });
         <small>已展示 {{ channelItems(section.id).length }} 部影片</small>
       </div>
     </section>
-    <p class="catalog-footnote">影视资料来自豆瓣 · 片源将在播放前查找与验证</p>
+    <p class="catalog-footnote">片单来自播出平台 · 豆瓣补充影片资料与短评 · 播放前核对实际片源</p>
   </main>
 </template>
 <style scoped>
+.platform-nav { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; margin-top: 16px; scrollbar-width: none; }
+.platform-nav::-webkit-scrollbar { display: none; }
+.platform-compact { display: none; }
+.platform-nav button { flex: 0 0 auto; min-height: 44px; padding: 10px 17px; border: 1px solid var(--divider); border-radius: 999px; background: var(--surface-1); color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: background 160ms, color 160ms; }
+.platform-nav button.active { color: var(--text-primary); background: var(--liquid-accent-subtle); border-color: rgb(var(--accent-rgb) / .4); }
+.platform-nav button:focus-visible { outline: 2px solid var(--liquid-accent); outline-offset: 2px; }
+.platform-health { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: -4px 0 16px; font-size: 10px; color: var(--text-tertiary); }
+.platform-health .outdated { color: var(--accent-amber); }
+@media (prefers-reduced-motion: reduce) { .platform-nav button { transition: none; } }
 .channel-nav { position: sticky; z-index: 25; top: calc(76px + var(--safe-area-top)); border-bottom: 1px solid var(--divider); }
 .feature-carousel { margin-top: 24px; }
 .catalog-page-footer { margin-top: 28px; text-align: center; }
@@ -139,6 +159,12 @@ onBeforeUnmount(() => { navigation++; });
 .catalog-update-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; text-align: left; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); background: var(--surface-1); color: var(--text-secondary); font-size: 12px; }
 @media (max-width: 767px) {
   .channel-nav { top: calc(75px + var(--safe-area-top)); }
-  .feature-carousel { margin-top: 20px; }
+  .platform-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; margin-top: 6px; padding: 0; overflow: visible; border-radius: 0; background: transparent; }
+  .platform-nav button { min-width: 0; min-height: 36px; padding: 7px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--text-tertiary); font-size: 12px; line-height: 20px; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+  .platform-nav button.active { background: transparent; color: var(--liquid-accent); box-shadow: none; font-weight: 600; }
+  .platform-nav button:focus-visible { outline-offset: 0; }
+  .platform-full { display: none; }
+  .platform-compact { display: inline; }
+  .feature-carousel { margin-top: 10px; }
 }
 </style>

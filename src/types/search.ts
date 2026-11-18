@@ -37,6 +37,7 @@ export interface ResourceItem {
   latestEpisode?: number;
   year?: string;
   sourceUrl?: string;
+  archivePreparation?: { archiveFid: string; episode: number; fileName: string; bytes: number; requiredMembership: string; notice: string; summary?: string; availableEpisodes?: number[]; missingEpisodes?: number[] };
   verification?: {
     summary: string;
     episodeCount: number;

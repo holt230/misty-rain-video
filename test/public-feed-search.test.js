@@ -34,9 +34,9 @@ test('网页查询超时和验证页明确失败，不当作空结果',async()=>
  await assert.rejects(new PublicFeedResourceSearch({fetchImpl:async()=>new Response('<html>challenge</html>')}).search('斗破苍穹'),{code:'RESOURCE_SEARCH_INVALID_RESPONSE'});
 });
 test('原索引只给非视频分享时，同轮公开网页的匹配分享仍交给真实文件核对',async()=>{
- const search=new ResourceSearchService({channels:[],catalogSearch:{search:async()=>({total:1,merged_by_type:{quark:[{url:'https://pan.quark.cn/s/nonvideo',note:'斗破苍穹年番'}]}})},publicFeedSearch:new PublicFeedResourceSearch({fetchImpl:async()=>Response.json(fixture)})});
+ const search=new ResourceSearchService({forumSearch:{search:async()=>({total:0,merged_by_type:{quark:[]}})},channels:[],catalogSearch:{search:async()=>({total:1,merged_by_type:{quark:[{url:'https://pan.quark.cn/s/nonvideo',note:'斗破苍穹年番'}]}})},publicFeedSearch:new PublicFeedResourceSearch({fetchImpl:async()=>Response.json(fixture)})});
  const result=await search.search('斗破苍穹',{category:'anime'});
  assert.equal(result.total,2);assert.equal(result.partial,false);
- assert.deepEqual(result.sources.map(({name,status,count})=>({name,status,count})),[{name:'erxiaopan',status:'success',count:1},{name:'public_guoman4K',status:'success',count:1}]);
+ assert.deepEqual(result.sources.map(({name,status,count})=>({name,status,count})),[{name:'erxiaopan',status:'success',count:1},{name:'public_guoman4K',status:'success',count:1},{name:'quark4k',status:'success',count:0}]);
  assert.equal(result.merged_by_type.quark[1].url,'https://pan.quark.cn/s/7162c13a74d7');
 });

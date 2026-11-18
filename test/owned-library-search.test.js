@@ -30,13 +30,13 @@ test('已保存的斗破苍穹第219集按片名找到，搜索不再用外部�
  }finally{view.app.unmount();}
 });
 test('分类不同不误用已有片库，真实无匹配时才进入外部查询',async()=>{
- const view=mount();try{await input('斗破苍穹');const select=document.querySelector('select');select.value='tv';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await nextTick();
+ const view=mount();try{await input('斗破苍穹');document.querySelector('[data-category=tv]').click();await nextTick();
  assert.equal(document.querySelector('.owned-search-results'),null);submit();assert.deepEqual(view.actions.search,[['斗破苍穹','tv']]);
  }finally{view.app.unmount();}
 });
 test('直接分享添加需明确分类，不把全部类型下的动漫静默存进电视剧',async()=>{
  const view=mount();try{await input('https://pan.quark.cn/s/realshare');assert.equal(document.querySelector('.search-submit').disabled,true);submit();assert.deepEqual(view.actions.save,[]);
- const select=document.querySelector('select');select.value='anime';select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await nextTick();submit();assert.equal(view.actions.save[0][0].category,'anime');assert.equal(view.actions.save[0][0].quarkShareUrl,'https://pan.quark.cn/s/realshare');
+ document.querySelector('[data-category=anime]').click();await nextTick();submit();assert.equal(view.actions.save[0][0].category,'anime');assert.equal(view.actions.save[0][0].quarkShareUrl,'https://pan.quark.cn/s/realshare');
  }finally{view.app.unmount();}
 });
 test('指定219集不能被上一集或第一集替代，缺集和跨季歧义有明确错误',()=>{

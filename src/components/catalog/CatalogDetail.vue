@@ -9,7 +9,7 @@ import CatalogPersonAvatar from './CatalogPersonAvatar.vue';
 import CatalogPersonDetail from './CatalogPersonDetail.vue';
 import CatalogComments from './CatalogComments.vue';
 const props = defineProps<{ item: CatalogItem; inLibrary: boolean; unversionedLibrary?: boolean }>();
-const emit = defineEmits<{ (event: 'close'): void; (event: 'play'): void; (event: 'sources'): void }>();
+const emit = defineEmits<{ (event: 'close'): void; (event: 'play'): void; (event: 'sources'): void; (event: 'resolved', item: CatalogItem): void }>();
 const root = ref<HTMLElement | null>(null);
 const selectedPerson = ref<CatalogCredit | null>(null);
 const expandedSummary = ref(false);
@@ -55,9 +55,14 @@ const onTouchEnd = (e: TouchEvent) => {
   }
 };
 const { data: details, loading, error, refresh } = useCatalogDetails<CatalogWorkDetails>(
-  () => '/api/catalog/works/' + props.item.catalogId.replace(/^douban:/, '') + '?category=' + props.item.category,
+  () => '/api/catalog/works/' + encodeURIComponent(props.item.catalogId.replace(/^douban:/, '')) + '?category=' + props.item.category,
   value => ({ ...value, directors: value.directors.map(catalogAvatar), actors: value.actors.map(catalogAvatar) })
 );
+watch(details, value => {
+  if (value?.catalogId === props.item.catalogId) emit('resolved', { ...props.item, year: value.year || props.item.year,
+    rating: value.rating || props.item.rating, ratingSource: value.ratingSource || props.item.ratingSource,
+    catalogAliases: [...new Set([...(props.item.catalogAliases || []), ...(value.catalogAliases || [])])] });
+});
 watch([expandedSummary, () => details.value?.summary], async () => { await nextTick(); measureSummary(); });
 const people = computed(() => {
   const merged = new Map<string, CatalogCredit>();
@@ -93,13 +98,13 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
     <div class="detail-window">
     <header class="screen-header"><button type="button" class="icon-control detail-back" aria-label="返回浏览" @click="emit('close')"><ArrowLeft /></button><span>影片详情</span><button type="button" class="icon-control detail-close" aria-label="关闭影片详情" @click="emit('close')"><X /></button></header>
     <div class="detail-stage">
-      <MediaPoster :src="item.poster" alt="" class="detail-backdrop" />
+      <MediaPoster :src="item.backdrop || item.poster" alt="" class="detail-backdrop" />
       <div class="detail-stage-shade"></div>
-      <div class="detail-overview"><MediaPoster :src="item.poster" :alt="item.title + '海报'" class="detail-poster" /><div><span class="eyebrow">{{ item.year || '发现好故事' }}</span><h1 id="catalog-detail-title">{{ item.title }}</h1><p>{{ item.status || '影片资料' }}</p><span v-if="item.rating" class="detail-score">{{ item.rating.toFixed(1) }}<small>豆瓣评分</small></span></div></div>
+      <div class="detail-overview"><MediaPoster :src="item.poster" :alt="item.title + '海报'" class="detail-poster" /><div><span class="eyebrow">{{ item.year || '发现好故事' }}</span><h1 id="catalog-detail-title">{{ item.title }}</h1><p>{{ item.status || '影片资料' }}</p><span v-if="item.rating" class="detail-score">{{ item.rating.toFixed(1) }}<small>{{ item.ratingSource || '豆瓣' }}评分</small></span></div></div>
     </div>
     <div class="detail-body">
       <button type="button" class="cinema-button primary play-feature" @click="emit('play')"><Play fill="currentColor" />{{ inLibrary ? '立即播放 / 续播' : unversionedLibrary ? '播放片库中的同名影片' : '找源并播放' }}</button>
-      <p class="detail-play-note">{{ inLibrary ? '从你的个人片库播放，自动恢复观看进度' : unversionedLibrary ? '片库已有同名影片，旧记录未标注年份；点击播放已有版本。' : '自动查找匹配资源，验证后加入个人片库并播放' }}</p>
+      <p class="detail-play-note">{{ inLibrary ? '从你的个人片库播放，自动恢复观看进度' : unversionedLibrary ? item.year ? '片库已有同名影片，旧记录未标注年份；点击播放已有版本。' : '当前推荐尚未确认年份；点击播放片库中已有的同名版本。' : '自动查找匹配资源，验证后加入个人片库并播放' }}</p>
       <dl v-if="facts.length" class="detail-facts"><div v-for="field in facts" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div></dl>
       <p v-else class="detail-brief">{{ item.subtitle || '发现下一部喜欢的作品' }}</p>
       <button type="button" class="cinema-button secondary" @click="emit('sources')"><Search />自己选择片源</button>
@@ -127,7 +132,7 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
       <p v-else-if="!loading" class="detail-brief">资料源暂未提供演职人员资料。</p>
       <CatalogComments :item="item" />
       <p v-if="item.status" class="detail-provenance">来源收录状态：{{ item.status }}，可播放集数以实际片源为准。</p>
-      <p class="detail-provenance">资料与短评来源：豆瓣</p>
+      <p class="detail-provenance">影片资料：{{ details?.sourceName || item.sourceName }} · 短评：豆瓣</p>
     </div>
     </div>
   </section>

@@ -8,7 +8,7 @@ const post = (heading, link, id = 1) => `<div class="tgme_widget_message" data-p
 const page = (...posts) => `<main class="tgme_channel_history">${posts.join('')}</main>`;
 const link = id => `https://pan.quark.cn/s/${id}`;
 const empty = () => ({ total: 0, merged_by_type: { quark: [] } });
-const createService=options=>new ResourceSearchService({publicFeedSearch:{search:async()=>empty()},...options});
+const createService=options=>new ResourceSearchService({forumSearch:{search:async()=>empty()},publicFeedSearch:{search:async()=>empty()},...options});
 
 test('公开消息只保留标题与本条分享，最新同链接去重，EP/SxxExx/话数均识别', () => {
   const rows = parseChannelResults(page(
@@ -83,13 +83,13 @@ test('默认不直连t.me，公开网页索引独立查询且直连频道需显�
  const service=createService({channels:[],catalogSearch:{search:async()=>empty()},channelSearch:{search:async()=>{channels++;throw new Error('should not run');}}});
  const result=await service.search('斗破苍穹');
  assert.equal(channels,0);assert.equal(result.partial,false);
- assert.deepEqual(result.sources.map(source=>source.name),['erxiaopan','public_guoman4K']);
+ assert.deepEqual(result.sources.map(source=>source.name),['erxiaopan','public_guoman4K','quark4k']);
 });
 
 test('显式频道失败时返回稳定来源诊断，不把密钥和原始异常传给客户端',async t=>{
  t.mock.method(console,'warn',()=>{});
  const service=createService({channels:['guoman4K'],catalogSearch:{search:async()=>({total:1,merged_by_type:{quark:[{url:link('current'),note:'斗破苍穹年番'}]}})},channelSearch:{search:async()=>{throw Object.assign(new Error('http://user:private@proxy.invalid'),{code:'ECONNRESET'});}}});
  const result=await service.search('斗破苍穹');assert.equal(result.partial,true);
- assert.deepEqual(result.sources.map(({name,status,code})=>({name,status,code})),[{name:'erxiaopan',status:'success',code:undefined},{name:'public_guoman4K',status:'success',code:undefined},{name:'guoman4K',status:'failed',code:'RESOURCE_SEARCH_UNAVAILABLE'}]);
+ assert.deepEqual(result.sources.map(({name,status,code})=>({name,status,code})),[{name:'erxiaopan',status:'success',code:undefined},{name:'public_guoman4K',status:'success',code:undefined},{name:'quark4k',status:'success',code:undefined},{name:'guoman4K',status:'failed',code:'RESOURCE_SEARCH_UNAVAILABLE'}]);
  assert.doesNotMatch(JSON.stringify(result),/private|proxy.invalid/);
 });
