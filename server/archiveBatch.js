@@ -97,22 +97,23 @@ export class ArchiveBatchService {
     if (!job || job.owner !== user.username) throw archiveError('未找到该账号的补集任务', 'ARCHIVE_JOB_NOT_FOUND', 404);
     this.jobs.set(job.id, job);
     if (job.status === 'running' && !this.active.has(job.id) && ![...this.activeTitles.values()].includes(job.id)) {
-      job.status = 'paused'; job.message = '补集已暂停，已保存的剧集仍在片库。重新搜索后可继续。';
+      job.status = 'paused'; job.message = '补集已暂停，已保存的剧集仍在片库。';
       await this.persist(job);
     }
     return job;
   }
 
-  async plan(input, user) {
+  async plan(input, user, previousJob) {
     validateInput(input);
-    const known = await this.catalog?.knownPlatforms?.(input.title, 'tv').catch(() => []) || [];
-    const [library, capability, search, progress] = await Promise.all([
+    const [library, capability, search, official] = await Promise.all([
       this.gateway.describeArchiveLibrary(input, user), this.gateway.getArchiveCapabilities(),
       this.resourceSearch.search(input.title, { category: 'tv' }),
-      this.officialProgress.lookup(input.title, { category: 'tv', known })
+      previousJob ? { year: previousJob.input.year, latestEpisode: previousJob.officialLatest } : this.confirmOfficialWork(input)
     ]);
-    const official = chooseOfficialWork(progress, input);
     const saved = library.quarkFid && this.userContext?.(user).mediaRepository.all().find(item => item.quarkFid === library.quarkFid);
+    if (previousJob?.sourceFingerprint && sourceFingerprint(saved) !== previousJob.sourceFingerprint) {
+      throw archiveError('片库内容有变化，请重新打开影片后继续。', 'ARCHIVE_TARGET_CHANGED', 409);
+    }
     if (saved?.year && official.year && String(saved.year) !== String(official.year)) {
       throw archiveError('片库中的作品年份与官方版本不一致，请先确认影片。', 'ARCHIVE_WORK_MISMATCH', 409);
     }
@@ -120,7 +121,7 @@ export class ArchiveBatchService {
     const rows = (search?.merged_by_type?.quark || []).filter(row => row.category === 'tv'
       && searchTitleKey(row.work_title || '') === searchTitleKey(input.title)
       && (!editionYear || String(row.year || '') === editionYear));
-    if (!rows.length || !rows.some(row => row.url === input.shareUrl)) {
+    if (!previousJob && !rows.some(row => row.url === input.shareUrl)) {
       throw archiveError(search.partial ? '部分剧集暂时无法查找，请稍后重试。' : '暂时没有找到可用剧集，请稍后重试。', 'ARCHIVE_WORK_MISMATCH', 422);
     }
     const orderedRows = [...new Map(rows.map(row => [row.url, row])).values()]
@@ -209,6 +210,12 @@ export class ArchiveBatchService {
       canStart: Boolean(required.length && !selected.missing.length && !reason), reason } };
   }
 
+  async confirmOfficialWork(input) {
+    const known = await this.catalog?.knownPlatforms?.(input.title, 'tv').catch(() => []) || [];
+    const progress = await this.officialProgress.lookup(input.title, { category: 'tv', known });
+    return chooseOfficialWork(progress, input);
+  }
+
   async preview(input, user) { return (await this.plan(input, user)).public; }
 
   async start(input, user) {
@@ -229,14 +236,54 @@ export class ArchiveBatchService {
     return this.launch(plan, input, user, key);
   }
 
-  async launch(plan, input, user, key) {
+  async resume(id, user) {
+    const job = await this.load(id, user);
+    const key = titleKey(job.input, user);
+    const starting = this.starting.get(key);
+    if (starting) {
+      const result = await starting;
+      if (result.id === id) return result;
+      throw archiveError('同名剧集正在补集，请等当前任务结束后再继续。', 'ARCHIVE_BUSY', 409);
+    }
+    const pending = this.resumeOnce(job, user, key).finally(() => this.starting.delete(key));
+    this.starting.set(key, pending);
+    return pending;
+  }
+
+  async resumeOnce(job, user, key) {
+    const activeId = this.activeTitles.get(key);
+    if (activeId) {
+      const activeJob = await this.load(activeId, user);
+      if (activeJob.status === 'running') {
+        if (activeId === job.id) return publicBatch(activeJob);
+        throw archiveError('同名剧集正在补集，请等当前任务结束后再继续。', 'ARCHIVE_BUSY', 409);
+      }
+      await this.active.get(activeId);
+    }
+    if (job.status === 'success') return publicBatch(job);
+    const input = { ...job.input, quarkFid: job.targetFid, shareUrl: job.items.find(item => !job.completedEpisodes.includes(item.episode))?.shareUrl || job.items[0]?.shareUrl };
+    const plan = await this.plan(input, user, job);
+    const existing = new Set(plan.identity.existingEpisodes);
+    const retained = job.items.filter(item => existing.has(item.episode));
+    if (existing.size === job.officialLatest) {
+      await this.persist({ ...job, items: retained, completedEpisodes: retained.map(item => item.episode),
+        currentEpisode: 0, status: 'success', error: undefined,
+        message: `片库已保存第 1～${job.officialLatest} 集，可以在片库观看。` });
+      return publicBatch(this.jobs.get(job.id));
+    }
+    if (!plan.public.canStart) throw archiveError(plan.public.reason, 'ARCHIVE_BATCH_INCOMPLETE', 422);
+    return this.launch(plan, input, user, key, job, retained);
+  }
+
+  async launch(plan, input, user, key, previousJob, retained = []) {
     if (this.active.size >= 2) throw archiveError('当前补集任务较多，请稍后重试。', 'ARCHIVE_BUSY', 429);
-    const id = plan.public.token.slice(0, 32);
+    const id = previousJob?.id || plan.public.token.slice(0, 32);
     const job = { id, owner: user.username, input: { title: input.title, category: 'tv', year: plan.identity.year,
       catalogId: String(input.catalogId || '').slice(0, 240), poster: String(input.poster || '').slice(0, 2048) },
-      targetFid: plan.identity.targetFid, sourceFingerprint: plan.identity.sourceFingerprint, officialLatest: plan.identity.latest, items: plan.identity.items,
-      completedEpisodes: [], currentEpisode: 0, cleanupPendingCount: 0, status: 'running',
-      message: '补集已开始，可以继续浏览。', stopRequested: false };
+      targetFid: plan.identity.targetFid, sourceFingerprint: plan.identity.sourceFingerprint, officialLatest: plan.identity.latest,
+      items: [...retained, ...plan.identity.items], completedEpisodes: retained.map(item => item.episode),
+      currentEpisode: 0, cleanupPendingCount: previousJob?.cleanupPendingCount || 0, status: 'running',
+      message: previousJob ? '正在继续补齐剩余剧集。' : '补集已开始，可以继续浏览。', stopRequested: false };
     this.activeTitles.set(key, id);
     try { await this.persist(job); } catch (error) { this.activeTitles.delete(key); throw error; }
     const task = this.run(job, user).catch(error => {
@@ -249,7 +296,7 @@ export class ArchiveBatchService {
 
   async run(job, user) {
     try {
-      for (const item of job.items) {
+      for (const item of job.items.slice(job.completedEpisodes.length)) {
         if (job.stopRequested) { job.status = 'paused'; job.message = '已停止补集，已保存的剧集仍在片库。'; break; }
         if (job.sourceFingerprint) {
           const current = this.userContext?.(user).mediaRepository.all().find(card => card.quarkFid === job.targetFid);

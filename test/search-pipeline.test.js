@@ -125,12 +125,12 @@ test('线上部分来源失败且无可用分享时保留官方进度，提供�
  try{await nextTick();assert.match(document.querySelector('.official-availability').textContent,/无法确认/);assert.equal(document.querySelector('.btn-transfer'),null);document.querySelector('.retry-search-button').click();assert.equal(retried,1);}finally{view.app.unmount();}
 });
 
-test('电视剧先展示补集范围和空间，再启动后台任务并提供停止入口',async()=>{
+test('电视剧展示补集范围和空间，后台任务可以停止并从回执继续',async()=>{
  const item={...resource('折月亮 (2026)',0),workTitle:'折月亮',category:'tv',year:'2026',batchEligible:true,
   archivePreparation:{episode:27,batchEligible:true,summary:'已找到第 1～27 集的资源',notice:'可以检查并补齐缺少的剧集。'}};
  const actions=[];const media={id:'quark:old',quarkFid:'old',title:'折月亮',category:'tv',poster:'',tag:''};
  const view=mount({searchKeyword:'折月亮',searchCategory:'tv',currentCategory:'tv',media,quarkResources:[item]},
-  {onSaveToCards:()=>actions.push('preview-or-start'),onStopBatch:id=>actions.push(id)});
+  {onSaveToCards:()=>actions.push('preview-or-start'),onStopBatch:id=>actions.push(id),onResumeBatch:id=>actions.push('resume:'+id)});
  try{
   await nextTick();assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'检查可存集数');
   document.querySelector('.btn-transfer').click();assert.deepEqual(actions,['preview-or-start']);
@@ -147,5 +147,11 @@ test('电视剧先展示补集范围和空间，再启动后台任务并提供�
   assert.match(document.querySelector('.save-receipt').textContent,/2 \/ 18/);
   [...document.querySelectorAll('.receipt-actions button')].find(button=>button.textContent.includes('停止补集')).click();
   assert.equal(actions.at(-1),'job-1');
+  view.state.savedBatch.status='failed';await nextTick();
+  const resume=document.querySelector('.receipt-actions .btn-transfer');
+  assert.match(resume.textContent,/继续补齐/);resume.click();assert.equal(actions.at(-1),'resume:job-1');
+  view.state.resumingBatch=true;await nextTick();assert.equal(resume.disabled,true);
+  view.state.resumingBatch=false;view.state.batchResumeError='部分资源暂时无法访问';await nextTick();
+  assert.equal(resume.disabled,false);assert.match(document.querySelector('.receipt-error').textContent,/无法访问/);
  }finally{view.app.unmount();}
 });

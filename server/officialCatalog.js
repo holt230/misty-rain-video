@@ -197,9 +197,15 @@ export class OfficialCatalogService extends CatalogService {
     return { ...await this.details.comments(resolved.doubanId, resolved, category, start), catalogId: id };
   }
   async knownPlatforms(keyword, category) {
+    await this.officialReady;
+    const key = titleKey(keyword);
+    const matches = item => ['tv', 'anime'].includes(item.category) && titleKey(item.title) === key
+      && (category === 'all' || category === item.category);
     const found = new Map();
-    for (const item of this.officialWorks.values()) if (['tv', 'anime'].includes(item.category) && titleKey(item.title) === titleKey(keyword)
-      && (category === 'all' || category === item.category)) for (const source of item.platforms) found.set(source.catalogId, { ...source, title: item.title, category: item.category, year: item.year });
+    const feeds = [...this.platformFeeds.values()].map(feed => feed.items.filter(matches));
+    for (const item of [...mergeOfficialCatalog(feeds), ...[...this.officialWorks.values()].filter(matches)]) {
+      for (const source of item.platforms) found.set(source.catalogId, { ...source, title: item.title, category: item.category, year: item.year });
+    }
     return [...found.values()];
   }
   start() {

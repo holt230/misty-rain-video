@@ -44,7 +44,7 @@ async function fixture(t, { failEpisode = 0, holdFirst = false } = {}) {
       const task = (async () => {
         markStarted();
         if (holdFirst && request.episode === 1) await gate;
-        if (request.episode === failEpisode) {
+        if (request.episode === failEpisode && calls.filter(call => call.episode === failEpisode).length === 1) {
           saved.set(id, { id, status: 'failed', message: '解压失败', error: { code: 'QUARK_ARCHIVE_FAILED', message: '解压失败' } });
           return;
         }
@@ -102,16 +102,26 @@ test('预览后片源变化必须重新核对，不能使用过时计划启动',
   assert.equal(f.calls.length, 0);
 });
 
-test('一集失败即停止并保留已补剧集，重新预览只包含仍缺的集数', async t => {
+test('一集失败后可继续原任务，只补剩余剧集并保留进度', async t => {
   const f = await fixture(t, { failEpisode: 3 }), preview = await f.service.preview(input, user);
   const job = await f.service.start({ ...input, token: preview.token }, user);
   await f.service.active.get(job.id);
   const result = await f.service.get(job.id, user);
   assert.equal(result.status, 'failed'); assert.deepEqual(result.completedEpisodes, [1, 2]);
   assert.deepEqual(f.calls.map(call => call.episode), [1, 2, 3]);
-  const retry = await f.service.preview(input, user);
-  assert.deepEqual(retry.plannedEpisodes, Array.from({ length: 16 }, (_, index) => index + 3));
-  assert.equal(f.stored.has(1), true); assert.equal(f.stored.has(2), true);
+  const newUrl = 'https://pan.quark.cn/s/replacement';
+  f.service.resourceSearch.search = async () => ({ merged_by_type: { quark: [{ ...row, url: newUrl }] } });
+  f.service.officialProgress.lookup = async () => { throw Error('official temporarily unavailable'); };
+  await assert.rejects(f.service.resume(job.id, { username: 'other' }), { code: 'ARCHIVE_JOB_NOT_FOUND' });
+  const [resumed, duplicate] = await Promise.all([f.service.resume(job.id, user), f.service.resume(job.id, user)]);
+  assert.equal(resumed.id, job.id); assert.equal(duplicate.id, job.id);
+  assert.equal(resumed.total, 18); assert.deepEqual(resumed.completedEpisodes, [1, 2]);
+  await f.service.active.get(job.id);
+  const done = await f.service.get(job.id, user);
+  assert.equal(done.status, 'success'); assert.equal(done.completedEpisodes.length, 18);
+  assert.equal(f.stored.size, 27);
+  assert.deepEqual(f.calls.slice(3).map(call => call.episode), Array.from({ length: 16 }, (_, index) => index + 3));
+  assert.ok(f.calls.slice(3).every(call => call.shareUrl === newUrl && call.quarkFid === 'old-library'));
 });
 
 test('任务隔离账号，可在当前集完成后停止，重复点击不会开启第二个任务', async t => {
@@ -125,6 +135,15 @@ test('任务隔离账号，可在当前集完成后停止，重复点击不会�
   const result = await f.service.get(first.id, user);
   assert.equal(result.status, 'paused'); assert.deepEqual(result.completedEpisodes, [1]);
   assert.equal(f.calls.length, 1); assert.equal(f.stored.has(1), true);
+  const restarted = new ArchiveBatchService(f.dir, {
+    gateway: f.gateway, archiveImport: f.archiveImport, catalog: f.service.catalog,
+    officialProgress: f.service.officialProgress, resourceSearch: f.service.resourceSearch
+  });
+  const resumed = await restarted.resume(first.id, user);
+  assert.equal(resumed.id, first.id); assert.deepEqual(resumed.completedEpisodes, [1]);
+  await restarted.active.get(first.id);
+  assert.equal((await restarted.get(first.id, user)).status, 'success');
+  assert.deepEqual(f.calls.map(call => call.episode), Array.from({ length: 18 }, (_, index) => index + 1));
 });
 
 test('官方集数不能唯一确认时不会把资源标题当作全集证明', async t => {
@@ -181,7 +200,7 @@ test('服务重启后未完成任务标记暂停，已完成集数和原目录�
     catalog: f.service.catalog, officialProgress: f.service.officialProgress, resourceSearch: f.service.resourceSearch });
   const job = await restored.get(id, user);
   assert.equal(job.status, 'paused'); assert.equal(job.targetFid, 'old-library');
-  assert.deepEqual(job.completedEpisodes, [1]); assert.match(job.message, /重新搜索/);
+  assert.deepEqual(job.completedEpisodes, [1]); assert.match(job.message, /已保存的剧集仍在片库/);
   assert.equal(f.calls.length, 0);
 });
 

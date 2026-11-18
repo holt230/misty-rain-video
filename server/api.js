@@ -408,9 +408,10 @@ export const handleApiRequest = async (request, response, context) => {
     if (pathname === '/api/library/archive-batches' && request.method === 'GET') {
       sendSuccess(response, await context.archiveBatch.list(user)); return true;
     }
-    const stopArchiveBatch = pathname.match(/^\/api\/library\/archive-batches\/([a-f0-9]{32})\/stop$/);
-    if (stopArchiveBatch && request.method === 'POST') {
-      sendSuccess(response, await context.archiveBatch.stop(stopArchiveBatch[1], user)); return true;
+    const archiveBatchAction = pathname.match(/^\/api\/library\/archive-batches\/([a-f0-9]{32})\/(stop|resume)$/);
+    if (archiveBatchAction && request.method === 'POST') {
+      const [, id, action] = archiveBatchAction;
+      sendSuccess(response, await context.archiveBatch[action](id, user)); return true;
     }
     const archiveJob = pathname.match(/^\/api\/library\/archive-jobs\/([a-f0-9]{32})$/);
     if (archiveJob && request.method === 'GET') {

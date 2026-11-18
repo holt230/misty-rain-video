@@ -73,8 +73,11 @@ export function parseYoukuProgress(html, candidate, keyword) {
   const components = (data.moduleList || []).flatMap(module => module.components || []);
   const list = components.find(component => component.type === 10013 && Array.isArray(component.itemList));
   if (!list) throw unavailable();
-  const marker = clean(list.subtitle).match(/更新至\s*(\d+)\s*(?:\/\s*\d+)?\s*[集话]|(\d+)\s*[集话]全/);
-  if (!marker || Number(marker[1] || marker[2]) !== latest) throw unavailable();
+  const subtitle = clean(list.subtitle);
+  const updated = Number(subtitle.match(/更新至\s*(\d+)\s*(?:\/\s*\d+)?\s*[集话]/)?.[1] || 0);
+  const full = subtitle.match(/(\d+)\s*[集话]全|全\s*(\d+)\s*[集话]/);
+  const total = Number(full?.[1] || full?.[2] || 0);
+  if (updated ? updated !== latest : !total || latest > total) throw unavailable();
   // Paged anime lists may contain 1..60 while episodeLast describes the current
   // release. Use the explicit update marker, never lastStage or episodeTotal
   // (both may include unreleased trailers).
@@ -82,7 +85,7 @@ export function parseYoukuProgress(html, candidate, keyword) {
     && item.episodeInfo?.isZp === true && item.action?.type === 'JUMP_TO_VIDEO'
     && (!item.action.extra?.showId || item.action.extra.showId === info.showId));
   const lastUrl = episode && officialPlatformUrl(`https://v.youku.com/v_show/id_${episode.action.value}.html`, 'youku');
-  if (!list.more && !lastUrl) throw unavailable();
+  if (!lastUrl && (!list.more || (!updated && total !== latest))) throw unavailable();
   return { id: `youku:${info.showId}`, title, category, year, latestEpisode: latest,
     completed: info.completed === true && episodeNumber(info.episodeTotal) === latest,
     platform: platforms.youku, sourceUrl: lastUrl || candidate.url };

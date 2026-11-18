@@ -40,6 +40,8 @@ const props = defineProps<{
   savedMedia?: MediaItem | null;
   savedSummary?: string;
   savedBatch?: ArchiveBatchJob;
+  resumingBatch?: boolean;
+  batchResumeError?: string;
   batchPreview?: { resourceId: string; plan: ArchiveBatchPreview } | null;
   officialProgress?: OfficialWorkProgress;
   officialCheckedAt?: string;
@@ -56,6 +58,7 @@ const emit = defineEmits<{
   (e: 'play-saved'): void;
   (e: 'view-library'): void;
   (e: 'stop-batch', id: string): void;
+  (e: 'resume-batch', id: string): void;
   (e: 'save-to-cards', media: MediaItem, targetCategory: CategoryType, bestRes?: ResourceItem, selectedFids?: string[]): void;
 }>();
 
@@ -76,6 +79,7 @@ const searchQuery = ref('');
 const searchInput = ref<HTMLInputElement | null>(null);
 const resultsBody = ref<HTMLElement | null>(null);
 const searchBusy = computed(() => Boolean(props.isAnalyzing || props.searchPending));
+const canResumeBatch = computed(() => props.savedBatch?.status === 'paused' || props.savedBatch?.status === 'failed');
 const searchingCurrentQuery = computed(() => searchBusy.value
   && searchQuery.value.trim() === (props.searchKeyword || props.media?.title || '').trim());
 const visibleCount = ref(20);
@@ -322,7 +326,17 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
           <span class="receipt-icon"><LoaderCircle v-if="savedBatch?.status === 'running'" class="search-spinner" aria-hidden="true" /><X v-else-if="savedBatch && savedBatch.status !== 'success'" aria-hidden="true" /><Check v-else aria-hidden="true" /></span>
           <h2>{{ savedBatch ? savedBatch.status === 'running' ? '正在补集' : savedBatch.status === 'success' ? '已补齐片库' : '补集已暂停' : batchPreview ? '剧集已齐' : '已保存到片库' }}</h2><strong>{{ savedMedia.title }}</strong><p>{{ savedSummary }}</p>
           <p v-if="savedBatch">已完成 {{ savedBatch.completedEpisodes.length }} / {{ savedBatch.total }} 集<span v-if="savedBatch.currentEpisode"> · 当前第 {{ savedBatch.currentEpisode }} 集</span></p>
-          <div class="receipt-actions"><button v-if="savedMedia.quarkFid" type="button" class="btn-action btn-transfer" @click="emit('play-saved')"><Play aria-hidden="true" /> {{ savedPlayLabel || '立即播放' }}</button><button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button><button v-if="savedBatch?.status === 'running'" type="button" class="btn-action btn-details" @click="emit('stop-batch', savedBatch.id)">停止补集</button></div>
+          <p v-if="canResumeBatch && batchResumeError" class="receipt-error" role="alert">{{ batchResumeError }}</p>
+          <div class="receipt-actions" :class="{ 'resume-actions': canResumeBatch }">
+            <button v-if="savedBatch && canResumeBatch" type="button" class="btn-action btn-transfer" :disabled="resumingBatch" @click="emit('resume-batch', savedBatch.id)">
+              <LoaderCircle v-if="resumingBatch" class="search-spinner" aria-hidden="true" />
+              <RefreshCw v-else aria-hidden="true" />
+              {{ resumingBatch ? '正在核对…' : '继续补齐' }}
+            </button>
+            <button v-if="savedMedia.quarkFid" type="button" class="btn-action" :class="canResumeBatch ? 'btn-details' : 'btn-transfer'" @click="emit('play-saved')"><Play aria-hidden="true" /> {{ savedPlayLabel || '立即播放' }}</button>
+            <button type="button" class="btn-action btn-details" @click="emit('view-library')"><Library aria-hidden="true" />查看片库</button>
+            <button v-if="savedBatch?.status === 'running'" type="button" class="btn-action btn-details" @click="emit('stop-batch', savedBatch.id)">停止补集</button>
+          </div>
         </section>
         <QuarkResourceDetails v-else-if="detailResource" ref="detailsRef"
           :resource="detailResource" :is-saving="isSaving" :replacing-source="replacingSource"
@@ -476,6 +490,7 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
 .save-receipt { display: grid; gap: 16px; justify-items: center; padding: 40px 16px; text-align: center; }
 .receipt-icon { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--success-subtle); color: var(--success); }
 .save-receipt h2 { font-size: 22px; }.save-receipt p { color: var(--text-secondary); font-size: 14px; }
+.save-receipt .receipt-error { color: var(--danger); }
 .receipt-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 12px; }
 .receipt-actions button { gap: 8px; min-height: 48px; }.receipt-actions svg { width: 18px; }
 .liquid-resource-row { display: flex; align-items: center; gap: 20px; padding: 24px; border: 0; background: var(--surface-1); }
@@ -512,9 +527,8 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
   .dialog-header { position: relative; padding: 23px 20px 12px; }
   .media-meta-row { align-items: flex-start; gap: 11px; }
   .dialog-poster { width: 32px; height: 44px; }
-  .dialog-title { max-width: calc(100% - 40px); font-size: 1.08rem; line-height: 1.8; }
+  .dialog-title { font-size: 1.08rem; line-height: 1.8; }
   .dialog-meta-info { gap: 9px; }
-  .dialog-top-actions { position: absolute; top: 17px; right: 15px; }
   .cat-selector-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; }
   .cat-pill-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; margin-left: 0; margin-top: 4px; }
   .cat-select-pill { min-height: 38px; padding: 0 6px; font-size: .78rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--surface-1); }
@@ -523,6 +537,9 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
   .result-filters { padding: 4px 16px 10px; gap: 2px; }
   .filter-chip { padding: 0 15px; }
   .dialog-body { padding: 0 16px calc(20px + var(--safe-area-bottom)); }
+  .resume-actions { display: grid; width: min(100%, 320px); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  .resume-actions .btn-transfer { grid-column: 1 / -1; }
+  .resume-actions button { padding-inline: 6px; }
   .liquid-resource-row { align-items: stretch; flex-direction: column; gap: 14px; padding: 20px 4px; border-radius: 0; background: transparent; }
   .row-right { width: 100%; }
   .row-right .btn-action { flex: 1; padding: 0 10px; }
@@ -561,7 +578,6 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
 @media (max-width: 767px) {
   .search-status { margin-left: var(--page-left); margin-right: var(--page-right); }
   .dialog-header, .result-filters, .dialog-body { padding-left: var(--page-left); padding-right: var(--page-right); }
-  .dialog-top-actions { right: var(--page-right); }
   .result-summary { padding-left: var(--page-left); padding-right: var(--page-right); }
   .result-search, .official-progress { margin-left: var(--page-left); margin-right: var(--page-right); }
   .result-search-icon { margin-left: 6px; }

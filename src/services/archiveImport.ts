@@ -59,6 +59,9 @@ export const listArchiveBatches = () => request<ArchiveBatchJob[]>('/api/library
 export const stopArchiveBatch = (id: string) => request<ArchiveBatchJob>(
   `/api/library/archive-batches/${encodeURIComponent(id)}/stop`, { method: 'POST' }
 );
+export const continueArchiveBatch = (id: string) => request<ArchiveBatchJob>(
+  `/api/library/archive-batches/${encodeURIComponent(id)}/resume`, { method: 'POST' }, 40000
+);
 export const archiveBytes = (bytes: number) => {
   const unit = bytes >= 1000 ** 4 ? 'TB' : bytes >= 1000 ** 3 ? 'GB' : 'MB';
   const divisor = unit === 'TB' ? 1000 ** 4 : unit === 'GB' ? 1000 ** 3 : 1000 ** 2;
