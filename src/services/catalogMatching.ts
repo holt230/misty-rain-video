@@ -26,8 +26,10 @@ const explicitSeason = (value: string): number | undefined => {
 };
 const season = (value: string) => explicitSeason(value) ?? 1;
 export function findCatalogMedia(item: CatalogItem, library: MediaItem[]) {
-  const linked = library.find(media => media.catalogId === item.catalogId && media.quarkFid);
+  const identities = new Set([item.catalogId, ...(item.catalogAliases || [])]);
+  const linked = library.find(media => media.quarkFid && [media.catalogId, ...(media.catalogAliases || [])].some(id => id && identities.has(id)));
   if (linked) return linked;
+  if (item.platforms?.length && !item.year) return undefined;
   const candidates = library.filter(media => media.quarkFid && media.category === item.category
     && normalize(media.title) === normalize(item.title) && (!item.year || media.year === item.year));
   return candidates.length === 1 ? candidates[0] : undefined;
@@ -35,7 +37,12 @@ export function findCatalogMedia(item: CatalogItem, library: MediaItem[]) {
 
 /** An unversioned personal copy is an explicit playback choice, not an edition match. */
 export function findUnversionedCatalogMedia(item: CatalogItem, library: MediaItem[]) {
-  if (!item.year || findCatalogMedia(item, library)) return undefined;
+  if (findCatalogMedia(item, library)) return undefined;
+  if (!item.year && item.platforms?.length) {
+    const copies = library.filter(media => media.quarkFid && media.category === item.category && normalize(media.title) === normalize(item.title));
+    return copies.length === 1 ? copies[0] : undefined;
+  }
+  if (!item.year) return undefined;
   const sameTitle = library.filter(media => media.quarkFid && media.category === item.category
     && normalize(media.title) === normalize(item.title));
   if (sameTitle.length !== 1 || sameTitle[0].year || sameTitle[0].catalogId) return undefined;
@@ -69,7 +76,10 @@ export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDet
     const posted = resource ? matchResource(item.title, resource.title, item.category) : undefined;
     const publishedPrefix = Boolean(resource?.source === 'public_guoman4K' && posted?.matches && !posted.otherVersion
       && directoryPrefix && workKey.startsWith(normalize(directoryPrefix)) && directoryPrefix.length >= Math.ceil(workKey.length / 2));
-    if (!details.videoCount || (!(match.matches && !match.otherVersion) && !publishedPrefix)
+    const exactPublished = Boolean(resource?.workTitle && isExactWorkTitle(item.title, resource.workTitle));
+    const literalDirectory = normalize(details.title).replace(/^[a-z](?=[\p{Script=Han}])/u, '').replace(/(?:19|20)\d{2}$/, '');
+    const punctuatedName = exactPublished && literalDirectory === workKey;
+    if (!details.videoCount || (!(match.matches && !match.otherVersion) && !publishedPrefix && !punctuatedName)
       || (item.year && year(details.title) && year(details.title) !== item.year)) return false;
     const videos = details.entries.filter(entry => entry.isVideo);
     const seasons = new Set([details.title, ...details.entries.filter(entry => entry.isVideo || entry.isDirectory).map(entry => entry.name)]

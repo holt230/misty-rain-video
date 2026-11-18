@@ -166,6 +166,8 @@ export class CatalogDetailsService {
         languages: row ? strings(row.languages) : previous?.languages || [], releaseDates: row ? strings(row.pubdate) : previous?.releaseDates || [],
         durations: row ? strings(row.durations) : previous?.durations || [],
         episodeCount: Number.isInteger(row?.episodes_count) && row.episodes_count > 0 ? row.episodes_count : previous?.episodeCount,
+        rating: Number(row?.rating?.value) > 0 && Number(row?.rating?.value) <= 10 ? Number(row.rating.value) : previous?.rating,
+        ratingSource: '豆瓣',
         directors: cast || !previous?.directors?.length ? publicCredits(directors) : previous.directors,
         actors: cast || !previous?.actors?.length ? publicCredits(actors) : previous.actors,
         partial: !row || !cast };

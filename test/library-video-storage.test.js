@@ -296,3 +296,48 @@ test('自动关联先校验完整候选，拒绝去重可能掩盖的混合片�
   assert.equal(await f.gateway.relinkLibrarySource(imported.item, candidate, user, { ...options, isCurrent: () => false }), false);
   assert.equal(committed, null);
 });
+
+test('分享者封禁只拒绝该分享，不误判当前账号认证，也不阻断下一条可用分享', async t => {
+ const f=fakeDrive(t);
+ const account={checkedAt:Date.now(),value:{isConfigured:true,isAuthenticated:true,isSvip:false}};
+ f.gateway.accountCache=account;
+ for(const status of [200,401,403]){
+  f.setToken({code:41020,message:'分享者用户封禁链接查看受限'},status);
+  await assert.rejects(f.gateway.getShareDetails({shareUrl:f.input.quarkShareUrl}),{code:'QUARK_SHARE_UNAVAILABLE',statusCode:422});
+  assert.equal(f.gateway.accountCache,account);
+ }
+ f.setToken(null);
+ const next=await f.gateway.getShareDetails({shareUrl:f.input.quarkShareUrl});
+ assert.ok(next.videoCount>0);
+ f.setToken({code:31001,message:'登录已失效'},401);
+ await assert.rejects(f.gateway.getShareDetails({shareUrl:f.input.quarkShareUrl}),{code:'QUARK_AUTH_REQUIRED'});
+ assert.equal(f.gateway.accountCache.value.isAuthenticated,false);
+});
+
+test('单集ZIP解压后核对再入库，失败不写片库，重试不重复解压或复制；临时目录按账号隔离', async t=>{
+ const f=fakeDrive(t);f.share.clear();
+ f.share.set('a167',video('a167','167.zip','0',100));
+ f.gateway.getArchiveCapabilities=async()=>({isAuthenticated:true,isSvip:true,freeBytes:100000});
+ const base=globalThis.fetch;let extracts=0,moves=0;
+ t.mock.method(globalThis,'fetch',async(url,init)=>{
+  const target=new URL(url),body=init.body?JSON.parse(init.body):{};
+  if(target.pathname.endsWith('/archive/unarchive')){
+   extracts++;
+   f.drive.set('unpacked',folder('unpacked','167',body.to_pdir_fid));
+   f.drive.set('v167',video('v167','167.mkv','unpacked',101));
+   return Response.json({code:0,data:{task_id:'task'}});
+  }
+  if(target.pathname.endsWith('/task'))return Response.json({code:0,data:{status:2}});
+  if(target.pathname.endsWith('/file/move')){moves++;for(const fid of body.filelist)f.drive.get(fid).pdir_fid=body.to_pdir_fid;return Response.json({code:0,data:{}});}
+  return base(url,init);
+ });
+ let state={};const options={state,checkpoint:async value=>{state=value;}};
+ const prepared=await f.gateway.prepareArchiveImport({shareUrl:f.input.quarkShareUrl,archiveFid:'a167',episode:167,operationId:'test-archive-167'},user,options);
+ assert.equal(prepared.episodes[0].episodeNumber,167);assert.equal(extracts,1);
+ const result=await f.gateway.finalizeArchiveImport(prepared,{title:'仙逆',category:'anime',episode:167,year:'2023'},{work_title:'仙逆',category:'anime',year:'2023'},user,{checkpoint:async value=>state=value});
+ assert.equal(result.item.title,'仙逆');assert.equal(moves,1);
+ const repeat=await f.gateway.prepareArchiveImport({shareUrl:f.input.quarkShareUrl,archiveFid:'a167',episode:167,operationId:'test-archive-167'},user,{state,checkpoint:async value=>state=value});
+ const same=await f.gateway.finalizeArchiveImport(repeat,{title:'仙逆',category:'anime',episode:167,year:'2023'},{work_title:'仙逆',category:'anime',year:'2023'},user,{checkpoint:async value=>state=value});
+ assert.equal(same.item.quarkFid,result.item.quarkFid);assert.equal(extracts,1);assert.equal(moves,1);
+ await assert.rejects(f.gateway.finalizeArchiveImport(prepared,{title:'仙逆',category:'anime',episode:167},{work_title:'仙逆',category:'anime'}, {username:'other',folder:'other'}),{code:'ARCHIVE_JOB_FORBIDDEN'});
+});

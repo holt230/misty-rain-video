@@ -1,3 +1,4 @@
+import { archiveFormat, supportedArchive, archiveError, requireArchiveCapacity, selectArchiveEpisode } from './archivePolicy.js';
 import dns from 'node:dns';
 import { createOpaqueId } from './http.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
@@ -189,7 +190,7 @@ const isCredentialAuthFailure = error => {
     || [401, 31001, 32003].includes(upstreamCode);
 };
 
-const isShareUnavailableMessage = message => /(?:取消|删除|撤销).*分享|分享.*(?:失效|过期|删除|不存在|取消|撤销)|不存在.*分享|文件.*(?:违规|已被屏蔽)|违规.*(?:文件|分享)/.test(String(message || ''));
+const isShareUnavailableMessage = message => /(?:取消|删除|撤销).*分享|分享.*(?:失效|过期|删除|不存在|取消|撤销)|不存在.*分享|文件.*(?:违规|已被屏蔽)|违规.*(?:文件|分享)|(?:分享者|分享用户|分享账号|分享人).*(?:封禁|封停|禁用|违规)/.test(String(message || ''));
 
 const libraryUpdateFailureStatus = (card, error) => {
   const code = String(error?.code || '');
@@ -836,6 +837,7 @@ export class QuarkGateway {
     const failures = [];
     for (const card of cards) {
       if (!card?.quarkFid) continue;
+      if (card.quarkArchiveImported) { failures.push({quarkFid:card.quarkFid,title:card.title,code:'ARCHIVE_UPDATE_REQUIRES_EXTRACTION',message:'请通过解压入库核对新集数。'});continue; }
       let releaseMutation;
       try {
         releaseMutation = acquireLibraryMutationLocks(this.libraryMutationLocks, [
@@ -914,6 +916,175 @@ export class QuarkGateway {
     return this.#createSharePlaybackSession({ shareUrl, title, passcode }, principal);
   }
 
+  async getArchiveCapabilities() {
+    const account = await this.getAccountStatus(true);
+    if (!account.isAuthenticated) return { isAuthenticated: false, isSvip: false, supportedFormats: ['zip', 'rar', '7z'] };
+    const member = await this.#requestJson(createDriveOperationUrl('member'), { cookie: this.#requireCookie() });
+    const totalBytes = Number(member?.data?.total_capacity), usedBytes = Number(member?.data?.use_capacity);
+    return { isAuthenticated: true, isSvip: account.isSvip, supportedFormats: ['zip', 'rar', '7z'],
+      freeBytes: Number.isFinite(totalBytes) && Number.isFinite(usedBytes) ? Math.max(0, totalBytes - usedBytes) : undefined };
+  }
+
+  /** Stage one archive in an account-owned system folder. No library record is created here. */
+  async prepareArchiveImport({ shareUrl, archiveFid, episode = 0, passcode = '', archivePassword = '', operationId }, user = SYSTEM_USER,
+    { state = {}, checkpoint = async () => {}, progress = () => {}, timeoutMs = 180000 } = {}) {
+    const principal = normalizeUser(user);
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(operationId || '') || !archiveFid || archivePassword.length > 128) {
+      throw archiveError('解压任务参数不正确', 'INVALID_ARCHIVE_REQUEST', 400);
+    }
+    if (state.owner && state.owner !== principal.username) throw archiveError('无权访问其他账号的解压任务', 'ARCHIVE_JOB_FORBIDDEN', 403);
+    state.owner = principal.username;
+    const persist = async () => checkpoint({ ...state });
+    const cookie = this.#requireCookie();
+    progress('checking', '正在检查网盘权限与剩余容量…');
+    const capability = await this.getArchiveCapabilities();
+    const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
+    const tree = await this.#readShareTree(share, cookie);
+    const archive = tree.find(item => item.fid === archiveFid && item.file_type !== 0 && !item.dir);
+    if (!archive || !supportedArchive(archive.file_name)) {
+      throw archiveError(archiveFormat(archive?.file_name) === 'iso' ? '当前不支持自动解压 ISO，尚未转存；将继续使用可解压或可直播放的来源。' : '该文件不是支持的 ZIP、RAR 或7Z压缩包', 'QUARK_ARCHIVE_FORMAT_UNSUPPORTED');
+    }
+    if (episode && extractEpisodeNumber(archive.file_name) !== episode) throw archiveError('压缩包集号已变化，未开始转存。', 'QUARK_SOURCE_CHANGED', 409);
+    if (state.archiveFid && state.archiveFid !== archive.fid) throw archiveError('解压任务的来源已变化', 'QUARK_SOURCE_CHANGED', 409);
+    requireArchiveCapacity(capability, Number(archive.size));
+    state.archiveFid = archive.fid; state.sourceShareId = share.pwdId;
+    state.archiveName = archive.file_name; state.archiveSize = Number(archive.size);
+    const root = await this.#getUserRoot(cookie, principal, true);
+    const area = await this.#ensureDriveFolder(root.fid, RESERVED_LIBRARY_FOLDER_PREFIX + '自动解压', cookie);
+    const stage = await this.#ensureDriveFolder(area.fid, 'job_' + operationId, cookie);
+    if (state.stageFid && state.stageFid !== stage.fid) throw archiveError('解压临时目录已变化，任务已停止', 'ARCHIVE_STAGE_CHANGED', 409);
+    state.areaFid = area.fid; state.stageFid = stage.fid;
+    const output = await this.#ensureDriveFolder(stage.fid, '解压内容', cookie);
+    state.outputFid = output.fid;
+    await persist();
+    if (!state.savedArchiveFid) {
+      progress('saving', '正在将所选压缩包存入临时目录…');
+      const prior = (await this.#listDriveFolder(stage.fid, this.#requireCookie())).filter(item => item.file_name === archive.file_name && Number(item.size) === Number(archive.size));
+      if (prior.length > 1) throw archiveError('临时目录中存在多个同名压缩包，请检查任务记录', 'ARCHIVE_STAGE_AMBIGUOUS', 409);
+      state.savedArchiveFid = prior[0]?.fid;
+      if (!state.savedArchiveFid) {
+        const saved = await this.#saveSharedItems({ pwdId: share.pwdId, stoken: share.stoken, items: [archive], targetFolderFid: stage.fid,
+          cookie: this.#requireCookie(), passcode });
+        state.savedArchiveFid = saved[0];
+      }
+      if (!state.savedArchiveFid) throw archiveError('压缩包转存结果尚未确认，任务已停止以免重复转存。', 'ARCHIVE_SAVE_UNCONFIRMED', 502);
+      await persist();
+    }
+    let episodes = await this.#walkDriveDirectory(output.fid, this.#requireCookie());
+    if (!episodes.length) {
+      if (!state.unarchiveTaskId) {
+        if (state.submissionUnconfirmed) throw archiveError('上次解压提交结果未确认，已保留临时目录；请稍后重试检查，不会重复提交。', 'ARCHIVE_SUBMISSION_UNCONFIRMED', 409);
+        progress('extracting', '正在请求网盘云端解压…');
+        state.submissionUnconfirmed = true; await persist();
+        const response = await this.#requestJson(createDriveOperationUrl('archive/unarchive'), {
+          method: 'POST', cookie: this.#requireCookie(), userAgent: QUARK_DESKTOP_USER_AGENT,
+          body: { fid: state.savedArchiveFid, to_pdir_fid: output.fid, conflict_mode: 3, suffix_type: 0, pwd: archivePassword, select_mode: 0 }
+        });
+        if (response?.code !== 0 || !response?.data?.task_id) {
+          state.submissionUnconfirmed = false; await persist();
+          throw archiveError(response?.message || '网盘未接受解压任务；已保留压缩包，未入库。', 'QUARK_ARCHIVE_UNAVAILABLE');
+        }
+        state.unarchiveTaskId = response.data.task_id; state.submissionUnconfirmed = false; await persist();
+      }
+      progress('extracting', '云端正在解压，视频不会下载到应用服务器…');
+      const deadline = Date.now() + timeoutMs;
+      let finished = false;
+      for (let retry = 0; Date.now() < deadline; retry++) {
+        const response = await this.#requestJson(createDriveOperationUrl('task', { task_id: state.unarchiveTaskId, retry_index: retry }), { cookie: this.#requireCookie() });
+        if (response?.code !== 0) throw archiveError(response?.message || '暂时无法读取云端解压进度，临时文件已保留。', 'ARCHIVE_TASK_UNAVAILABLE', 502);
+        const status = Number(response?.data?.status);
+        if (status === 2) { finished = true; break; }
+        if ([3, 4, -1].includes(status)) {
+          state.unarchiveTaskId = ''; await persist();
+          throw archiveError(response?.data?.message || response?.message || '云端解压失败，未入库。');
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (!finished) throw archiveError('云端解压仍在进行，任务和临时目录已保留，可稍后继续检查。', 'ARCHIVE_TASK_PENDING', 409);
+      progress('verifying', '解压完成，正在读取实际视频文件…');
+      episodes = await this.#walkDriveDirectory(output.fid, this.#requireCookie());
+    }
+    state.prepared = true; await persist();
+    return { state: { ...state }, shareTitle: share.title,
+      archive: { fid: archive.fid, name: archive.file_name, size: Number(archive.size) },
+      episodes, files: await this.#listDriveFolder(output.fid, this.#requireCookie()) };
+  }
+
+  async finalizeArchiveImport(prepared, input, publication, user = SYSTEM_USER, { checkpoint = async () => {}, progress = () => {} } = {}) {
+    const principal = normalizeUser(user), state = prepared.state;
+    if (state.owner !== principal.username || !state.prepared) throw archiveError('解压任务尚未准备完成', 'ARCHIVE_JOB_FORBIDDEN', 403);
+    const cookie = this.#requireCookie();
+    const root = await this.#getUserRoot(cookie, principal, false);
+    const area = root && (await this.#listDriveFolder(root.fid, cookie)).find(item => item.fid === state.areaFid
+      && item.file_name === RESERVED_LIBRARY_FOLDER_PREFIX + '自动解压' && (item.dir || item.file_type === 0));
+    const stage = area && (await this.#listDriveFolder(area.fid, cookie)).find(item => item.fid === state.stageFid && /^job_[a-zA-Z0-9_-]{8,80}$/.test(item.file_name || ''));
+    const output = stage && (await this.#listDriveFolder(stage.fid, cookie)).find(item => item.fid === state.outputFid && item.file_name === '解压内容');
+    if (!area || !stage || !output) throw archiveError('无权使用该临时目录，未入库。', 'ARCHIVE_JOB_FORBIDDEN', 403);
+    const episodes = await this.#walkDriveDirectory(output.fid, cookie);
+    let selected;
+    if (state.publishFid && state.targetFid) {
+      const committed = await this.#walkDriveDirectory(state.targetFid, cookie);
+      const found = committed.find(item => item.fid === state.publishFid && item.episodeNumber === input.episode);
+      if (found) selected = found;
+    }
+    if (!selected) selected = selectArchiveEpisode(episodes, input, publication);
+    const folderName = QUARK_LIBRARY_FOLDERS[input.category], mediaTitle = sanitizeFolderName(input.title);
+    if (!folderName || !mediaTitle) throw archiveError('影片信息不正确', 'INVALID_ARCHIVE_REQUEST', 400);
+    const releaseTitle = acquireLibraryMutationLocks(this.libraryMutationLocks, [libraryTitleMutationKey(principal, input.category, mediaTitle)]);
+    let releaseFolder;
+    try {
+      progress('publishing', '视频和集数已核对，正在加入片库…');
+      const category = await this.#ensureDriveFolder(root.fid, folderName, this.#requireCookie());
+      const target = await this.#ensureDriveFolder(category.fid, mediaTitle, this.#requireCookie());
+      if (state.targetFid && state.targetFid !== target.fid) throw archiveError('目标片库目录已变化，任务已停止。', 'ARCHIVE_TARGET_CHANGED', 409);
+      state.targetFid = target.fid;
+      releaseFolder = acquireLibraryMutationLocks(this.libraryMutationLocks, [libraryFidMutationKey(principal, target.fid)]);
+      const existing = await this.#walkDriveDirectory(target.fid, this.#requireCookie());
+      const duplicates = existing.filter(item => item.episodeNumber === input.episode);
+      if (duplicates.length > 1) throw archiveError('片库已有多个相同集号，请先确认季度。', 'ARCHIVE_EPISODE_UNCONFIRMED', 409);
+      let saved = duplicates[0], moved = false;
+      if (!saved) {
+        state.publishFid = selected.fid; await checkpoint({ ...state });
+        const response = await this.#requestJson(createDriveOperationUrl('file/move'), {
+          method: 'POST', cookie: this.#requireCookie(), userAgent: QUARK_DESKTOP_USER_AGENT,
+          body: { action_type: 1, filelist: [selected.fid], exclude_fids: [], to_pdir_fid: target.fid }
+        });
+        if (response?.code !== 0) throw archiveError(response?.message || '视频移动结果未确认，临时文件已保留。', 'ARCHIVE_PUBLISH_UNCONFIRMED', 502);
+        for (let retry = 0; retry < 5; retry++) {
+          const actual = await this.#walkDriveDirectory(target.fid, this.#requireCookie());
+          saved = actual.find(item => item.fid === selected.fid && item.episodeNumber === input.episode);
+          if (saved) break;
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        if (!saved) throw archiveError('视频已提交移动，结果暂未确认；不会重复复制。', 'ARCHIVE_PUBLISH_UNCONFIRMED', 502);
+        moved = true;
+        const canonicalName = libraryVideoName(saved, input.category);
+        const siblings = await this.#listDriveFolder(target.fid, this.#requireCookie());
+        if (saved.fileName !== canonicalName && !siblings.some(item => item.fid !== saved.fid && item.file_name === canonicalName)) {
+          await this.#renameDriveItem(saved.fid, canonicalName, this.#requireCookie());
+        }
+      }
+      state.publishFid = saved.fid; state.published = true;
+      await checkpoint({ ...state });
+      this.driveEpisodeCache.delete(target.fid); this.libraryUpdateCache.clear();
+      return { item: { ...this.#libraryItem({ fid: target.fid, mediaTitle, category: input.category, folderName, pwdId: state.sourceShareId }),
+        year: publication.year || input.year || '', quarkArchiveImported: true, quarkArchiveEpisode: input.episode },
+        transferredCount: moved ? 1 : 0, state: { ...state } };
+    } finally { releaseFolder?.(); releaseTitle(); }
+  }
+
+  async cleanupArchiveStage(state, user = SYSTEM_USER, { discardFailed = false } = {}) {
+    const principal = normalizeUser(user);
+    if ((!state.published && !discardFailed) || state.owner !== principal.username || !state.stageFid) return false;
+    const root = await this.#getUserRoot(this.#requireCookie(), principal, false);
+    const area = root && (await this.#listDriveFolder(root.fid, this.#requireCookie())).find(item => item.fid === state.areaFid
+      && item.file_name === RESERVED_LIBRARY_FOLDER_PREFIX + '自动解压');
+    const stage = area && (await this.#listDriveFolder(area.fid, this.#requireCookie())).find(item => item.fid === state.stageFid && /^job_[a-zA-Z0-9_-]{8,80}$/.test(item.file_name || ''));
+    if (!stage) return true;
+    await this.#trashDriveFids([stage.fid], this.#requireCookie());
+    return true;
+  }
+
   async getShareDetails({ shareUrl, passcode = '' }, { signal } = {}) {
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie, signal });
@@ -925,6 +1096,7 @@ export class QuarkGateway {
     return {
       title: share.title,
       videoCount: entries.filter(isVideoFile).length,
+      archiveCount: entries.filter(item => archiveFormat(item.file_name) && item.file_type !== 0 && !item.dir).length,
       episodeCount: entries.filter(item => isVideoFile(item) && !ancillaryVideoPattern.test(item.file_name)
         && extractEpisodeNumber(item.file_name) > 0).length,
       entries: entries.map(item => {
@@ -933,8 +1105,8 @@ export class QuarkGateway {
         return {
           fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
           name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),
-          isVideo: video, isSubtitle: isSubtitleFile(item), size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
-          episodeNumber: episode?.episodeNumber || 0, episodeTitle: episode?.episodeTitle || '',
+          isVideo: video, isArchive: Boolean(archiveFormat(item.file_name) && item.file_type !== 0 && !item.dir), archiveFormat: archiveFormat(item.file_name), isSubtitle: isSubtitleFile(item), size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
+          episodeNumber: episode?.episodeNumber || (archiveFormat(item.file_name) ? extractEpisodeNumber(item.file_name) || 0 : 0), episodeTitle: episode?.episodeTitle || '',
           videoCount: videoCounts.get(item.fid) || 0
         };
       })
@@ -1442,14 +1614,21 @@ export class QuarkGateway {
   }
 
   async #listShareFolder({ pwdId, stoken, parentFid, cookie, signal }) {
-    const all = [];
+    const all = [], seen = new Set();
+    const incomplete = () => new QuarkApiError('分享目录尚未完整读取，请重试，暂时无法确认剧集范围', {
+      code: 'QUARK_SHARE_LIST_INCOMPLETE', statusCode: 502
+    });
     for (let page = 1; page <= 100; page += 1) {
+      signal?.throwIfAborted();
       const url = new URL(`${SHARE_HOST}/share/sharepage/detail`);
+      url.searchParams.set('pr', 'ucpro');
+      url.searchParams.set('fr', 'pc');
       url.searchParams.set('pwd_id', pwdId);
       url.searchParams.set('stoken', stoken);
       url.searchParams.set('pdir_fid', parentFid);
-      url.searchParams.set('page', String(page));
-      url.searchParams.set('size', '100');
+      // Quark ignores page/size and returns only the default first ten items.
+      url.searchParams.set('_page', String(page));
+      url.searchParams.set('_size', '100');
       const result = await this.#requestJson(url, { cookie, userAgent: QUARK_DESKTOP_USER_AGENT, signal });
       if (result?.code !== 0) {
         const message = result?.message || result?.message_desc || '';
@@ -1459,10 +1638,20 @@ export class QuarkGateway {
         });
       }
       const list = arrayFrom(result?.data?.list);
-      all.push(...list);
-      if (list.length < 100) break;
+      const metadata = result?.metadata || result?.data?.metadata || {};
+      const total = metadata._total == null ? NaN : Number(metadata._total);
+      const hasTotal = Number.isSafeInteger(total) && total >= 0;
+      for (const item of list) {
+        if (!item.fid || seen.has(item.fid)) throw incomplete();
+        seen.add(item.fid); all.push(item);
+      }
+      const reportedSize = Number(metadata._size);
+      const actualPageSize = Number.isSafeInteger(reportedSize) && reportedSize > 0 ? reportedSize : 100;
+      // _total includes files Quark filters out of the public response. Advance
+      // through every raw page, counting only the actual accessible files.
+      if (hasTotal ? page * actualPageSize >= total : list.length < actualPageSize) return all;
     }
-    return all;
+    throw incomplete();
   }
 
   async #walkDriveDirectory(rootFid, cookie) {
@@ -1507,6 +1696,13 @@ export class QuarkGateway {
       this.driveEpisodeCache.set(card.quarkFid, { checkedAt: Date.now(), episodes: localEpisodes });
     }
 
+    if (card.quarkArchiveImported) {
+      const latest = [...localEpisodes].sort((a,b)=>b.episodeNumber-a.episodeNumber)[0];
+      return { quarkFid:card.quarkFid,title:card.title,localEpisodeCount:localEpisodes.length,sourceEpisodeCount:localEpisodes.length,
+        latestEpisodeNumber:latest?.episodeNumber||0,latestEpisodeTitle:latest?.episodeTitle||'',newEpisodeCount:0,
+        updateCheckedAt:new Date().toISOString(),updateCheckAvailable:false,code:'ARCHIVE_UPDATE_REQUIRES_EXTRACTION',
+        missingEpisodes:[],message:'压缩包来源需重新解压核对；当前显示片库实际集数。' };
+    }
     const shareUrl = String(card.quarkShareUrl || '');
     if (!/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(shareUrl)) {
       const latest = localEpisodes[0];
@@ -2387,6 +2583,22 @@ export class QuarkGateway {
       });
     }
     const code = result?.code;
+    const archiveMessage = result?.message || result?.message_desc || '';
+    if (/\/archive\/unarchive$/.test(new URL(url).pathname) && Number(code) !== 0
+      && /bad archive|invalid archive|unsupported|解压|压缩包|password|密码/i.test(archiveMessage)) {
+      throw archiveError(archiveMessage, 'QUARK_ARCHIVE_UNAVAILABLE');
+    }
+    const shareMessage = result?.message || result?.message_desc || '';
+    const unavailableShare = [200, 400, 401, 403, 404, 410, 422].includes(response.status)
+      && Number(code) !== 0
+      && /\/share\/sharepage\/(?:token|detail)$/.test(new URL(url).pathname)
+      && isShareUnavailableMessage(shareMessage);
+    if (unavailableShare) {
+      // A banned share owner is a property of that share, not this account's
+      // authentication. Do not poison the account cache or stop other sources.
+      throw new QuarkApiError(shareMessage, { code: 'QUARK_SHARE_UNAVAILABLE', statusCode: 422,
+        details: { upstreamStatus: response.status, upstreamCode: code } });
+    }
     if (response.status === 401 || response.status === 403 || code === 401 || code === 32003 || code === 31001 || code === 41020) {
       if (options.acceptAuthRefreshResponse && result.__responseCookies) return result;
       // 41020 是单次写操作的风控/会话拒绝，并不代表账号 Cookie 已退出。

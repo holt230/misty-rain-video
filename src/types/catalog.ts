@@ -1,16 +1,25 @@
 import type { CategoryType, MediaItem } from './media';
 
 export type CatalogChannel = CategoryType | 'new';
+export type CatalogPlatform = 'qq' | 'mango' | 'youku' | 'iqiyi';
+export interface CatalogPlatformSource { id: CatalogPlatform; name: string; catalogId: string; url: string }
+export interface CatalogSourceState { id: CatalogPlatform; name: string; status: 'success' | 'stale' | 'unavailable'; count: number; updatedAt: string; refreshing?: boolean }
 export interface CatalogItem extends MediaItem {
   catalogId: string;
   year: string;
   rating?: number;
+  ratingSource?: string;
+  backdrop?: string;
+  platforms?: CatalogPlatformSource[];
   subtitle: string;
   sourceName: string;
   sourceUrl: string;
 }
 export interface CatalogFeed {
   channel: CatalogChannel;
+  platform?: CatalogPlatform | 'all';
+  sourceName?: string;
+  sources?: CatalogSourceState[];
   page?: number;
   pageSize?: number;
   revision?: string;
@@ -50,7 +59,10 @@ export interface CatalogMetadataState {
   sourceName: string;
 }
 export interface CatalogWorkDetails extends CatalogMetadataState {
+  rating?: number;
+  ratingSource?: string;
   catalogId: string;
+  catalogAliases?: string[];
   title: string;
   year?: string;
   summary: string;

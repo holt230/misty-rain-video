@@ -35,6 +35,7 @@ COPY --from=builder --chown=node:node /app/server.js ./server.js
 COPY --from=builder --chown=node:node /app/server ./server
 COPY --from=resource-search --chown=node:node /app/pansou ./bin/pansou
 COPY --from=builder --chown=node:node /app/scripts/verify-search-runtime.mjs ./scripts/verify-search-runtime.mjs
+COPY --from=builder --chown=node:node /app/scripts/verify-official-catalog.mjs ./scripts/verify-official-catalog.mjs
 
 RUN mkdir -p /app/data /app/bin && chown -R node:node /app/data /app/bin
 

@@ -53,3 +53,13 @@ test('share verification rejects empty content and explicit conflicting seasons 
   assert.equal(matchesCatalogTitle(work, '九门 S02E01 2026 1080P'), false);
 });
 test.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+test('official provider aliases preserve saved catalog links while unknown editions require an explicit personal-library choice', () => {
+  const official = { title: '同名剧', category: 'tv', year: '2026', catalogId: 'work:new', platforms: [{ id: 'qq' }], catalogAliases: ['qq:123', 'douban:123'] };
+  const saved = { title: '同名剧', category: 'tv', year: '2026', catalogId: 'douban:123', quarkFid: 'owned' };
+  assert.equal(findCatalogMedia(official, [saved]), saved);
+  const unknown = { ...official, year: '', catalogAliases: [] };
+  assert.equal(findCatalogMedia(unknown, [saved]), undefined);
+  assert.equal(findUnversionedCatalogMedia(unknown, [saved]), saved);
+  assert.equal(findUnversionedCatalogMedia(unknown, [saved, { ...saved, quarkFid: 'second', year: '2020' }]), undefined);
+});

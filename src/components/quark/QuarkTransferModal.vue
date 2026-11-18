@@ -25,6 +25,7 @@ const props = defineProps<{
   searchCategory?: SearchCategory;
   isSaving?: boolean;
   savingResourceId?: string;
+  savingMessage?: string;
   saveError?: LibrarySaveFeedback | null;
   failedResourceId?: string;
   automaticStatus?: string;
@@ -89,6 +90,7 @@ const officialAvailability = computed(() => {
   if (!latest || searchBusy.value) return '';
   if (props.searchError) return '片源查询未完成，暂时无法确认最新一集是否可用。';
   const found = props.quarkResources.some(resource => resource.verification?.requiredEpisodes.includes(latest));
+  if (!found && props.quarkResources.some(resource=>resource.archivePreparation?.episode===latest)) return '已找到第 ' + latest + ' 集压缩包，需解压后核对正片。';
   return found ? `本次已找到官方最新第 ${latest} 集。` : `本次暂未找到官方最新第 ${latest} 集。`;
 });
 const saveCategory = (resource: ResourceItem): CategoryType => targetCategory.value === 'all' ? resource.category || props.media?.category || props.currentCategory : targetCategory.value;
@@ -338,6 +340,7 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <button v-if="saveError.needsAuth" type="button" @click="emit('open-auth-settings')">前往认证设置</button>
                   </div>
                   <div class="row-tags">
+                    <span v-if="res.archivePreparation && !res.verification" class="update-badge">{{ res.archivePreparation.summary || `第 ${res.archivePreparation.episode} 集 · 需解压核对` }}</span>
                     <span v-if="res.verification" class="update-badge">{{ res.verification.summary }}</span>
                     <span v-if="res.category" class="tag-meta">{{ categories.find(category => category.value === res.category)?.label }}</span>
                     <span v-if="res.year" class="tag-meta">{{ res.year }}</span>
@@ -346,20 +349,21 @@ useDialog(dialogRef, () => props.isOpen, requestBack);
                     <span v-if="res.password" class="tag-meta">提取码已自动识别</span>
                     <span v-if="res.datetime" class="tag-meta">{{ res.datetime }}</span>
                   </div>
+                  <p v-if="res.archivePreparation && !res.verification" class="verification-notice">{{ res.archivePreparation.notice }}</p>
                   <p v-if="res.verification?.notice" class="verification-notice">{{ res.verification.notice }}</p>
                 </div>
               </div>
 
               <div class="row-right">
-                <button v-if="!res.verification" type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
+                <button v-if="!res.verification && !res.archivePreparation" type="button" class="btn-action btn-details" :disabled="isSaving" @click="detailResource = res">查看资源</button>
                 <button
                   class="btn-action btn-transfer"
                   :class="{ 'is-saving': isSaving && savingResourceId === res.id }"
-                  :disabled="isSaving || !res.verification"
+                  :disabled="isSaving || (!res.verification && !res.archivePreparation)"
                   @click="failedResourceId === res.id && saveError?.needsSearch ? emit('retry-search') : emit('save-to-cards', media, saveCategory(res), res, res.verification?.selectedFids)"
                 >
                   <LoaderCircle v-if="isSaving && savingResourceId === res.id" class="search-spinner" aria-hidden="true" />
-                  {{ isSaving && savingResourceId === res.id ? '正在保存到片库…' : failedResourceId === res.id && saveError ? saveError.needsSearch ? '重新搜索' : '重新保存' : replacingSource ? '保存并替换片源' : '保存到片库' }}
+                  {{ isSaving && savingResourceId === res.id ? res.archivePreparation && !res.verification ? savingMessage || '正在云端解压核对…' : '正在保存到片库…' : failedResourceId === res.id && saveError ? saveError.needsSearch ? '重新搜索' : '重新保存' : res.archivePreparation && !res.verification ? `解压第 ${res.archivePreparation.episode} 集` : replacingSource ? '保存并替换片源' : '保存到片库' }}
                 </button>
               </div>
             </div>

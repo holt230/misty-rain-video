@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { authFetch } from '../services/authService';
 import { apiUrl, withAppBase } from '../services/appUrl';
-import type { CatalogBrowseState, CatalogChannel, CatalogFeed } from '../types/catalog';
+import type { CatalogBrowseState, CatalogChannel, CatalogFeed, CatalogPlatform } from '../types/catalog';
 
 export const catalogChannels: { id: CatalogChannel; title: string; subtitle: string }[] = [
   { id: 'tv', title: '最近热门剧集', subtitle: '发现正在被讨论的好故事' },
@@ -12,6 +12,7 @@ export const catalogChannels: { id: CatalogChannel; title: string; subtitle: str
 ];
 
 export function useCatalog(enabled: Ref<boolean>) {
+  const platform = ref<CatalogPlatform | 'all'>('all');
   const feeds = ref<Partial<Record<CatalogChannel, CatalogFeed>>>({});
   const browse = ref<Partial<Record<CatalogChannel, CatalogBrowseState>>>({});
   const loading = ref<CatalogChannel[]>([]);
@@ -29,14 +30,14 @@ export function useCatalog(enabled: Ref<boolean>) {
     loading: false, error: '', needsRefresh: false, endMessage: ''
   });
   const fetchFeed = async (channel: CatalogChannel, page: number, revision: string, controller: AbortController): Promise<CatalogFeed> => {
-    const params = new URLSearchParams({ channel, page: String(page) });
+    const params = new URLSearchParams({ channel, page: String(page), platform: platform.value });
     if (revision) params.set('revision', revision);
     const response = await authFetch(apiUrl('/api/catalog?' + params), { signal: controller.signal });
     const body = await response.json();
     if (response.status === 409 || body.code === 'CATALOG_CHANGED') throw Object.assign(new Error('目录已有更新，刷新后可继续浏览'), { code: 'CATALOG_CHANGED' });
     if (!response.ok || body.code !== 0 || !Array.isArray(body.data?.items) || body.data.loadError
       || (body.data.page !== undefined && body.data.page !== page) || (body.data.channel && body.data.channel !== channel)) throw new Error('目录加载失败');
-    return { ...body.data, items: body.data.items.map((item: CatalogFeed['items'][number]) => ({ ...item, poster: withAppBase(item.poster) })) };
+    return { ...body.data, items: body.data.items.map((item: CatalogFeed['items'][number]) => ({ ...item, poster: withAppBase(item.poster), backdrop: withAppBase(item.backdrop || item.poster) })) };
   };
   const readChannel = async (channel: CatalogChannel, run: number, epoch: number, attempt = 0, reset = false) => {
     if (!current(channel, run, epoch)) return;
@@ -109,13 +110,20 @@ export function useCatalog(enabled: Ref<boolean>) {
     generation++; cancel();
     if (!enabled.value) return;
     loading.value = catalogChannels.map(channel => channel.id);
-    await Promise.all(catalogChannels.map(channel => refreshChannel(channel.id)));
+    const run = generation;
+    await refreshChannel('tv');
+    if (run === generation && enabled.value) await Promise.all(catalogChannels.filter(channel => channel.id !== 'tv').map(channel => refreshChannel(channel.id)));
   };
   watch(enabled, value => {
     if (value) void refresh();
     else { generation++; cancel(); loading.value = []; feeds.value = {}; browse.value = {}; }
   }, { immediate: true });
   onBeforeUnmount(() => { generation++; cancel(); });
+  const selectPlatform = (value: CatalogPlatform | 'all') => {
+    if (platform.value === value) return;
+    platform.value = value; feeds.value = {}; browse.value = {};
+    void refresh();
+  };
   const items = computed(() => catalogChannels.flatMap(channel => browse.value[channel.id]?.items || feeds.value[channel.id]?.items || []));
-  return { feeds, browse, items, loading, refresh, refreshChannel, loadMore };
+  return { feeds, browse, items, loading, platform, selectPlatform, refresh, refreshChannel, loadMore };
 }

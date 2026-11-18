@@ -1,3 +1,4 @@
+import { ArchiveImportService } from './archiveImport.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,9 +11,15 @@ import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
-import { CatalogService } from './catalog.js';
+import { OfficialCatalogService } from './officialCatalog.js';
+import { catalogIdFromPath } from './officialCatalogData.js';
 import { OfficialProgressService } from './officialProgress.js';
 
+const requireCatalogId = value => {
+  const id = catalogIdFromPath(value);
+  if (!id) throw Object.assign(new Error('无效的作品标识'), { statusCode: 400 });
+  return id;
+};
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -49,11 +56,12 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     posterService: new PosterService(dataDir),
     resourceSearch: new ResourceSearchService(),
     officialProgress: new OfficialProgressService(),
-    catalog: new CatalogService(dataDir),
+    catalog: new OfficialCatalogService(dataDir),
     danmaku: new DanmakuService(dataDir),
     tvPlaybackClient,
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
   };
+  context.archiveImport = new ArchiveImportService(dataDir, { gateway: context.quarkGateway, resourceSearch: context.resourceSearch, userContext });
   context.libraryMaintenance = new LibraryMaintenance(context);
   return context;
 };
@@ -289,23 +297,23 @@ export const handleApiRequest = async (request, response, context) => {
     if (pathname === '/api/catalog' && request.method === 'GET') {
       const page = url.searchParams.get('page') || '1';
       if (!/^\d{1,2}$/.test(page)) throw Object.assign(new Error('无效的目录分页'), { statusCode: 400 });
-      sendSuccess(response, await context.catalog.get(url.searchParams.get('channel') || 'tv', Number(page), url.searchParams.get('revision') || ''));
+      sendSuccess(response, await context.catalog.get(url.searchParams.get('channel') || 'tv', Number(page), url.searchParams.get('revision') || '', url.searchParams.get('platform') || 'all'));
       return true;
     }
-    const catalogComments = pathname.match(/^\/api\/catalog\/works\/(\d{1,20})\/comments$/);
+    const catalogComments = pathname.match(/^\/api\/catalog\/works\/([^/]+)\/comments$/);
     if (catalogComments && request.method === 'GET') {
       const category = url.searchParams.get('category') || 'tv';
       if (!['tv', 'movie', 'anime', 'variety'].includes(category)) throw Object.assign(new Error('未知的影片类型'), { statusCode: 400 });
       const start = url.searchParams.get('start') || '0';
       if (!/^\d{1,2}$/.test(start)) throw Object.assign(new Error('无效的短评分页'), { statusCode: 400 });
-      sendSuccess(response, await context.catalog.comments(catalogComments[1], category, Number(start)));
+      sendSuccess(response, await context.catalog.comments(requireCatalogId(catalogComments[1]), category, Number(start)));
       return true;
     }
-    const catalogDetail = pathname.match(/^\/api\/catalog\/works\/(\d{1,20})$/);
+    const catalogDetail = pathname.match(/^\/api\/catalog\/works\/([^/]+)$/);
     if (catalogDetail && request.method === 'GET') {
       const category = url.searchParams.get('category') || 'tv';
       if (!['tv', 'movie', 'anime', 'variety'].includes(category)) throw Object.assign(new Error('未知的影片类型'), { statusCode: 400 });
-      sendSuccess(response, await context.catalog.detail(catalogDetail[1], category));
+      sendSuccess(response, await context.catalog.detail(requireCatalogId(catalogDetail[1]), category));
       return true;
     }
     const catalogPerson = pathname.match(/^\/api\/catalog\/people\/(\d{1,20})$/);
@@ -324,9 +332,9 @@ export const handleApiRequest = async (request, response, context) => {
       }
       return true;
     }
-    const catalogPoster = pathname.match(/^\/api\/catalog\/posters\/(\d{1,20})$/);
+    const catalogPoster = pathname.match(/^\/api\/catalog\/posters\/([^/]+)$/);
     if (catalogPoster && request.method === 'GET') {
-      const asset = await context.catalog.poster(catalogPoster[1]);
+      const asset = await context.catalog.poster(requireCatalogId(catalogPoster[1]), url.searchParams.get('kind') === 'backdrop' ? 'backdrop' : 'poster');
       if (!asset) sendJson(response, 404, { code: 'POSTER_NOT_FOUND', message: '海报暂不可用' });
       else {
         response.setHeader('Content-Type', asset.contentType);
@@ -381,6 +389,17 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    if (pathname === '/api/quark/archive-capabilities' && request.method === 'GET') {
+      sendSuccess(response, await context.quarkGateway.getArchiveCapabilities()); return true;
+    }
+    if (pathname === '/api/library/archive-jobs' && request.method === 'POST') {
+      sendSuccess(response, await context.archiveImport.start(await readRequestBody(request, 16 * 1024), user)); return true;
+    }
+    const archiveJob = pathname.match(/^\/api\/library\/archive-jobs\/([a-f0-9]{32})$/);
+    if (archiveJob && request.method === 'GET') {
+      sendSuccess(response, await context.archiveImport.get(archiveJob[1], user)); return true;
+    }
+
     if (pathname === '/api/quark/share-details' && request.method === 'POST') {
       const input = await readRequestBody(request);
       const controller = createProxyRequestController(request, response);
@@ -397,7 +416,10 @@ export const handleApiRequest = async (request, response, context) => {
         throw Object.assign(new Error('请输入有效的片名与分类'), { statusCode: 400, code: 'INVALID_PROGRESS_QUERY' });
       }
       const controller = createProxyRequestController(request, response);
-      try { sendSuccess(response, await context.officialProgress.lookup(keyword, { category, signal: controller.signal })); }
+      try {
+        const known = await context.catalog?.knownPlatforms?.(keyword, category) || [];
+        sendSuccess(response, await context.officialProgress.lookup(keyword, { category, signal: controller.signal, known }));
+      }
       finally { controller.cleanup(); }
       return true;
     }

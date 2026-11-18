@@ -30,11 +30,14 @@ export interface QuarkShareEntry {
   episodeTitle: string;
   videoCount: number;
   isSubtitle?: boolean;
+  isArchive?: boolean;
+  archiveFormat?: string;
 }
 
 export interface QuarkShareDetails {
   title: string;
   videoCount: number;
+  archiveCount?: number;
   episodeCount: number;
   entries: QuarkShareEntry[];
 }

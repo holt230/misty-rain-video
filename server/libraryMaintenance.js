@@ -84,7 +84,7 @@ export class LibraryMaintenance {
           const cards = library.map(item => {
             const saved = metadata.find(card => card.quarkFid === item.quarkFid);
             return saved ? { ...saved, ...item, quarkShareUrl: saved.quarkShareUrl || '', quarkPasscode: saved.quarkPasscode || '' } : null;
-          }).filter(Boolean);
+          }).filter(card => card && !card.quarkArchiveImported);
           const fids = new Set(cards.map(card => card.quarkFid));
           for (const fid of Object.keys(state.items)) if (!fids.has(fid)) delete state.items[fid];
           const due = cards.filter(card => {

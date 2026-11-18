@@ -192,3 +192,25 @@ test('Escape closes only the top dialog and restores focus before closing the pl
 });
 
 test.after(async () => { dom.window.close(); await fs.rm(directory, { recursive: true, force: true }); });
+
+test('rapid platform changes cancel the previous request and late responses cannot overwrite the selected platform', async t => {
+  let release, oldSignal;
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(input, 'http://localhost'), selected = url.searchParams.get('platform'), channel = url.searchParams.get('channel');
+    if (selected === 'qq' && channel === 'tv') {
+      oldSignal = init.signal;
+      return new Promise(resolve => { release = resolve; });
+    }
+    return catalogPage(channel, 1, [{ ...pageItems(1)[0], title: selected + '影片' }]);
+  });
+  const view = mountCatalog();
+  try {
+    await flush(); view.catalog.selectPlatform('qq'); await flush();
+    view.catalog.selectPlatform('mango'); await flush();
+    assert.equal(oldSignal.aborted, true);
+    assert.equal(view.catalog.feeds.value.tv.items[0].title, 'mango影片');
+    release(catalogPage('tv', 1, [{ ...pageItems(1)[0], title: '迟到的腾讯影片' }]));
+    await flush(); assert.equal(view.catalog.platform.value, 'mango');
+    assert.equal(view.catalog.feeds.value.tv.items[0].title, 'mango影片');
+  } finally { view.app.unmount(); }
+});

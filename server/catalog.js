@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { CatalogDetailsService, catalogImageHost } from './catalogDetails.js';
+import { artworkUrl, imageType } from './officialCatalogData.js';
 
 const CHANNELS = {
   tv: { type: 'tv', category: 'tv', tag: '热门', mediaCategory: 'tv' },
@@ -216,24 +217,27 @@ export class CatalogService {
   async poster(id) { return this.image((await this.workItem(id))?.posterUrl); }
 
   async image(url) {
-    if (!imageHost(url)) return null;
+    if (!imageHost(url) && !artworkUrl(url)) return null;
+    url = artworkUrl(url) || url;
     const key = crypto.createHash('sha256').update(url).digest('hex').slice(0, 32);
     if (this.images.has(key)) return this.images.get(key);
     const file = path.join(this.directory, key + '.jpg');
     try {
       const buffer = await fs.readFile(file);
-      return { buffer, contentType: 'image/jpeg' };
+      const contentType = imageType(buffer);
+      if (!contentType) return null;
+      return { buffer, contentType };
     } catch { /* Fetch only catalog-owned images; never accept a caller-provided URL. */ }
     while (this.images.size >= 4) await Promise.race(this.images.values());
     if (this.images.has(key)) return this.images.get(key);
     const task = (async () => {
       const response = await this.fetcher(url, {
         redirect: 'error',
-        headers: { 'User-Agent': 'MistyRainVideo/1.0', Referer: 'https://movie.douban.com/', Accept: 'image/jpeg' },
+        headers: { 'User-Agent': 'MistyRainVideo/1.0', Referer: url.includes('alicdn.com') ? 'https://www.youku.com/' : url.includes('iqiyipic.com') ? 'https://www.iqiyi.com/' : url.includes('hitv.com') ? 'https://www.mgtv.com/' : url.includes('qpic.cn') || url.includes('gtimg.') ? 'https://v.qq.com/' : 'https://movie.douban.com/', Accept: 'image/jpeg,image/png,image/webp' },
         signal: AbortSignal.timeout(8_000)
       });
       const contentType = response.headers.get('content-type')?.split(';')[0];
-      if (!response.ok || contentType !== 'image/jpeg' || !response.body) return null;
+      if (!response.ok || !['image/jpeg', 'image/png', 'image/webp'].includes(contentType) || !response.body) return null;
       if (Number(response.headers.get('content-length')) > 4 * 1024 * 1024) return null;
       const reader = response.body.getReader(), chunks = [];
       let length = 0;
@@ -247,7 +251,7 @@ export class CatalogService {
         }
       } finally { reader.releaseLock(); }
       const buffer = Buffer.concat(chunks);
-      if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+      if (imageType(buffer) !== contentType) return null;
       await fs.writeFile(file, buffer);
       // Artwork and portraits share a bounded cache, without evicting the image just written.
       const files = (await fs.readdir(this.directory)).filter(name => /^[a-f0-9]{32}\.jpg$/.test(name));

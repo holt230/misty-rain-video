@@ -1,3 +1,4 @@
+import { ForumResourceSearch } from './forumResourceSearch.js';
 import { CatalogResourceSearch } from './catalogResourceSearch.js';
 import { configuredSearchChannels, configuredSearchUrls } from './searchConfig.js';
 import { ChannelResourceSearch } from './channelResourceSearch.js';
@@ -30,6 +31,7 @@ function normalizePayload(payload) {
     if (!match) continue;
     const url = `https://pan.quark.cn/s/${match[1]}`;
     if (!unique.has(url)) unique.set(url, { url, note: safeText(row.note || row.title, 800), password: safeText(row.password, 32), datetime: safeText(row.datetime, 64), source: safeText(row.source, 160),
+      ...(row.source_url ? { source_url: safeText(row.source_url, 2048) } : {}),
       ...(row.work_title ? { work_title: safeText(row.work_title, 160) } : {}),
       ...(['tv', 'anime', 'movie', 'variety'].includes(row.category) ? { category: row.category } : {}),
       ...(Number.isInteger(row.latest_episode) && row.latest_episode >= 0 && row.latest_episode <= 5000 ? { latest_episode: row.latest_episode } : {}),
@@ -56,7 +58,7 @@ function mergeResults(lists) {
 
 /** A search returns only this operation's results; no stored results or fallback queries. */
 export class ResourceSearchService {
-  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), channels = configuredSearchChannels(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch, publicFeedSearch } = {}) {
+  constructor({ fetchImpl = globalThis.fetch, urls = configuredSearchUrls(), channels = configuredSearchChannels(), source = configuredSource(), timeoutMs = configuredTimeout(), maxConcurrent = 4, catalogSearch, channelSearch, publicFeedSearch, forumSearch } = {}) {
     this.fetchImpl = fetchImpl;
     this.urls = [...new Set(urls || [])];
     this.useCatalog = urls === undefined;
@@ -67,6 +69,7 @@ export class ResourceSearchService {
     this.catalogSearch = catalogSearch || new CatalogResourceSearch({ fetchImpl, timeoutMs });
     this.channelSearch = channelSearch || new ChannelResourceSearch({ fetchImpl, timeoutMs: Math.min(timeoutMs, 5000) });
     this.publicFeedSearch = publicFeedSearch || new PublicFeedResourceSearch({ fetchImpl, timeoutMs });
+    this.forumSearch = forumSearch || new ForumResourceSearch({ fetchImpl, timeoutMs });
     this.channels = configuredSearchChannels(channels.join(','));
   }
 
@@ -85,7 +88,7 @@ export class ResourceSearchService {
 
   async run(keyword, category) {
     if (this.useCatalog) {
-      const names = ['erxiaopan', 'public_guoman4K', ...this.channels];
+      const names = ['erxiaopan', 'public_guoman4K', 'quark4k', ...this.channels];
       const sources = [];
       const inspect = async (name, loader) => {
         const started = Date.now();
@@ -104,6 +107,7 @@ export class ResourceSearchService {
       const results = await Promise.allSettled([
         inspect('erxiaopan', () => this.catalogSearch.search(keyword, { category })),
         inspect('public_guoman4K', () => this.publicFeedSearch.search(keyword, { category })),
+        inspect('quark4k', () => this.forumSearch.search(keyword, { category })),
         ...this.channels.map(channel => inspect(channel, () => this.channelSearch.search(keyword, { category, channel })))
       ]);
       const successes = results.filter(result => result.status === 'fulfilled').map(result => result.value);

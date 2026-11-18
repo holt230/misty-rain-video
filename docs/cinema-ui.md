@@ -1,6 +1,8 @@
 # 内容首页与观影交互
 
-本轮基于 main-master（7add5dd），开发分支 codex/tencent-style-ui。
+当前首页片单已改为四平台聚合，最新实现见 [四平台首页片单](official-platform-home.md)。以下保留初版及历次演进记录。
+
+初版基于 main-master（7add5dd），开发分支 codex/tencent-style-ui。
 
 ## 功能与范围
 

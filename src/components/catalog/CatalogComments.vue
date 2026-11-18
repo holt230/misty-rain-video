@@ -8,7 +8,7 @@ const start = ref(0);
 const pages = shallowRef<Record<number, CatalogComments>>({});
 watch(() => props.item.catalogId, () => { start.value = 0; pages.value = {}; }, { flush: 'sync' });
 const { data, loading, error, refresh } = useCatalogDetails<CatalogComments>(
-  () => '/api/catalog/works/' + props.item.catalogId.replace(/^douban:/, '') + '/comments?category=' + props.item.category + '&start=' + start.value,
+  () => '/api/catalog/works/' + encodeURIComponent(props.item.catalogId.replace(/^douban:/, '')) + '/comments?category=' + props.item.category + '&start=' + start.value,
   value => value
 );
 watch(data, value => {
@@ -31,7 +31,7 @@ const firstCharacter = (name: string) => Array.from(name)[0] || '影';
 </script>
 <template>
   <section class="detail-information catalog-comments" aria-labelledby="catalog-comments-title" :aria-busy="loading">
-    <header class="comments-heading"><div><h2 id="catalog-comments-title"><MessageCircle />观众短评</h2><p>看看观众怎么说 · 热门短评</p></div><span v-if="lastPage?.total">共 {{ countFormat.format(lastPage.total) }} 条</span></header>
+    <header class="comments-heading"><div><h2 id="catalog-comments-title"><MessageCircle />观众短评</h2><p>看看观众怎么说 · {{ lastPage?.sourceName || data?.sourceName || '豆瓣' }}短评</p></div><span v-if="lastPage?.total">共 {{ countFormat.format(lastPage.total) }} 条</span></header>
     <p v-if="loading && !comments.length" class="comments-note" role="status">正在加载观众短评…</p>
     <div v-if="error || data?.message" class="comments-feedback" role="status"><span>{{ error || data?.message }}</span><button type="button" class="text-link" :disabled="loading" @click="refresh"><RefreshCw />重新加载短评</button></div>
     <div v-if="comments.length" class="comment-list">

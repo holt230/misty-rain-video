@@ -250,10 +250,11 @@
   .screen-header { padding-top: calc(var(--mobile-header-top-space) + var(--safe-area-top)); padding-bottom: 12px; min-height: 74px; }
   .cinema-brand { font-size: 16px; gap: 6px; }
   .cinema-brand > :first-child { width: 30px; height: 30px; }
-  .header-search { flex: 1; width: auto; padding: 0 12px; min-width: 0; gap: 7px; }
-  .header-search span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .header-search svg { width: 16px; height: 16px; }
-  .cinema-header > .header-history { width: 36px; flex-basis: 36px; padding: 8px; }
+  .cinema-header .header-search { display: inline-grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; margin-left: auto; padding: 11px; gap: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); -webkit-tap-highlight-color: transparent; }
+  .cinema-header .header-search span { display: none; }
+  .cinema-header .header-search svg { width: 21px; height: 21px; }
+  .cinema-header > .header-history { width: 44px; flex-basis: 44px; padding: 11px; }
+  .cinema-header .header-search:focus-visible { outline: 2px solid var(--liquid-accent); outline-offset: -4px; }
   .channel-nav { gap: 24px; padding-top: 2px; padding-bottom: 10px; }
   .channel-nav button { font-size: 14px; }
   .channel-nav button.active { font-size: 19px; }

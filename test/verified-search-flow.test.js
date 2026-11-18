@@ -92,3 +92,42 @@ test('准确发布标题可以核对有明确发布者标记的短目录名，�
 });
 
 const mockFetch=(t,handler)=>t.mock.method(globalThis,'fetch',(url,init)=>String(url).includes('/official-progress')?Promise.resolve(Response.json({code:0,data:{status:'unknown',works:[],checkedAt:'',message:'官方进度暂未确认'}})):handler(url,init));
+
+test('仙逆真实失败结构：3个失效分享和1个无正片目录明确汇总，不误报认证失败或存在可保存结果', async () => {
+ const rows = [0,1,2,3].map(n => ({ ...resource, id:'xianni'+n, url:'https://pan.quark.cn/s/xianni'+n, title:'仙逆', workTitle:'仙逆', year:undefined }));
+ const result = await verifySearchResults(rows, options({ title:'仙逆', inspect:async row => {
+  if(row.id!=='xianni3')throw Object.assign(new Error('分享地址已失效'),{code:'QUARK_SHARE_UNAVAILABLE',status:422});
+  return {title:'仙尼2026-7',videoCount:0,episodeCount:0,entries:[]};
+ } }));
+ assert.equal(result.resources.length,0);assert.equal(result.needsAuth,undefined);
+ assert.match(result.message,/本次核对 4 个分享/);assert.match(result.message,/3 个已失效/);assert.match(result.message,/1 个未识别到正片视频/);
+});
+
+test('电视剧同集多画质压缩包仍能提供明确的解压入口，不能被标成已验证可播放',async()=>{
+ const item={...resource,title:'折月亮',workTitle:'折月亮',category:'tv',year:'2026',source:'quark4k'};
+ const result=await verifySearchResults([item],options({title:'折月亮',category:'tv',episode:27,inspect:async()=>({title:'Z 这越亮',videoCount:0,entries:[
+  {fid:'small',name:'27.zip',isArchive:true,archiveFormat:'zip',isVideo:false,episodeNumber:27,size:100},
+  {fid:'large',name:'27.zip',isArchive:true,archiveFormat:'zip',isVideo:false,episodeNumber:27,size:200}
+ ]})}));
+ assert.equal(result.resources.length,1);assert.equal(result.resources[0].archivePreparation.archiveFid,'large');
+ assert.equal(result.resources[0].verification,undefined);
+});
+
+
+test('全集档案按实际编号去重显示范围，保留单集操作语义，不能冒充已验证视频', async () => {
+ const item={...resource,title:'尚公主',workTitle:'尚公主',category:'tv',year:'2026',source:'quark4k',latestEpisode:40};
+ const archives=Array.from({length:40},(_,i)=>({fid:'zip'+(i+1),name:(i+1)+'.zip',isArchive:true,archiveFormat:'zip',isVideo:false,episodeNumber:i+1,size:100}));
+ const inspect=async()=>({title:'S 商公猪 40集全',videoCount:0,entries:[...archives,...archives.map(a=>({...a,fid:a.fid+'large',size:200}))]});
+ const checked=await verifySearchResults([item],options({title:'尚公主',category:'tv',officialLatest:40,inspect}));
+ const found=checked.resources[0];
+ assert.equal(found.verification,undefined);assert.equal(found.archivePreparation.archiveFid,'zip40large');
+ assert.deepEqual(found.archivePreparation.availableEpisodes,Array.from({length:40},(_,i)=>i+1));
+ assert.deepEqual(found.archivePreparation.missingEpisodes,[]);
+ assert.match(found.archivePreparation.summary,/1～40/);assert.match(found.archivePreparation.notice,/本次仅解压第 40 集/);
+ const absent=await verifySearchResults([item],options({title:'尚公主',category:'tv',officialLatest:40,inspect:async()=>({title:'S 商公猪',videoCount:0,entries:archives.filter(a=>a.episodeNumber!==17)})}));
+ assert.deepEqual(absent.resources[0].archivePreparation.missingEpisodes,[17]);
+ assert.match(absent.resources[0].archivePreparation.notice,/第 17 集压缩包未找到/);
+ const selected=await verifySearchResults([item],options({title:'尚公主',category:'tv',episode:5,inspect}));
+ assert.deepEqual(selected.resources[0].archivePreparation.availableEpisodes,[5]);
+ assert.equal(selected.resources[0].archivePreparation.episode,5);
+});
