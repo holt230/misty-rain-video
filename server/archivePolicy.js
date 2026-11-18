@@ -4,11 +4,21 @@ const supported = new Set(['zip', 'rar', '7z']);
 export const archiveFormat = name => String(name || '').match(/\.(zip|rar|7z|iso)$/i)?.[1].toLowerCase() || '';
 export const supportedArchive = name => supported.has(archiveFormat(name));
 export const archiveError = (message, code = 'QUARK_ARCHIVE_FAILED', statusCode = 422) => Object.assign(new Error(message), { code, statusCode });
+export function mergeArchiveMetadata(item, input, original) {
+  const next = { ...item, catalogId: original?.catalogId || input.catalogId || undefined, poster: original?.poster || input.poster || '' };
+  if (original) {
+    for (const key of ['quarkShareUrl', 'quarkPasscode', 'quarkSelectionFids', 'quarkQuality', 'tag', 'desc', 'status']) {
+      if (Object.hasOwn(original, key)) next[key] = original[key]; else delete next[key];
+    }
+    if (!original.quarkArchiveImported) { delete next.quarkArchiveImported; delete next.quarkArchiveEpisode; }
+  }
+  return next;
+}
 export function requireArchiveCapacity(capability, bytes) {
-  if (!capability.isAuthenticated) throw archiveError('网盘认证已失效，请重新认证', 'QUARK_AUTH_REQUIRED', 401);
-  if (!capability.isSvip) throw archiveError('当前账号不支持云端解压，本次未转存或入库；应用不会自动开通会员。', 'QUARK_ARCHIVE_MEMBERSHIP_REQUIRED');
-  if (!Number.isFinite(capability.freeBytes) || !Number.isFinite(bytes) || bytes <= 0) throw archiveError('暂未确认剩余容量，未开始转存。', 'QUARK_ARCHIVE_CAPACITY_UNKNOWN');
-  if (capability.freeBytes < bytes * 3) throw archiveError('剩余容量不足以同时保留压缩包和解压视频，未开始转存。', 'QUARK_ARCHIVE_SPACE_REQUIRED');
+  if (!capability.isAuthenticated) throw archiveError('网盘登录已失效，请重新登录。', 'QUARK_AUTH_REQUIRED', 401);
+  if (!capability.isSvip) throw archiveError('当前网盘账号暂不支持保存这类资源，请检查会员权限。', 'QUARK_ARCHIVE_MEMBERSHIP_REQUIRED');
+  if (!Number.isFinite(capability.freeBytes) || !Number.isFinite(bytes) || bytes <= 0) throw archiveError('暂时无法确认网盘空间，请稍后重试。', 'QUARK_ARCHIVE_CAPACITY_UNKNOWN');
+  if (capability.freeBytes < bytes * 3) throw archiveError('网盘空间不足，请清理后重试。', 'QUARK_ARCHIVE_SPACE_REQUIRED');
 }
 
 export function selectArchiveEpisode(episodes, request, publication) {

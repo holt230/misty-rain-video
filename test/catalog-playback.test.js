@@ -82,8 +82,27 @@ test('电视剧自动播放仍优先连续来源，不把只有末集的分享�
   assert.equal(result.status, 'manual'); assert.match(result.message, /缺 29 集/); assert.match(result.message, /未执行入库/);
 });
 
+test('电视剧找到压缩包时先自动核对整部补集计划，不直接保存单集', async () => {
+  const source = { title: '测试剧', workTitle: '测试剧', category: 'tv', year: '2026', url: 'https://pan.quark.cn/s/archive',
+    batchEligible: true, archivePreparation: { batchEligible: true, episode: 27 } };
+  let previews = 0;
+  const result = await prepareCatalogPlayback(work, { ...defaults, resources: () => [source],
+    inspect: async () => assert.fail('Archive search was already inspected'),
+    save: async () => assert.fail('A batch must not start before the plan is shown'),
+    previewBatch: async () => { previews++; return true; } });
+  assert.equal(result.status, 'planned'); assert.equal(previews, 1);
+});
+
 test('已经核对的动漫分段不重复读取也不会因为未全集而被自动流程丢弃',async()=>{
  const source={title:'测试动画',workTitle:'测试动画',category:'anime',url:'https://pan.quark.cn/s/verified',verification:{complete:false,summary:'第219集',episodeCount:1,selectedFids:['219']}};
+ let saved;
+ const result=await prepareCatalogPlayback({title:'测试动画',category:'anime'},{...defaults,resources:()=>[source],inspect:()=>assert.fail('Already verified'),save:async(_,fids)=>{saved=fids;return true;}});
+ assert.equal(result.status,'saved');assert.deepEqual(saved,['219']);
+});
+
+test('动漫已核对视频和压缩包并存时仍可直接保存已有视频',async()=>{
+ const source={title:'测试动画',workTitle:'测试动画',category:'anime',url:'https://pan.quark.cn/s/mixed',
+  archivePreparation:{batchEligible:false,episode:219},verification:{complete:false,summary:'第219集',episodeCount:1,selectedFids:['219']}};
  let saved;
  const result=await prepareCatalogPlayback({title:'测试动画',category:'anime'},{...defaults,resources:()=>[source],inspect:()=>assert.fail('Already verified'),save:async(_,fids)=>{saved=fids;return true;}});
  assert.equal(result.status,'saved');assert.deepEqual(saved,['219']);

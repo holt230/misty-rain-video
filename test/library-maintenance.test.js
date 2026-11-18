@@ -101,6 +101,18 @@ test('后台补集保留 FID 和播放历史；重启读取进度、不提前重
   assert.equal(f.calls.length, 1);
 });
 
+test('定时维护只补电视剧，不自动处理动漫或其他分类', async t => {
+  const f = fixture(t);
+  const anime = { ...card, id: 'quark:anime', quarkFid: 'anime', title: '测试动漫', category: 'anime' };
+  const movie = { ...card, id: 'quark:movie', quarkFid: 'movie', title: '测试电影', category: 'movie' };
+  f.data.get('one').mediaRepository.save(anime);
+  f.data.get('one').mediaRepository.save(movie);
+  f.context.quarkGateway.listLibrary = async user => user.folder === 'one' ? [card, anime, movie] : [];
+  await f.service.runOnce();
+  assert.deepEqual(f.calls, [['append', 'one', 'show']]);
+  assert.deepEqual(f.service.status(f.users[0]).items.map(item => item.quarkFid), ['show']);
+});
+
 test('来源连续三次失效才检索关联，保持原文件目录；网络或认证错误不触发换源', async t => {
   const f = fixture(t);
   f.setStatus({ updateCheckAvailable: false, code: 'QUARK_SHARE_UNAVAILABLE' });

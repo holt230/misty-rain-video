@@ -1,4 +1,5 @@
 import { ArchiveImportService } from './archiveImport.js';
+import { ArchiveBatchService } from './archiveBatch.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,6 +63,8 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
   };
   context.archiveImport = new ArchiveImportService(dataDir, { gateway: context.quarkGateway, resourceSearch: context.resourceSearch, userContext });
+  context.archiveBatch = new ArchiveBatchService(dataDir, { gateway: context.quarkGateway, resourceSearch: context.resourceSearch,
+    officialProgress: context.officialProgress, catalog: context.catalog, archiveImport: context.archiveImport, userContext });
   context.libraryMaintenance = new LibraryMaintenance(context);
   return context;
 };
@@ -394,6 +397,19 @@ export const handleApiRequest = async (request, response, context) => {
     }
     if (pathname === '/api/library/archive-jobs' && request.method === 'POST') {
       sendSuccess(response, await context.archiveImport.start(await readRequestBody(request, 16 * 1024), user)); return true;
+    }
+    if (pathname === '/api/library/archive-batches/preview' && request.method === 'POST') {
+      sendSuccess(response, await context.archiveBatch.preview(await readRequestBody(request, 16 * 1024), user)); return true;
+    }
+    if (pathname === '/api/library/archive-batches' && request.method === 'POST') {
+      sendSuccess(response, await context.archiveBatch.start(await readRequestBody(request, 16 * 1024), user)); return true;
+    }
+    if (pathname === '/api/library/archive-batches' && request.method === 'GET') {
+      sendSuccess(response, await context.archiveBatch.list(user)); return true;
+    }
+    const stopArchiveBatch = pathname.match(/^\/api\/library\/archive-batches\/([a-f0-9]{32})\/stop$/);
+    if (stopArchiveBatch && request.method === 'POST') {
+      sendSuccess(response, await context.archiveBatch.stop(stopArchiveBatch[1], user)); return true;
     }
     const archiveJob = pathname.match(/^\/api\/library\/archive-jobs\/([a-f0-9]{32})$/);
     if (archiveJob && request.method === 'GET') {

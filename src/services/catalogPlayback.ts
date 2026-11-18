@@ -10,6 +10,7 @@ interface AutomaticPlaybackOptions {
   cancelled: () => boolean;
   inspect: (resource: ResourceItem, signal?: AbortSignal) => Promise<QuarkShareDetails>;
   save: (resource: ResourceItem, selectedFids?: string[]) => Promise<boolean>;
+  previewBatch?: (resource: ResourceItem) => Promise<boolean>;
   progress: (message: string) => void;
   now?: () => number;
   wait?: () => Promise<void>;
@@ -31,8 +32,13 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
       continue;
     }
     checked.add(resource.url);
-    if (resource.archivePreparation && !resource.verification) {
-      lastSourceError = '已找到压缩包，可在结果中点击解压按钮，核对实际视频后入库。';
+    if (item.category === 'tv' && resource.batchEligible && options.previewBatch) {
+      options.progress('已找到剧集，正在检查还缺多少集…');
+      const prepared = await options.previewBatch(resource);
+      return { status: prepared ? 'planned' as const : 'failed' as const, attempts: checked.size };
+    }
+    if (resource.archivePreparation && (!resource.verification || (resource.archivePreparation.batchEligible && resource.verification.complete === false))) {
+      lastSourceError = '已找到资源，可在结果中保存到片库。';
       continue;
     }
     if (resource.verification) {

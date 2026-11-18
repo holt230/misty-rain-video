@@ -1614,6 +1614,7 @@ defineExpose({ retry, dismissLayer });
             <strong>{{ libraryCoverage.summary }}</strong>
             <span v-if="officialWork">{{ officialWork.completed ? `官方共 ${officialWork.latestEpisode} 集` : `官方已更新至第 ${officialWork.latestEpisode} 集` }} · {{ officialWork.platform }}</span>
             <span v-if="libraryCoverage.missingLabel">{{ libraryCoverage.missingLabel }}</span>
+            <button v-if="media?.category === 'tv' && libraryCoverage.missingLabel" type="button" class="episode-coverage-action" @click="emit('re-search', media)">补齐缺少的剧集</button>
           </div>
           <div class="episode-heading">
             <div class="episode-heading-title">
@@ -1783,6 +1784,7 @@ defineExpose({ retry, dismissLayer });
 .episode-update-time { font-variant-numeric: tabular-nums; }
 .episode-coverage { display: grid; flex-shrink: 0; gap: 6px; margin: 16px 12px 0; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 14px; background: var(--surface-1); font-size: 12px; line-height: 1.6; }
 .episode-coverage strong { color: var(--text-primary); font-weight: 600; }.episode-coverage span { color: var(--text-secondary); }
+.episode-coverage-action { justify-self: start; min-height: 36px; padding: 0 14px; border: 1px solid var(--divider); border-radius: 18px; color: var(--text-primary); background: var(--glass-bg); font-size: .75rem; }
 .episode-ranges { display: flex; flex-shrink: 0; gap: 6px; overflow-x: auto; padding: 0 12px 10px; }
 .episode-ranges button { min-height: 44px; flex-shrink: 0; padding: 0 14px; border: var(--glass-border); border-radius: 24px; color: var(--text-secondary); background: var(--glass-bg); font-size: .76rem; }
 .episode-ranges button.active { color: var(--liquid-accent-strong); background: var(--glass-lens); box-shadow: var(--glass-highlight-inner); font-weight: 650; }

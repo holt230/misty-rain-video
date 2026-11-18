@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { archiveImportMessage, importArchiveResource } from './services/archiveImport';
+import { archiveImportMessage, importArchiveResource, listArchiveBatches, previewArchiveBatch, startArchiveBatch, stopArchiveBatch,
+  type ArchiveBatchJob, type ArchiveBatchPreview } from './services/archiveImport';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Plus, RefreshCw } from '@lucide/vue';
 import LoginScreen from './components/auth/LoginScreen.vue';
@@ -27,7 +28,7 @@ import { useAuth } from './composables/useAuth';
 import { useToast } from './composables/useToast';
 import { usePlaybackHistory } from './composables/usePlaybackHistory';
 import { MediaStore } from './services/mediaStore';
-import { getLibrarySaveFeedback, type LibrarySaveFeedback } from './services/libraryFeedback';
+import { getLibrarySaveFeedback, LibrarySaveError, type LibrarySaveFeedback } from './services/libraryFeedback';
 import type { MediaItem, CategoryType, PlaybackHistoryEntry } from './types/media';
 import type { ResourceItem, SearchCategory } from './types/search';
 
@@ -99,8 +100,13 @@ const automaticStatus = ref('');
 const automaticNotice = ref('');
 const transferSavedMedia = ref<MediaItem | null>(null);
 const transferSavedSummary = ref('');
+const archiveBatchPreview = ref<{ resourceId: string; plan: ArchiveBatchPreview } | null>(null);
+const archiveBatchJobs = ref<ArchiveBatchJob[]>([]);
+const transferBatchId = ref('');
+const transferBatch = computed(() => archiveBatchJobs.value.find(job => job.id === transferBatchId.value));
 watch([isTransferOpen, searchPending], () => {
-  if (!isTransferOpen.value || searchPending.value) { transferSavedMedia.value = null; transferSavedSummary.value = ''; }
+  if (!isTransferOpen.value || searchPending.value) { transferSavedMedia.value = null; transferSavedSummary.value = ''; transferBatchId.value = ''; }
+  if (!isTransferOpen.value || searchPending.value) archiveBatchPreview.value = null;
   if (searchPending.value) { saveError.value = null; failedResourceId.value = ''; }
 });
 let automaticSequence = 0;
@@ -132,6 +138,55 @@ const saveError = ref<LibrarySaveFeedback | null>(null);
 const failedResourceId = ref('');
 const actionMedia = ref<MediaItem | null>(null);
 const mobileTab = ref<MobileDockTab>('home');
+const stoppingArchiveBatch = ref('');
+let archiveBatchTimer: ReturnType<typeof setTimeout> | undefined;
+let archiveBatchRefreshing = false;
+let archiveBatchOwner = '';
+const refreshArchiveBatches = async () => {
+  if (!authenticated.value || !user.value || archiveBatchRefreshing) return;
+  archiveBatchRefreshing = true;
+  const username = user.value.username;
+  const requestedAt = Date.now();
+  try {
+    const previous = new Map(archiveBatchJobs.value.map(job => [job.id, job.status]));
+    const jobs = await listArchiveBatches();
+    if (username !== user.value?.username) return;
+    const justStarted = archiveBatchJobs.value.filter(job => job.status === 'running'
+      && Date.parse(job.updatedAt) >= requestedAt - 1000 && !jobs.some(item => item.id === job.id));
+    archiveBatchJobs.value = [...justStarted, ...jobs];
+    const receipt = jobs.find(job => job.id === transferBatchId.value);
+    if (receipt) {
+      transferSavedSummary.value = receipt.message;
+      if (transferSavedMedia.value && receipt.targetFid) transferSavedMedia.value = { ...transferSavedMedia.value, quarkFid: receipt.targetFid };
+    }
+    if (jobs.some(job => previous.get(job.id) === 'running' && job.status !== 'running')) void refreshList(true);
+  } catch { /* Keep the last known status and retry while a task is running. */ }
+  finally {
+    archiveBatchRefreshing = false;
+    clearTimeout(archiveBatchTimer);
+    if (authenticated.value && user.value?.username && user.value.username !== username) {
+      archiveBatchTimer = setTimeout(() => void refreshArchiveBatches(), 0);
+    } else if (authenticated.value && archiveBatchJobs.value.some(job => job.status === 'running')) {
+      archiveBatchTimer = setTimeout(() => void refreshArchiveBatches(), 5000);
+    }
+  }
+};
+watch([authenticated, () => user.value?.username, mobileTab], ([ready]) => {
+  const username = user.value?.username || '';
+  if (archiveBatchOwner !== username) {
+    clearTimeout(archiveBatchTimer); archiveBatchJobs.value = []; archiveBatchPreview.value = null; archiveBatchOwner = username;
+  }
+  if (ready && user.value) void refreshArchiveBatches();
+  else { clearTimeout(archiveBatchTimer); archiveBatchJobs.value = []; }
+}, { immediate: true });
+onBeforeUnmount(() => clearTimeout(archiveBatchTimer));
+const stopBatch = async (id: string) => {
+  if (stoppingArchiveBatch.value) return;
+  stoppingArchiveBatch.value = id;
+  try { await stopArchiveBatch(id); await refreshArchiveBatches(); }
+  catch (error) { toast.show(error instanceof Error ? error.message : '暂时无法停止补集', '×'); }
+  finally { stoppingArchiveBatch.value = ''; }
+};
 const selectedHistoryEntry = ref<PlaybackHistoryEntry | null>(null);
 const isCheckingUpdates = ref(false);
 const isApplyingUpdates = ref(false);
@@ -313,6 +368,12 @@ const handleReSearch = (media: MediaItem) => {
   openTransferModal(media);
   setMobileHistoryLayer('transfer', replaceHistory);
 };
+const resumeArchiveBatch = (job: ArchiveBatchJob) => {
+  const item = allMediaList.value.find(media => media.quarkFid === job.targetFid)
+    || allMediaList.value.find(media => media.category === 'tv' && media.title === job.title)
+    || { id: `search-batch-${job.id}`, title: job.title, category: 'tv' as const, tag: '', poster: '' };
+  handleReSearch(item);
+};
 
 let catalogOrigin: { page: MobileDockTab; top: number } | null = null;
 const openCatalogDetail = (item: CatalogItem) => {
@@ -375,8 +436,28 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
   const account = user.value?.username;
   const playAfterSave = playAfterTransfer.value;
   try {
+    if (cat === 'tv' && bestRes?.batchEligible) {
+        const plan = archiveBatchPreview.value?.resourceId === bestRes.id ? archiveBatchPreview.value.plan : null;
+        if (!plan?.canStart) {
+          archiveImportMessage.value = '正在检查还缺多少集…';
+          const preview = await previewArchiveBatch(cardToSave, bestRes);
+          if (account !== user.value?.username) return false;
+          archiveBatchPreview.value = { resourceId: bestRes.id, plan: preview };
+          return false;
+        }
+        archiveImportMessage.value = '正在准备保存…';
+        const job = await startArchiveBatch(cardToSave, bestRes, plan.token);
+        if (account !== user.value?.username) return false;
+        archiveBatchJobs.value = [job, ...archiveBatchJobs.value.filter(item => item.id !== job.id)];
+        transferBatchId.value = job.id;
+        transferSavedMedia.value = { ...cardToSave, quarkFid: job.targetFid || cardToSave.quarkFid };
+        transferSavedSummary.value = job.message;
+        cancelAutomatic(); pendingCatalog.value = null; playAfterTransfer.value = false;
+        void refreshArchiveBatches();
+        return true;
+    }
     if (bestRes?.archivePreparation && !bestRes.verification) {
-      archiveImportMessage.value = '正在检查云端解压条件…';
+      archiveImportMessage.value = '正在准备保存…';
       const result = await importArchiveResource(cardToSave, bestRes, cat);
       if (account !== user.value?.username) return false;
       await refreshList(true); currentCategory.value = cat;
@@ -408,6 +489,7 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
     }
     return true;
   } catch (error) {
+    if (error instanceof LibrarySaveError && error.code === 'ARCHIVE_PLAN_CHANGED') archiveBatchPreview.value = null;
     saveError.value = getLibrarySaveFeedback(error);
     failedResourceId.value = bestRes?.id || 'direct';
     return false;
@@ -584,6 +666,10 @@ watch([isAnalyzing, searchPending, quarkResources], async () => {
     cancelled: () => sequence !== automaticSequence || !isTransferOpen.value,
     inspect: (resource, signal) => QuarkStreamService.getShareDetails(resource.url, resource.password || '', signal),
     save: (resource, fids) => handleSaveCard(item, item.category, resource, fids),
+    previewBatch: async resource => {
+      await handleSaveCard(item, item.category, resource);
+      return archiveBatchPreview.value?.resourceId === resource.id;
+    },
     progress: message => { if (sequence === automaticSequence) automaticStatus.value = message; }
   });
   if (sequence !== automaticSequence) return;
@@ -619,6 +705,13 @@ const showSavedLibrary = () => {
       <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :error="failedResourceId === 'direct' ? saveError : null" @search="handleSearchMedia" @select="openCatalogDetail" @play="playSearchLibraryMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
       <main v-show="mobileTab === 'library'" class="page-container library-page">
         <header class="library-intro"><div class="library-title"><h1>我的片库</h1><p>{{ allMediaList.length }} 部影片，随时开场</p></div><div class="library-actions"><button type="button" class="check-updates-button" :class="{ checking: isCheckingUpdates }" :disabled="isCheckingUpdates || isApplyingUpdates" aria-label="检查片库更新" @click="checkLibraryUpdates(true, true)"><RefreshCw /><span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span></button><button type="button" class="add-library-button" @click="focusMobileSearch"><Plus />添加</button></div></header>
+        <section v-if="archiveBatchJobs.length" class="archive-batches" aria-label="电视剧补集任务">
+          <div v-for="job in archiveBatchJobs" :key="job.id" class="archive-batch-status" role="status">
+            <div><strong>{{ job.title }} · {{ job.status === 'running' ? '正在补集' : job.status === 'success' ? '已补齐' : '补集未完成' }}</strong><p>{{ job.message }}</p><small>已完成 {{ job.completedEpisodes.length }} / {{ job.total }} 集<span v-if="job.cleanupPendingCount"> · 部分临时文件未清理，可能占用网盘空间</span></small></div>
+            <button v-if="job.status === 'running'" type="button" :disabled="stoppingArchiveBatch === job.id" @click="stopBatch(job.id)">停止补集</button>
+            <button v-else-if="job.status !== 'success'" type="button" @click="resumeArchiveBatch(job)">继续补集</button>
+          </div>
+        </section>
         <div class="category-toolbar"><CategoryTabs v-model="currentCategory" :counts="categoryCounts" /></div>
         <div class="library-filter-row"><div role="group" aria-label="片库状态"><button type="button" :class="{ active: libraryFilter === 'all' }" :aria-pressed="libraryFilter === 'all'" @click="libraryFilter = 'all'">全部</button><button type="button" :class="{ active: libraryFilter === 'watching' }" :aria-pressed="libraryFilter === 'watching'" @click="libraryFilter = 'watching'">在看</button><button type="button" :class="{ active: libraryFilter === 'updated' }" :aria-pressed="libraryFilter === 'updated'" @click="libraryFilter = 'updated'">有更新</button></div><select v-model="librarySort" aria-label="片库排序"><option value="default">默认排序</option><option value="recent">最近观看</option><option value="title">片名排序</option></select></div>
         <button v-if="availableUpdateMedia.length" type="button" class="apply-updates-button" :disabled="isApplyingUpdates || isCheckingUpdates" @click="applyLibraryUpdates(availableUpdateMedia)">{{ isApplyingUpdates ? '正在补充新剧集…' : availableUpdateMedia.length + ' 部影片发现新剧集，立即补集' }}</button>
@@ -631,7 +724,7 @@ const showSavedLibrary = () => {
     </div>
     <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" @resolved="resolveCatalogItem" :in-library="!!findCatalogMedia(catalogDetail, allMediaList)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
     <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" :requested-episode="requestedLibraryEpisode" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
-    <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :saving-message="archiveImportMessage" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
+    <QuarkTransferModal ref="transferPageRef" v-if="isTransferOpen" :is-open="isTransferOpen" :is-analyzing="isAnalyzing || !!automaticStatus" :automatic-status="automaticStatus" @cancel-automatic="cancelAutomatic" :play-after-save="playAfterTransfer" :media="selectedMedia" :current-category="currentCategory" :quark-resources="quarkResources" :search-error="searchError" :search-notice="automaticNotice || searchNotice" :search-pending="searchPending" :search-keyword="searchKeyword" :search-category="searchCategory" :is-saving="isSavingTransfer" :saving-resource-id="savingResourceId" :saving-message="archiveImportMessage" :save-error="saveError" :failed-resource-id="failedResourceId" @open-auth-settings="openPlaybackAuth" @close="closeTransferPanel" @retry-search="retryTransferSearch" @search="searchTransferResources" :official-progress="officialProgress" :official-checked-at="officialCheckedAt" :official-notice="officialNotice" :search-phase="searchPhase" :verification-progress="verificationProgress" :search-needs-auth="searchNeedsAuth" :saved-media="transferSavedMedia" :saved-summary="transferSavedSummary" :saved-batch="transferBatch" :batch-preview="archiveBatchPreview" @stop-batch="stopBatch" @play-saved="playSavedTransfer" @view-library="showSavedLibrary" @save-to-cards="handleSaveCard" />
     <DeleteMediaConfirm :open="!!deletingMedia" :media="deletingMedia" :deleting="isDeletingMedia" @cancel="closeDeleteDialog" @confirm="confirmDeleteMedia" />
     <CategoryPickerSheet :open="!!categoryMedia" :media="categoryMedia" :saving="isSavingCategory" @cancel="closeCategoryPicker" @select="selectMediaCategory" />
     <MediaActionSheet :open="!!actionMedia" :media="actionMedia" @cancel="closeMediaActions" @edit-category="editActionMediaCategory" @re-search="reSearchActionMedia" @update-library="updateActionMedia" @delete="deleteActionMedia" />
@@ -641,6 +734,10 @@ const showSavedLibrary = () => {
 
 <style scoped>
 .page-container { position: relative; z-index: 1; }
+.archive-batches { display: grid; gap: 10px; margin: 0 0 18px; }
+.archive-batch-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); }
+.archive-batch-status strong { color: var(--text-primary); font-size: .88rem; }.archive-batch-status p { margin: 4px 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }.archive-batch-status small { color: var(--text-tertiary); }
+.archive-batch-status button { flex-shrink: 0; min-height: 40px; padding: 0 14px; border: 1px solid var(--divider); border-radius: 20px; color: var(--text-primary); background: var(--glass-bg); }
 .library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .library-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; min-width: 0; }
 .library-title h1 { font-size: 2rem; font-weight: 650; letter-spacing: -.035em; line-height: 1.3; }

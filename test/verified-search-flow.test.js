@@ -123,11 +123,27 @@ test('全集档案按实际编号去重显示范围，保留单集操作语义�
  assert.equal(found.verification,undefined);assert.equal(found.archivePreparation.archiveFid,'zip40large');
  assert.deepEqual(found.archivePreparation.availableEpisodes,Array.from({length:40},(_,i)=>i+1));
  assert.deepEqual(found.archivePreparation.missingEpisodes,[]);
- assert.match(found.archivePreparation.summary,/1～40/);assert.match(found.archivePreparation.notice,/本次仅解压第 40 集/);
+ assert.match(found.archivePreparation.summary,/1～40/);assert.match(found.archivePreparation.notice,/检查并补齐/);
+ assert.equal(found.archivePreparation.batchEligible,true);
  const absent=await verifySearchResults([item],options({title:'尚公主',category:'tv',officialLatest:40,inspect:async()=>({title:'S 商公猪',videoCount:0,entries:archives.filter(a=>a.episodeNumber!==17)})}));
  assert.deepEqual(absent.resources[0].archivePreparation.missingEpisodes,[17]);
- assert.match(absent.resources[0].archivePreparation.notice,/第 17 集压缩包未找到/);
+ assert.match(absent.resources[0].archivePreparation.notice,/第 17 集暂未找到/);
  const selected=await verifySearchResults([item],options({title:'尚公主',category:'tv',episode:5,inspect}));
  assert.deepEqual(selected.resources[0].archivePreparation.availableEpisodes,[5]);
  assert.equal(selected.resources[0].archivePreparation.episode,5);
+ assert.equal(selected.resources[0].archivePreparation.batchEligible,false);
+});
+
+test('同一电视剧分享同时含视频和压缩包时保留两种实际覆盖，用于自动补全', async () => {
+ const item={...resource,title:'折月亮',workTitle:'折月亮',category:'tv',year:'2026',source:'quark4k',latestEpisode:27};
+ const entries=[{...file(27),name:'折月亮.E27.mp4'},...Array.from({length:26},(_,i)=>({
+  fid:'zip'+(i+1),name:(i+1)+'.zip',isArchive:true,archiveFormat:'zip',isVideo:false,episodeNumber:i+1,size:100
+ }))];
+ const result=await verifySearchResults([item],options({title:'折月亮',category:'tv',officialLatest:27,inspect:async()=>({title:'折月亮',videoCount:1,entries})}));
+ assert.equal(result.resources.length,1);
+ assert.equal(result.resources[0].verification.complete,false);
+ assert.deepEqual(result.resources[0].verification.requiredEpisodes,[27]);
+ assert.equal(result.resources[0].batchEligible,true);
+ assert.equal(result.resources[0].archivePreparation.batchEligible,true);
+ assert.equal(result.resources[0].archivePreparation.availableEpisodes.length,26);
 });
