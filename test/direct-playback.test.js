@@ -233,6 +233,51 @@ test('TV 失效时回退网页源且继续代理，绝不把 Cookie 地址当成
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('单集兼容音频只返回已确认的网页立体声来源，保留直连且刷新仍使用网页来源', async t => {
+  const gateway = makeGateway();
+  const request = (action, user = admin) => api({
+    gateway, method: 'POST', url: '/api/player/sessions/session/episodes/episode/' + action, body: { nativeHls: true }, user
+  });
+  assert.equal((await request('compatible-audio')).statusCode, 409);
+  const normal = JSON.parse((await request('prepare')).body).data.sources[0];
+  assert.equal(normal.delivery, 'direct');
+  assert.equal((await request('compatible-audio', { username: 'other', role: 'user' })).statusCode, 403);
+
+  const audio = [
+    { index: '1', codec_name: 'aac', channels: '6' },
+    { index: '2', codec_name: 'aac', channels: '2' }
+  ];
+  let version = 0;
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { video_list: [
+    { resolution: 'super', video_info: {
+      url: `https://media.example.test/web.mp4?v=${++version}`, format: 'mp4', codec: 'h264',
+      streams: { audio_stream_list: audio }
+    } },
+    { resolution: 'high', video_info: {
+      url: 'https://media.example.test/missing-track.mp4', format: 'mp4', audio: { codec: 'aac', channels: 6 }
+    } }
+  ] } }));
+  const compat = await request('compatible-audio');
+  assert.equal(compat.statusCode, 200);
+  const data = JSON.parse(compat.body).data;
+  assert.equal(data.transferred, false);
+  assert.equal(data.sources.length, 1);
+  const [stereo] = data.sources;
+  assert.equal(stereo.audioCompatibility, true);
+  assert.equal(stereo.delivery, 'proxy');
+  assert.deepEqual(stereo.audioTracks.map(item => item.channels), ['6', '2']);
+  assert.equal(JSON.parse((await request('compatible-audio')).body).data.sources[0].id, stereo.id);
+  assert.equal(await gateway.getDirectStreamUrl('session', normal.id, admin), 'https://media.example.test/video.mp4');
+  const renewed = await gateway.refreshStreamSource('session', stereo.id, admin);
+  assert.equal(renewed.requestProfile, 'web');
+  assert.match(renewed.upstreamUrl, /web\.mp4\?v=3$/);
+  audio.pop();
+  const unavailable = await request('compatible-audio');
+  assert.equal(unavailable.statusCode, 422);
+  assert.equal(JSON.parse(unavailable.body).code, 'QUARK_STEREO_UNAVAILABLE');
+  assert.ok(await gateway.getDirectStreamUrl('session', normal.id, admin));
+});
+
 test('强制代理模式不会优先使用 TV 或返回直连来源', async () => {
   const gateway = makeGateway();
   gateway.directPlaybackEnabled = false;

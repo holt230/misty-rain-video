@@ -358,6 +358,8 @@ const playbackVideoItems = data => [
 ];
 const dolbyVisionProfile = item => Number(item?.video_info?.dolby_vision?.profile
   || item?.video?.dolby_vision?.profile || item?.dolby_vision?.profile) || 0;
+const hasCompatibleStereo = source => !source.isHls && source.mimeType === 'video/mp4' && !source.colorCompatibilityRisk
+  && source.audioTracks?.some(track => /^(?:2|stereo)$/i.test(track.channels) && /^(?:aac|mp4a)(?:\b|$)/i.test(track.codec));
 
 const hasRawPlaybackSource = data => playbackVideoItems(data).some(item => {
   const info = item?.video_info || item?.video || {};
@@ -1279,13 +1281,23 @@ export class QuarkGateway {
 
     const cookie = this.#requireCookie();
     const cacheKey = session.kind === 'share' ? `${session.pwdId}:${episode.fid}` : '';
+    const audioCompatibility = capabilities?.audioCompatibility === true;
     let savedFid = session.kind === 'drive' ? episode.fid : (playbackCache?.get(cacheKey)?.savedFid || '');
     let playData = null;
 
+    if (audioCompatibility) {
+      const directSource = [...session.sources.values()].find(source => source.episodeFid === episode.fid && source.delivery === 'direct');
+      if (!directSource?.savedFid) {
+        throw new QuarkApiError('请先打开当前剧集，再切换音轨', { code: 'AUDIO_PLAYBACK_NOT_READY', statusCode: 409 });
+      }
+      savedFid = directSource.savedFid;
+    }
+
     if (savedFid) {
       try {
-        playData = await this.#loadPlayData(savedFid);
+        playData = await this.#loadPlayData(savedFid, audioCompatibility);
       } catch (error) {
+        if (audioCompatibility) throw error;
         if (error.code === 'QUARK_FILE_NOT_FOUND') {
           if (cacheKey) playbackCache?.remove(cacheKey);
           if (session.kind === 'drive') throw error;
@@ -1316,7 +1328,13 @@ export class QuarkGateway {
     }
 
     const normalized = await this.#normalizePlayData(playData, savedFid, cookie, capabilities?.nativeHls === true);
-    if (!normalized.sources.length) {
+    const candidates = audioCompatibility
+      ? [...new Map(normalized.sources.filter(hasCompatibleStereo).map(source => [source.resolution, source])).values()]
+      : normalized.sources;
+    if (audioCompatibility && !candidates.length) {
+      throw new QuarkApiError('当前剧集暂未找到兼容的立体声音轨', { code: 'QUARK_STEREO_UNAVAILABLE', statusCode: 422 });
+    }
+    if (!candidates.length) {
       throw new QuarkApiError('播放服务没有返回当前文件可用的播放地址', {
         code: 'QUARK_PLAY_SOURCE_EMPTY',
         statusCode: 502
@@ -1324,15 +1342,18 @@ export class QuarkGateway {
     }
 
     for (const [sourceId, source] of [...session.sources.entries()]) {
-      if (source.episodeFid === episode.fid) session.sources.delete(sourceId);
+      if (!audioCompatibility && source.episodeFid === episode.fid) session.sources.delete(sourceId);
     }
 
-    const sources = normalized.sources.map(source => {
-      const sourceId = createOpaqueId();
+    const sources = candidates.map(source => {
+      const previous = audioCompatibility && [...session.sources.values()].find(item => item.audioCompatibility
+        && item.episodeFid === episode.fid && item.resolution === source.resolution);
+      const sourceId = previous ? previous.id : createOpaqueId();
       const streamUrl = `/api/player/sessions/${encodeURIComponent(sessionId)}/streams/${encodeURIComponent(sourceId)}`;
       session.sources.set(sourceId, {
         ...source,
         id: sourceId,
+        audioCompatibility,
         directOnly: source.delivery === 'direct',
         episodeFid: episode.fid,
         savedFid,
@@ -1349,6 +1370,7 @@ export class QuarkGateway {
         codec: source.codec,
         bitrate: source.bitrate,
         ...(source.audioTracks?.length ? { audioTracks: source.audioTracks } : {}),
+        ...(audioCompatibility ? { audioCompatibility: true } : {}),
         ...(source.colorCompatibilityRisk ? { colorCompatibilityRisk: true } : {}),
         mimeType: source.mimeType,
         isHls: source.isHls,
@@ -1493,11 +1515,12 @@ export class QuarkGateway {
   async refreshStreamSource(sessionId, sourceId, user = SYSTEM_USER) {
     const { source } = this.getStreamSource(sessionId, sourceId, user);
     const cookie = this.#requireCookie();
-    const playData = await this.#loadPlayData(source.savedFid);
+    const playData = await this.#loadPlayData(source.savedFid, source.audioCompatibility === true);
     const normalized = await this.#normalizePlayData(playData, source.savedFid, cookie, source.nativeHls === true);
-    const replacement = normalized.sources.find(item => item.resolution === source.resolution)
-      || normalized.sources.find(item => item.label === source.label)
-      || normalized.sources[0];
+    const candidates = source.audioCompatibility ? normalized.sources.filter(hasCompatibleStereo) : normalized.sources;
+    const replacement = candidates.find(item => item.resolution === source.resolution)
+      || candidates.find(item => item.label === source.label)
+      || (source.audioCompatibility ? undefined : candidates[0]);
     if (!replacement) return source;
     Object.assign(source, replacement, { id: sourceId, resolvedAt: Date.now(), touchedAt: Date.now() });
     return source;
@@ -2401,12 +2424,12 @@ export class QuarkGateway {
     );
   }
 
-  async #loadPlayData(savedFid) {
+  async #loadPlayData(savedFid, webOnly = false) {
     const cookie = this.#requireCookie();
     let webData = { __playbackProfile: 'web' };
 
     // TV 的渐进式视频可免 Cookie 直连。片库管理仍保留原有网页认证。
-    if (this.directPlaybackEnabled && this.credentialStore.getTvAuth?.()?.refreshToken && this.tvPlaybackClient) {
+    if (!webOnly && this.directPlaybackEnabled && this.credentialStore.getTvAuth?.()?.refreshToken && this.tvPlaybackClient) {
       try {
         const data = await this.tvPlaybackClient.getStreaming(savedFid);
         if (hasRawPlaybackSource(data)) return { ...data, __playbackProfile: 'tv' };
@@ -2457,7 +2480,7 @@ export class QuarkGateway {
     }
 
     const tvAuth = this.credentialStore.getTvAuth?.();
-    if (tvAuth?.refreshToken && this.tvPlaybackClient) {
+    if (!webOnly && tvAuth?.refreshToken && this.tvPlaybackClient) {
       try {
         const data = await this.tvPlaybackClient.getStreaming(savedFid);
         const advancedData = { ...data, __playbackProfile: 'tv' };

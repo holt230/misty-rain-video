@@ -695,13 +695,14 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
-    const prepareMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/episodes\/([^/]+)\/prepare$/);
+    const prepareMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/episodes\/([^/]+)\/(prepare|compatible-audio)$/);
     if (prepareMatch && request.method === 'POST') {
       const sessionId = decodeURIComponent(prepareMatch[1]);
       const episodeFid = decodeURIComponent(prepareMatch[2]);
       const capabilities = await readRequestBody(request, 4 * 1024);
       const playback = await context.quarkGateway.prepareEpisode(sessionId, episodeFid, user, userData.playbackCache, {
-        nativeHls: capabilities?.nativeHls === true
+        nativeHls: capabilities?.nativeHls === true,
+        audioCompatibility: prepareMatch[3] === 'compatible-audio'
       });
       sendSuccess(response, playback);
       return true;

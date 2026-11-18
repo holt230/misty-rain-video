@@ -52,6 +52,7 @@ export interface PlaybackSource {
   codec: string;
   bitrate: number;
   audioTracks?: PlaybackAudioTrack[];
+  audioCompatibility?: boolean;
   colorCompatibilityRisk?: boolean;
   mimeType: string;
   isHls: boolean;
@@ -190,10 +191,11 @@ export class QuarkStreamService {
     });
   }
 
-  static prepareEpisode(sessionId: string, episodeFid: string, capabilities: { nativeHls: boolean } = { nativeHls: false }): Promise<PreparedPlayback> {
+  static prepareEpisode(sessionId: string, episodeFid: string, capabilities: { nativeHls: boolean; audioCompatibility?: boolean } = { nativeHls: false }): Promise<PreparedPlayback> {
+    const action = capabilities.audioCompatibility ? 'compatible-audio' : 'prepare';
     return request<PreparedPlayback>(
-      `/api/player/sessions/${encodeURIComponent(sessionId)}/episodes/${encodeURIComponent(episodeFid)}/prepare`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(capabilities) }
+      `/api/player/sessions/${encodeURIComponent(sessionId)}/episodes/${encodeURIComponent(episodeFid)}/${action}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nativeHls: capabilities.nativeHls }) }
     ).then(playback => ({
       ...playback,
       sources: playback.sources.map(source => ({
