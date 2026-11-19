@@ -75,7 +75,7 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
     if (!validatesCatalogShare(item, details, resource)) continue;
     let selectedFids: string[] | undefined;
     {
-      const coverage = resourceCompleteness(details, item.category, resource.latestEpisode || resourceEpisode(resource.title));
+      const coverage = resourceCompleteness(details, item.category, resource.latestEpisode || resourceEpisode(resource.title), resource.title);
       if (!coverage.complete && !(item.category === 'anime' && coverage.available > 0)) {
         if (!bestPartial || coverage.available > bestPartial.available) bestPartial = coverage;
         options.progress(`当前来源实际可识别 ${coverage.available} 集，缺 ${coverage.missing.length} 集，继续核对其他来源…`);

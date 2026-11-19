@@ -4,6 +4,7 @@ import path from 'node:path';
 import { archiveError, mergeArchiveMetadata, requireArchiveCapacity, supportedArchive } from './archivePolicy.js';
 import { isAncillaryVideoPath, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
 import { searchTitleKey } from './searchTitles.js';
+import { fileSourceColor, leastCompatibleColor, sourceColor, sourceColorRank } from './sourceColor.js';
 
 const ancillary = /预告|花絮|片头|片尾|主题曲|幕后|宣传片/i;
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -32,15 +33,18 @@ function chooseOfficialWork(progress, input) {
   return [...works].sort((a, b) => b.latestEpisode - a.latestEpisode || String(a.platform).localeCompare(String(b.platform)))[0];
 }
 
-/** Prefer a single quality that covers the most missing episodes, then the smaller archives. */
+const compareBatchFiles = (a, b) => sourceColorRank(a.colorFormat) - sourceColorRank(b.colorFormat) || a.bytes - b.bytes;
+
+/** Cover the most missing episodes, then prefer a compatible release and save space. */
 export function selectArchiveBatch(groups, missingEpisodes) {
   const missing = new Set(missingEpisodes), chosen = [];
   while (missing.size) {
     const candidates = groups.map(group => {
       const items = group.items.filter(item => missing.has(item.episode));
-      return { group, items, bytes: items.reduce((sum, item) => sum + item.bytes, 0) };
+      const colorFormat = leastCompatibleColor(items.map(item => item.colorFormat ?? sourceColor(group.quality)));
+      return { group, items, colorFormat, bytes: items.reduce((sum, item) => sum + item.bytes, 0) };
     }).filter(candidate => candidate.items.length)
-      .sort((a, b) => b.items.length - a.items.length || a.bytes - b.bytes || a.group.key.localeCompare(b.group.key));
+      .sort((a, b) => b.items.length - a.items.length || compareBatchFiles(a, b) || a.group.key.localeCompare(b.group.key));
     if (!candidates.length) break;
     for (const item of candidates[0].items) {
       if (!missing.has(item.episode)) continue;
@@ -140,21 +144,23 @@ export class ArchiveBatchService {
     const groups = new Map(), wantedSeason = seasonNumber(input.title);
     for (const [index, detail] of details.entries()) {
       if (!detail) continue;
-      const row = orderedRows[index], folders = new Map(detail.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry]));
+      const row = orderedRows[index], folders = new Map(detail.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
+      const color = entry => fileSourceColor(entry, folders, row.note || detail.title);
       for (const entry of detail.entries) {
         if (!entry.isArchive || !supportedArchive(entry.name) || !Number.isInteger(entry.episodeNumber)
           || entry.episodeNumber < 1 || entry.episodeNumber > official.latestEpisode || !Number.isFinite(entry.size) || entry.size <= 0) continue;
-        const folderNames = (entry.ancestorFids || []).map(fid => folders.get(fid)?.name || '').filter(Boolean);
+        const folderNames = (entry.ancestorFids || []).map(fid => folders.get(fid) || '').filter(Boolean);
         const fullName = [...folderNames, entry.name].join('/'), foundSeason = seasonNumber(fullName);
         if (ancillary.test(fullName) || (wantedSeason && foundSeason && wantedSeason !== foundSeason) || (!wantedSeason && foundSeason > 1)) continue;
         const key = `${row.url}\n${entry.parentFid || '0'}\narchive`;
-        if (!groups.has(key)) groups.set(key, { key, quality: folders.get(entry.parentFid)?.name || '', episodes: new Map() });
+        if (!groups.has(key)) groups.set(key, { key, quality: folders.get(entry.parentFid) || '', episodes: new Map() });
         const group = groups.get(key), previous = group.episodes.get(entry.episodeNumber);
-        const candidate = { kind: 'archive', shareUrl: row.url, archiveFid: entry.fid, episode: entry.episodeNumber, bytes: entry.size, quality: group.quality };
-        if (!previous || candidate.bytes < previous.bytes || (candidate.bytes === previous.bytes && candidate.archiveFid < previous.archiveFid)) group.episodes.set(entry.episodeNumber, candidate);
+        const candidate = { kind: 'archive', shareUrl: row.url, archiveFid: entry.fid, episode: entry.episodeNumber,
+          bytes: entry.size, quality: group.quality, colorFormat: color(entry) };
+        if (!previous || (compareBatchFiles(candidate, previous) || candidate.archiveFid.localeCompare(previous.archiveFid)) < 0) group.episodes.set(entry.episodeNumber, candidate);
       }
       const videos = detail.entries.filter(entry => entry.isVideo).map(entry => {
-        const sourcePath = (entry.ancestorFids || []).map(fid => folders.get(fid)?.name || '').filter(Boolean).join('/');
+        const sourcePath = (entry.ancestorFids || []).map(fid => folders.get(fid) || '').filter(Boolean).join('/');
         return { entry, fileName: entry.name, episodeNumber: entry.episodeNumber, size: entry.size, sourcePath,
           seasonNumber: seasonNumber(`${sourcePath}/${entry.name}`) };
       }).filter(item => !isAncillaryVideoPath(`${item.sourcePath}/${item.fileName}`));
@@ -165,11 +171,11 @@ export class ArchiveBatchService {
         if (!Number.isInteger(video.episodeNumber) || video.episodeNumber < 1 || video.episodeNumber > official.latestEpisode
           || !Number.isFinite(video.size) || video.size <= 0) continue;
         const key = `${row.url}\n${entry.parentFid || '0'}\nvideo`;
-        if (!groups.has(key)) groups.set(key, { key, quality: folders.get(entry.parentFid)?.name || '', episodes: new Map() });
+        if (!groups.has(key)) groups.set(key, { key, quality: folders.get(entry.parentFid) || '', episodes: new Map() });
         const group = groups.get(key), previous = group.episodes.get(video.episodeNumber);
         const candidate = { kind: 'video', shareUrl: row.url, fileFid: entry.fid, shareTitle: detail.title,
-          episode: video.episodeNumber, bytes: video.size, quality: group.quality };
-        if (!previous || candidate.bytes < previous.bytes || (candidate.bytes === previous.bytes && candidate.fileFid < previous.fileFid)) group.episodes.set(video.episodeNumber, candidate);
+          episode: video.episodeNumber, bytes: video.size, quality: group.quality, colorFormat: color(entry) };
+        if (!previous || (compareBatchFiles(candidate, previous) || candidate.fileFid.localeCompare(previous.fileFid)) < 0) group.episodes.set(video.episodeNumber, candidate);
       }
     }
     const existingEpisodes = [...new Set(library.episodes.map(item => item.episodeNumber).filter(number => number > 0 && number <= official.latestEpisode))].sort((a, b) => a - b);

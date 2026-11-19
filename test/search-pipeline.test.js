@@ -61,6 +61,26 @@ test('请求进行中持续显示旋转图标、搜索中和骨架，不把旧�
  view.state.searchPending=false;view.state.quarkResources=[resource('斗破苍穹 更新219集',1)];await nextTick();assert.equal(document.querySelector('.search-status'),null);assert.equal(document.querySelector('.resource-loading'),null);assert.match(document.querySelector('.row-title').textContent,/219/);}finally{view.app.unmount();}
 });
 
+test('同集优先展示 SDR 标注，HDR 标签不会进入 4K 筛选', async t => {
+  const candidates = [
+    { note: '斗破苍穹年番 更新219集 4K 杜比视界', url: 'https://pan.quark.cn/s/dolby' },
+    { note: '斗破苍穹年番 更新219集 HDR10', url: 'https://pan.quark.cn/s/hdr' },
+    { note: '斗破苍穹年番 更新219集 1080P SDR', url: 'https://pan.quark.cn/s/sdr' }
+  ];
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 0, data: { total: 3, merged_by_type: { quark: candidates } } }));
+  const client = await new SilentSearchEngine().search('斗破苍穹');
+  const view = mount({ quarkResources: client.items });
+  try {
+    await nextTick();
+    assert.match(document.querySelector('.row-tags').textContent, /SDR 标注/);
+    assert.equal(client.items.find(item => item.url.endsWith('/hdr')).is4k, false);
+    [...document.querySelectorAll('[role="radio"]')].find(button => button.textContent === '4K').click();
+    await nextTick();
+    assert.equal(document.querySelectorAll('.liquid-resource-row').length, 1);
+    assert.match(document.querySelector('.row-tags').textContent, /4K 超高清.*杜比视界标注/);
+  } finally { view.app.unmount(); }
+});
+
 test('真实空结果显示未找到，失败显示错误与重新搜索，二者不混用',async()=>{
  let retries=0;const view=mount({}, {onRetrySearch:()=>retries++});
  try{await nextTick();assert.match(document.querySelector('.empty-notice').textContent,/未找到《斗破苍穹》/);assert.equal(document.querySelector('.search-status'),null);assert.equal(document.querySelector('.result-summary'),null);

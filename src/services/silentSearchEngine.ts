@@ -5,6 +5,7 @@ import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
 import { isNonVideoResource } from './resourceFiltering';
 import { matchesResourceTitle, resourceHeading } from './resourceTitles';
+import { sourceColor } from '../../server/sourceColor.js';
 
 const REQUEST_TIMEOUT_MS = 14_000;
 const normalizeKeyword = (keyword: string) => keyword.normalize('NFKC').replace(/[《》()（）]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -70,12 +71,12 @@ export class SilentSearchEngine {
     const title = resourceHeading(note);
     const share = parseLibraryInput(`${String(raw.url || '')}\n${note}`);
     if (share.kind !== 'share') return null;
-    const is4k = /4k|2160p|uhd|杜比|hdr/i.test(title);
-    const quality = is4k ? '4K 超高清' : /1080p|fhd|蓝光/i.test(title) ? '1080P 超清' : '清晰度待解析';
+    const is4k = /4k|2160p|uhd/i.test(title);
+    const quality = is4k ? '4K 超高清' : /1080p|fhd/i.test(title) ? '1080P 超清' : '清晰度待解析';
     const rawDate = String(raw.datetime || '').trim();
     const parsed = Date.parse(rawDate);
     return { id: `quark-${share.url.split('/').pop()}`, title, url: share.url, password: raw.password || share.passcode,
-      driveType: 'quark', datetime: Number.isFinite(parsed) && new Date(parsed).getFullYear() >= 2001 ? rawDate.substring(0, 10) : '', source: raw.source || '', quality, is4k,
+      driveType: 'quark', datetime: Number.isFinite(parsed) && new Date(parsed).getFullYear() >= 2001 ? rawDate.substring(0, 10) : '', source: raw.source || '', quality, is4k, colorFormat: sourceColor(title),
       workTitle: typeof raw.work_title === 'string' ? raw.work_title : undefined,
       category: ['tv', 'anime', 'movie', 'variety'].includes(raw.category) ? raw.category : undefined,
       updateText: typeof raw.update_text === 'string' ? raw.update_text : undefined,

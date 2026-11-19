@@ -13,6 +13,7 @@ import type { LibrarySaveFeedback } from '../../services/libraryFeedback';
 import { archiveBytes, type ArchiveBatchJob, type ArchiveBatchPreview } from '../../services/archiveImport';
 import { episodeRangeLabel } from '../../services/resourceCompleteness';
 import { useDialog } from '../../composables/useDialog';
+import { sourceColor, type SourceColor } from '../../../server/sourceColor.js';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -93,6 +94,9 @@ const filterOptions: Array<{ value: ResultFilter; label: string }> = [
 ];
 
 const cleanTitle = resourceHeading;
+const colorLabels: Record<SourceColor, string> = {
+  sdr: 'SDR 标注', hdr: 'HDR 标注', 'dolby-vision': '杜比视界标注', unknown: '色彩待核验'
+};
 const targetTitle = computed(() => searchIntent(props.searchKeyword || props.media?.title || '').title);
 const soleResult = computed(() => rankedQuarkResources.value.length === 1);
 const officialAvailability = computed(() => {
@@ -379,6 +383,7 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
                     <span v-if="res.category" class="tag-meta">{{ categories.find(category => category.value === res.category)?.label }}</span>
                     <span v-if="res.year" class="tag-meta">{{ res.year }}</span>
                     <span class="tag-badge">{{ res.quality }}</span>
+                    <span class="tag-meta">{{ colorLabels[res.colorFormat ?? sourceColor(res.title)] }}</span>
                     <span v-if="res.size" class="tag-meta">{{ res.size }}</span>
                   </div>
                   <details v-if="res.workTitle && res.workTitle !== cleanTitle(res.title)" class="version-details"><summary>版本详情</summary><p>{{ cleanTitle(res.title) }}</p></details>
