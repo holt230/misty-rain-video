@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { archiveError, mergeArchiveMetadata, requireArchiveCapacity, supportedArchive } from './archivePolicy.js';
-import { isAncillaryVideoPath, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
+import { seasonNumber, shareVideoCandidates, validateSourceCandidate } from './libraryPolicy.js';
 import { searchTitleKey } from './searchTitles.js';
 import { fileSourceColor, leastCompatibleColor, sourceColor, sourceColorRank } from './sourceColor.js';
 
@@ -159,13 +159,10 @@ export class ArchiveBatchService {
           bytes: entry.size, quality: group.quality, colorFormat: color(entry) };
         if (!previous || (compareBatchFiles(candidate, previous) || candidate.archiveFid.localeCompare(previous.archiveFid)) < 0) group.episodes.set(entry.episodeNumber, candidate);
       }
-      const videos = detail.entries.filter(entry => entry.isVideo).map(entry => {
-        const sourcePath = (entry.ancestorFids || []).map(fid => folders.get(fid) || '').filter(Boolean).join('/');
-        return { entry, fileName: entry.name, episodeNumber: entry.episodeNumber, size: entry.size, sourcePath,
-          seasonNumber: seasonNumber(`${sourcePath}/${entry.name}`) };
-      }).filter(item => !isAncillaryVideoPath(`${item.sourcePath}/${item.fileName}`));
+      const videos = shareVideoCandidates(detail.entries);
       if (!validateSourceCandidate({ card: { title: input.title, category: 'tv', year: editionYear },
-        shareTitle: detail.title, episodes: videos, localEpisodes: videos })) continue;
+        shareTitle: detail.title, episodes: videos, localEpisodes: videos,
+        publication: { source: row.source, workTitle: row.work_title, category: row.category, year: row.year } })) continue;
       for (const video of videos) {
         const entry = video.entry;
         if (!Number.isInteger(video.episodeNumber) || video.episodeNumber < 1 || video.episodeNumber > official.latestEpisode

@@ -182,24 +182,32 @@ test('同名同年的多个真实来源可以补齐缺口，其他年份不会�
   assert.equal(differentEdition.canStart, false); assert.deepEqual(differentEdition.missingEpisodes, [17]);
 });
 
-test('同一作品的已核对视频和压缩包可组合补全集，直接视频追加到原目录', async t => {
+test('已核实目录别名的直接视频可与压缩包组合补全集，并追加到原目录', async t => {
   const f = await fixture(t), otherUrl = 'https://pan.quark.cn/s/video';
   for (let i = f.entries.length - 1; i >= 0; i--) if (f.entries[i].episodeNumber === 17) f.entries.splice(i, 1);
-  f.service.resourceSearch.search = async () => ({ merged_by_type: { quark: [row, { ...row, url: otherUrl }] } });
-  f.gateway.getShareDetails = async ({ shareUrl }) => shareUrl === url ? { title: '折月亮', entries: f.entries } : { title: '折月亮2026', entries: [
-    { fid: 'folder-video', name: '折月亮2026', isDirectory: true },
-    { fid: 'video-17', parentFid: 'folder-video', ancestorFids: ['folder-video'], name: '折月亮.E17.mp4', isVideo: true, episodeNumber: 17, size: 15 }
+  f.service.resourceSearch.search = async () => ({ merged_by_type: { quark: [row, { ...row, source: 'erxiaopan', url: otherUrl }] } });
+  const directory = '【Z】折丨Y越亮';
+  const folder = { fid: 'folder-video', name: directory, isDirectory: true };
+  f.gateway.getShareDetails = async ({ shareUrl }) => shareUrl === url ? { title: '折月亮', entries: f.entries } : { title: directory, entries: [
+    folder,
+    { fid: 'video-17', parentFid: 'folder-video', ancestorFids: ['folder-video'], name: '17-4K.mp4', isVideo: true, episodeNumber: 17, size: 15 }
   ] };
   let direct;
   f.gateway.importShare = async request => { direct = request; f.stored.add(17); return { item: { quarkFid: 'old-library', title: '折月亮', category: 'tv' } }; };
   let persisted;
   f.service.userContext = () => ({ mediaRepository: { all: () => [{ quarkFid: 'old-library', quarkShareUrl: 'old-source' }], save: item => { persisted = item; } } });
+  folder.name = '其他电视剧';
+  const mismatched = await f.service.preview(input, user);
+  assert.equal(mismatched.canStart, false);
+  assert.deepEqual(mismatched.missingEpisodes, [17]);
+  folder.name = directory;
   const preview = await f.service.preview(input, user);
   assert.equal(preview.canStart, true); assert.equal(preview.totalVideoBytes, 15); assert.deepEqual(preview.missingEpisodes, []);
   const job = await f.service.start({ ...input, token: preview.token }, user); await f.service.active.get(job.id);
   assert.equal((await f.service.get(job.id, user)).status, 'success');
   assert.equal(direct.appendToFid, 'old-library'); assert.deepEqual(direct.quarkSelectionFids, ['video-17']);
   assert.deepEqual(direct.quarkRequiredEpisodes, [17]); assert.equal(persisted.quarkShareUrl, 'old-source');
+  assert.equal(direct.quarkVerifiedShareTitle, directory);
 });
 
 test('服务重启后未完成任务标记暂停，已完成集数和原目录保留', async t => {

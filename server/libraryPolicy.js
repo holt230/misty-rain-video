@@ -1,4 +1,6 @@
 // Pure identity rules shared by storage and background source maintenance.
+import { searchTitleKey } from './searchTitles.js';
+
 const chineseNumbers = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 export const seasonNumber = value => {
   const text = String(value || '').normalize('NFKC');
@@ -43,24 +45,55 @@ const titleMatches = (title, value) => {
     .test(actual.slice(expected.length));
 };
 
-export const validateSourceCandidate = ({ card, shareTitle, episodes, localEpisodes }) => {
+// Verified directory names from the structured TV index, scoped to their exact work.
+const indexedTvDirectories = new Map([
+  ['多喜一家人', '多喜'],
+  ['折月亮', '【z】折丨y越亮']
+]);
+const directoryKey = value => String(value || '').normalize('NFKC').trim().toLowerCase();
+
+export function matchesIndexedTvDirectory(card, shareTitle, publication) {
+  if (card.category !== 'tv' || publication?.source !== 'erxiaopan' || publication.category !== 'tv') return false;
+  const work = searchTitleKey(card.title);
+  return work === searchTitleKey(publication.workTitle) && (!card.year || card.year === publication.year)
+    && indexedTvDirectories.get(work) === directoryKey(shareTitle);
+}
+
+export function shareVideoCandidates(entries) {
+  const folders = new Map(entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
+  return entries.filter(entry => entry.isVideo).map(entry => {
+    const sourcePath = (entry.ancestorFids || []).map(fid => folders.get(fid) || '').filter(Boolean).join('/');
+    return { entry, fileName: entry.name, episodeNumber: entry.episodeNumber, size: entry.size, sourcePath,
+      seasonNumber: seasonNumber(`${sourcePath}/${entry.name}`) };
+  }).filter(item => !isAncillaryVideoPath(`${item.sourcePath}/${item.fileName}`));
+}
+
+export const validateSourceCandidate = ({ card, shareTitle, episodes, localEpisodes, publication }) => {
   if (!episodes.length || !localEpisodes.length) return false;
+  const indexedDirectory = matchesIndexedTvDirectory(card, shareTitle, publication);
+  const matchesAlias = value => indexedDirectory && directoryKey(value) === directoryKey(shareTitle);
   const evidence = [shareTitle, ...episodes.map(item => item.sourcePath?.split('/')[0]).filter(Boolean)];
-  if (!evidence.some(value => titleMatches(card.title, value))) return false;
+  if (!indexedDirectory && !evidence.some(value => titleMatches(card.title, value))) return false;
   const targetYear = String(card.year || card.title.match(/(?:19|20)\d{2}/)?.[0] || '');
-  const years = String(shareTitle || '').match(/(?:19|20)\d{2}/g) || [];
-  if (targetYear && years.some(year => year !== targetYear)) return false;
+  const otherYear = value => targetYear && (String(value || '').match(/(?:19|20)\d{2}/g) || []).some(year => year !== targetYear);
+  if (otherYear(shareTitle)) return false;
   const season = seasonNumber(card.title) || 1;
+  const otherSeason = value => {
+    const found = seasonNumber(value);
+    return found > 0 && found !== season;
+  };
   if (episodes.some(item => item.seasonNumber && item.seasonNumber !== season)) return false;
-  if (seasonNumber(shareTitle) && seasonNumber(shareTitle) !== season) return false;
+  if (otherSeason(shareTitle)) return false;
   for (const episode of episodes) {
     const name = String(episode.fileName || '').replace(/\.[a-z0-9]{2,5}$/i, '');
     const prefix = name.split(/s\d{1,2}e\d|(?:ep?|episode)[\s._-]*\d|第\s*\d+\s*[集话期]|^\d+/i)[0];
-    if (cleanTitle(prefix) && !titleMatches(card.title, prefix)) return false;
+    if (cleanTitle(prefix) && !titleMatches(card.title, prefix) && !matchesAlias(prefix.replace(/[\s._-]+$/, ''))) return false;
+    if (indexedDirectory && (otherYear(prefix) || otherSeason(name))) return false;
     // Each directory must identify this work or a release/season descriptor.
     // A correct root title does not make unrelated nested works safe.
-    for (const part of String(episode.sourcePath || '').split('/').filter(Boolean)) {
-      if (!titleMatches(card.title, part)
+    for (const [index, part] of String(episode.sourcePath || '').split('/').filter(Boolean).entries()) {
+      if (indexedDirectory && (otherYear(part) || otherSeason(part))) return false;
+      if (!titleMatches(card.title, part) && !(index === 0 && matchesAlias(part))
         && !/^(?:s\d{1,2}|第[\d一二三四五六七八九十]+季|4k|1080p|2160p|720p|高清|超清|正片|国语|粤语|全集|完结)+$/i.test(cleanTitle(part))) return false;
     }
   }

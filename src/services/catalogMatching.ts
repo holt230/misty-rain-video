@@ -5,6 +5,7 @@ import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
 import { compareResourceColors, matchResource, resourceEpisode } from './resourceMatching';
 import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { matchesIndexedTvDirectory, shareVideoCandidates, validateSourceCandidate } from '../../server/libraryPolicy.js';
 import { matchesResourceTitle } from './resourceTitles';
 
 export type PlaybackWork = Pick<CatalogItem, 'title' | 'category'> & { year?: string };
@@ -70,6 +71,11 @@ export function automaticCatalogCandidates(item: PlaybackWork, resources: Resour
 }
 
 export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem, { allowUnspecifiedSeason = false } = {}) {
+  if (matchesIndexedTvDirectory(item, details.title, resource)) {
+    const videos = shareVideoCandidates(details.entries);
+    return Boolean(details.videoCount) && validateSourceCandidate({ card: item, shareTitle: details.title,
+      episodes: videos, localEpisodes: videos, publication: resource });
+  }
   if (allowUnspecifiedSeason && explicitSeason(item.title) === undefined) {
     const match = matchResource(item.title, details.title, item.category);
     // Public posts often use a publisher marker plus a shortened directory name
