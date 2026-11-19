@@ -9,6 +9,7 @@ import { DanmakuService } from './danmaku/service.js';
 import { LibraryConfigStore, LibraryViewRepository, MediaRepository, PlaybackCacheRepository, PlaybackHistoryRepository, PlayerPreferencesStore, QuarkCredentialStore, LibraryMaintenanceRepository } from './storage.js';
 import { LibraryMaintenance } from './libraryMaintenance.js';
 import { QUARK_LIBRARY_FOLDERS, QuarkGateway } from './quarkGateway.js';
+import { stereoResponse } from './mp4Stereo.js';
 import { isGenericPoster, LEGACY_DEFAULT_POSTER, PosterService } from './posterService.js';
 import { ResourceSearchService } from './resourceSearch.js';
 import { TvPlaybackClient } from './tvPlaybackClient.js';
@@ -708,12 +709,27 @@ export const handleApiRequest = async (request, response, context) => {
       return true;
     }
 
+    const stereoMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/streams\/([^/]+)\/stereo$/);
+    if (stereoMatch && request.method === 'POST') {
+      const { source } = context.quarkGateway.getStreamSource(decodeURIComponent(stereoMatch[1]), decodeURIComponent(stereoMatch[2]), user);
+      const upstreamUrl = source.upstreamUrl;
+      const plan = await context.quarkGateway.stereoPlan(source);
+      const available = Boolean(plan && source.upstreamUrl === upstreamUrl);
+      if (available) source.stereoPlayback = { upstreamUrl, plan };
+      sendSuccess(response, { available });
+      return true;
+    }
     const streamMatch = pathname.match(/^\/api\/player\/sessions\/([^/]+)\/streams\/([^/]+)$/);
     if (streamMatch && (request.method === 'GET' || request.method === 'HEAD')) {
       const sessionId = decodeURIComponent(streamMatch[1]);
       const sourceId = decodeURIComponent(streamMatch[2]);
       const { session, source } = context.quarkGateway.getStreamSource(sessionId, sourceId, user);
-      if ((source.directOnly || source.delivery === 'direct') && url.searchParams.get('delivery') !== 'proxy') {
+      const stereo = url.searchParams.get('audio') === 'stereo';
+      const preparedStereo = source.stereoPlayback;
+      if (stereo && !preparedStereo) {
+        throw Object.assign(new Error('请重新打开当前剧集'), { statusCode: 409, code: 'STEREO_NOT_PREPARED' });
+      }
+      if (!stereo && (source.directOnly || source.delivery === 'direct') && url.searchParams.get('delivery') !== 'proxy') {
         const location = await context.quarkGateway.getDirectStreamUrl(sessionId, sourceId, user);
         if (location) {
           response.statusCode = 302;
@@ -739,7 +755,16 @@ export const handleApiRequest = async (request, response, context) => {
         const upstream = refreshed.upstream;
         const activeSource = refreshed.source;
 
-        if (isManifestResponse(upstream, activeSource.upstreamUrl, activeSource.isHls) && upstream.ok) {
+        if (stereo && upstream.ok) {
+          const original = preparedStereo.plan;
+          const current = preparedStereo.upstreamUrl === activeSource.upstreamUrl
+            ? original : await context.quarkGateway.stereoPlan(activeSource);
+          if (!current || current.offset !== original.offset || current.size !== original.size || current.revision !== original.revision) {
+            await upstream.body?.cancel();
+            throw Object.assign(new Error('播放文件已变化，请重新连接'), { statusCode: 409, code: 'PLAY_SOURCE_CHANGED' });
+          }
+          await pipeWebResponse(stereoResponse(upstream, current), response);
+        } else if (isManifestResponse(upstream, activeSource.upstreamUrl, activeSource.isHls) && upstream.ok) {
           const manifest = await readWebResponseText(upstream);
           response.statusCode = upstream.status;
           response.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');

@@ -57,6 +57,7 @@ export const configureVideoRequest = (video: HTMLVideoElement, source: PlaybackS
 
 export const playbackSourceLabel = (source: PlaybackSource) => {
   const label = source.resolution === 'dolby_vision' ? `${source.label} 杜比视界` : source.label;
+  if (source.singleStereo) return `${label} · 立体声`;
   if (source.audioCompatibility) return `${label} · 兼容音频`;
   if (!source.delivery) return label;
   return `${label} · ${source.delivery === 'direct' ? '直连' : '中转'}`;

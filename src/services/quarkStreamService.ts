@@ -53,6 +53,7 @@ export interface PlaybackSource {
   bitrate: number;
   audioTracks?: PlaybackAudioTrack[];
   audioCompatibility?: boolean;
+  singleStereo?: boolean;
   colorCompatibilityRisk?: boolean;
   mimeType: string;
   isHls: boolean;
@@ -146,6 +147,19 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 };
 
 export class QuarkStreamService {
+  static async singleStereoSource(source: PlaybackSource, signal: AbortSignal): Promise<PlaybackSource> {
+    if (source.singleStereo || source.isHls || source.mimeType !== 'video/mp4') return source;
+    const endpoint = source.url.split('?')[0]!;
+    try {
+      const response = await authFetch(endpoint + '/stereo', { method: 'POST', signal });
+      if (!response.ok || (await response.json()).data?.available !== true) return source;
+      return { ...source, url: endpoint + '?audio=stereo', singleStereo: true, delivery: 'proxy',
+        audioTracks: [{ id: 'stereo', label: '立体声', channels: '2', codec: 'aac', language: '' }] };
+    } catch {
+      return source;
+    }
+  }
+
   static getShareDetails(shareUrl: string, passcode = '', signal?: AbortSignal): Promise<QuarkShareDetails> {
     return request('/api/quark/share-details', {
       method: 'POST',
