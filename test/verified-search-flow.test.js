@@ -93,6 +93,29 @@ test('准确发布标题可以核对有明确发布者标记的短目录名，�
 
 const mockFetch=(t,handler)=>t.mock.method(globalThis,'fetch',(url,init)=>String(url).includes('/official-progress')?Promise.resolve(Response.json({code:0,data:{status:'unknown',works:[],checkedAt:'',message:'官方进度暂未确认'}})):handler(url,init));
 
+test('已核实的电视剧目录别名显示实际集数，并拒绝错剧、错年份和混季', async () => {
+  for (const [title, directory, count] of [['多喜一家人', '多喜', 10], ['折月亮', '【Z】折丨Y越亮', 27]]) {
+    const indexed = { ...resource, title, workTitle: title, category: 'tv', source: 'erxiaopan', year: '2026', latestEpisode: count };
+    const entries = Array.from({ length: count }, (_, index) => ({ ...file(index + 1),
+      name: `${String(index + 1).padStart(2, '0')}-4K.mp4` }));
+    const verify = (overrides = {}, data = {}) => verifySearchResults([{ ...indexed, ...overrides }], options({
+      title, category: 'tv', year: '2026', officialLatest: count,
+      inspect: async () => ({ title: directory, videoCount: entries.length, entries, ...data })
+    }));
+    const result = await verify();
+    assert.equal(result.resources[0]?.verification.episodeCount, count, title);
+    assert.equal(result.resources[0].verification.complete, true);
+    assert.equal((await verify({}, { entries: entries.slice(1) })).resources[0].verification.complete, false);
+    for (const overrides of [{ source: 'other' }, { year: '2025' }, { category: 'anime' }, { workTitle: `${title} 第二季` }]) {
+      assert.equal((await verify(overrides)).resources.length, 0);
+    }
+    for (const name of ['其他电视剧.E01.mp4', 'S02E01.mp4', `${title}.2025.E01.mp4`]) {
+      assert.equal((await verify({}, { entries: [{ ...entries[0], name }, ...entries.slice(1)] })).resources.length, 0);
+    }
+    assert.equal((await verify({}, { title: `${directory}合集` })).resources.length, 0);
+  }
+});
+
 test('仙逆真实失败结构：3个失效分享和1个无正片目录明确汇总，不误报认证失败或存在可保存结果', async () => {
  const rows = [0,1,2,3].map(n => ({ ...resource, id:'xianni'+n, url:'https://pan.quark.cn/s/xianni'+n, title:'仙逆', workTitle:'仙逆', year:undefined }));
  const result = await verifySearchResults(rows, options({ title:'仙逆', inspect:async row => {
