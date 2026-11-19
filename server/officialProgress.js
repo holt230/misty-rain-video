@@ -93,8 +93,11 @@ export class OfficialProgressService {
       controller.signal.throwIfAborted();
       const target = new URL(url);
       if (target.protocol !== 'https:' || target.port || target.username || target.password || ![
-        'pbaccess.video.qq.com', 'v.youku.com', 'pcw-api.iqiyi.com', 'pcweb.api.mgtv.com'
+        'pbaccess.video.qq.com', 'v.youku.com', 'pcw-api.iqiyi.com', 'pcweb.api.mgtv.com', 'm.yangshipin.cn'
       ].includes(target.hostname)) throw new Error('官方数据地址无效');
+      if (target.hostname === 'm.yangshipin.cn' && officialPlatformUrl(target.href, 'yangshipin') !== target.href) {
+        throw new Error('央视频正片地址无效');
+      }
       const requestOptions = { ...options, headers: { 'User-Agent': 'Mozilla/5.0', ...options.headers }, signal: controller.signal, redirect: 'manual' };
       let response = await this.fetchImpl(target.href, requestOptions);
       if (target.hostname === 'v.youku.com' && target.pathname === '/video' && [301, 302, 303, 307, 308].includes(response.status)) {
@@ -148,7 +151,7 @@ export class OfficialProgressService {
       const works = [...new Map(confirmed.map(work => [work.platform + ':' + work.id, work])).values()]
         .sort((a, b) => a.title.localeCompare(b.title) || a.platform.localeCompare(b.platform) || a.id.localeCompare(b.id));
       return { status: works.length ? 'confirmed' : timedOut || searchFailed ? 'unavailable' : 'unknown', works, checkedAt: works.length || !timedOut ? new Date().toISOString() : '',
-        message: works.length ? '' : timedOut || searchFailed ? '官方进度暂时无法读取，已找到的资源仍按实际文件核对。' : '暂未在腾讯视频、优酷、芒果TV或爱奇艺确认到对应版本的正片进度。' };
+        message: works.length ? '' : timedOut || searchFailed ? '官方进度暂时无法读取，已找到的资源仍按实际文件核对。' : '暂未从播出平台确认对应版本的正片进度。' };
     } catch {
       return { status: 'unavailable', works: [], checkedAt: '', message: '官方进度暂时无法读取，已找到的资源仍按实际文件核对。' };
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }

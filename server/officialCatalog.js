@@ -196,14 +196,32 @@ export class OfficialCatalogService extends CatalogService {
       message: '暂未确认对应版本的短评，已保留影片介绍和找源入口。' };
     return { ...await this.details.comments(resolved.doubanId, resolved, category, start), catalogId: id };
   }
-  async knownPlatforms(keyword, category) {
+  async knownWorks(keyword, category) {
     await this.officialReady;
     const key = titleKey(keyword);
-    const matches = item => ['tv', 'anime'].includes(item.category) && titleKey(item.title) === key
+    const matches = item => titleKey(item.title) === key
       && (category === 'all' || category === item.category);
-    const found = new Map();
     const feeds = [...this.platformFeeds.values()].map(feed => feed.items.filter(matches));
-    for (const item of [...mergeOfficialCatalog(feeds), ...[...this.officialWorks.values()].filter(matches)]) {
+    return [...mergeOfficialCatalog(feeds), ...[...this.officialWorks.values()].filter(matches)];
+  }
+  async libraryPoster(card) {
+    const matchesEdition = work => work.category === card.category && titleKey(work.title) === titleKey(card.title)
+      && (!card.year || String(card.year) === String(work.year));
+    const linked = card.catalogId && await this.workItem(card.catalogId);
+    if (linked?.posterUrl && matchesEdition(linked)) return linked.poster;
+    const matches = [...new Map((await this.knownWorks(card.title, card.category)).filter(matchesEdition)
+      .map(work => [work.catalogId, work])).values()];
+    const dated = matches.filter(work => work.year);
+    const candidates = dated.length ? dated : matches;
+    if (candidates.length !== 1 || !candidates[0].posterUrl) return '';
+    const work = candidates[0];
+    this.officialWorks.set(work.catalogId, work);
+    return work.poster;
+  }
+  async knownPlatforms(keyword, category) {
+    const found = new Map();
+    for (const item of await this.knownWorks(keyword, category)) {
+      if (!['tv', 'anime'].includes(item.category)) continue;
       for (const source of item.platforms) found.set(source.catalogId, { ...source, title: item.title, category: item.category, year: item.year });
     }
     return [...found.values()];

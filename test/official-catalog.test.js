@@ -91,6 +91,34 @@ test('a failed platform remains explicitly unavailable without discarding health
   const selected = await service.get('tv', 1, '', 'mango'); assert.equal(selected.items.length, 1);
   assert.equal(selected.items[0].title, 'mango'); assert.match(selected.message, /暂未更新/);
 });
+
+test('已有片库卡片补用唯一匹配的官方海报，保留已有海报并拒绝同名年份歧义', async t => {
+  const title = '多喜一家人', oldPoster = 'https://example.test/original.jpg';
+  const service = new OfficialCatalogService(await directory(t), { providers: { fetch: async platform => [
+    row(platform, { title }), row(platform, { title: '有海报' }),
+    row(platform, { title: '同名作品', year: '2020', catalogId: platform + ':old' }),
+    row(platform, { title: '同名作品', year: '2026', catalogId: platform + ':new' })
+  ] } });
+  const feed = await service.get('tv');
+  const source = feed.items.find(work => work.title === title);
+  const context = {
+    authService: { authenticate: () => ({ username: 'viewer' }) },
+    userContext: () => ({ mediaRepository: { all: () => [{ quarkFid: 'two', poster: oldPoster }] },
+      libraryViewRepository: { categoryFor: () => undefined } }),
+    quarkGateway: { listLibrary: async () => [title, '有海报', '同名作品'].map((title, index) => ({
+      id: String(index), title, category: 'tv', quarkFid: ['one', 'two', 'three'][index], poster: ''
+    })) },
+    posterService: { enrich: async cards => cards },
+    catalog: service
+  };
+  let body;
+  const response = { setHeader() {}, end: text => { body = JSON.parse(text); } };
+  await handleApiRequest({ method: 'GET', url: '/api/media-cards', headers: { host: 'localhost' } }, response, context);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(body.data.slice(0, 2).map(card => [card.quarkFid, card.poster]), [['one', source.poster], ['two', oldPoster]]);
+  assert.match(body.data[2].poster, /images.unsplash.com/);
+  assert.equal((await service.workItem(source.catalogId)).title, title);
+});
 test('first-load failures back off, remain distinct from empty feeds, and cannot be replaced by Douban recommendations', async t => {
   let calls = 0;
   const service = new OfficialCatalogService(await directory(t), { providers: { fetch: async () => { calls++; throw Error('offline'); } } });

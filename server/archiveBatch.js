@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { archiveError, mergeArchiveMetadata, requireArchiveCapacity, supportedArchive } from './archivePolicy.js';
 import { seasonNumber, shareVideoCandidates, validateSourceCandidate } from './libraryPolicy.js';
-import { searchTitleKey } from './searchTitles.js';
+import { hasConflictingOfficialEditions, searchTitleKey } from './searchTitles.js';
 import { fileSourceColor, leastCompatibleColor, sourceColor, sourceColorRank } from './sourceColor.js';
 
 const ancillary = /预告|花絮|片头|片尾|主题曲|幕后|宣传片/i;
@@ -29,6 +29,9 @@ function chooseOfficialWork(progress, input) {
   const years = new Set(works.map(work => String(work.year || '')).filter(Boolean));
   if (!works.length || years.size > 1) {
     throw archiveError('暂时无法确认这部剧更新到多少集，请稍后重试。', 'OFFICIAL_PROGRESS_UNAVAILABLE', 422);
+  }
+  if (hasConflictingOfficialEditions(works)) {
+    throw archiveError('播出平台的集数不同，暂时无法确认找到的是哪个版本。', 'OFFICIAL_EDITION_AMBIGUOUS', 422);
   }
   return [...works].sort((a, b) => b.latestEpisode - a.latestEpisode || String(a.platform).localeCompare(String(b.platform)))[0];
 }
@@ -372,8 +375,11 @@ export class ArchiveBatchService {
     for (const name of names) {
       try { jobs.push(await this.get(name.slice(0, 32), user)); } catch (error) { if (error.code !== 'ARCHIVE_JOB_NOT_FOUND') throw error; }
     }
+    // Keep recoverable records when the drive is temporarily unavailable.
+    const folderIds = jobs.some(job => job.targetFid) ? await this.gateway.libraryFolderIds(user).catch(() => null) : null;
     const latest = new Map();
     for (const job of jobs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))) {
+      if (folderIds && job.targetFid && !folderIds.has(job.targetFid)) continue;
       const key = `${job.category}:${searchTitleKey(job.title)}`;
       if (!latest.has(key)) latest.set(key, job);
     }

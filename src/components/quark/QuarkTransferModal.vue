@@ -390,12 +390,12 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
                   <p v-if="res.archivePreparation && usesArchiveAction(res) && batchPreview?.resourceId !== res.id && failedResourceId !== res.id && !res.batchEligible" class="verification-notice">{{ res.archivePreparation.notice }}</p>
                   <p v-if="res.verification?.notice && !res.batchEligible && failedResourceId !== res.id" class="verification-notice">{{ res.verification.notice }}</p>
                   <div v-if="batchPreview?.resourceId === res.id" class="archive-batch-plan" role="status">
-                    <strong v-if="batchPreview.plan.plannedEpisodes.length">计划补齐{{ episodeRangeLabel(batchPreview.plan.plannedEpisodes) }} · 共 {{ batchPreview.plan.plannedEpisodes.length }} 集</strong>
+                    <strong v-if="batchPreview.plan.plannedEpisodes.length">{{ batchPreview.plan.canStart ? '计划补齐' : '本次找到' }}{{ episodeRangeLabel(batchPreview.plan.plannedEpisodes) }} · 共 {{ batchPreview.plan.plannedEpisodes.length }} 集</strong>
                     <strong v-else>片库已有 {{ batchPreview.plan.existingEpisodes.length }} 集</strong>
-                    <span>片库已有 {{ batchPreview.plan.existingEpisodes.length }} 集，已更新至第 {{ batchPreview.plan.officialLatest }} 集。</span>
+                    <span>{{ batchPreview.plan.officialPlatform || '播出平台' }}已更新至第 {{ batchPreview.plan.officialLatest }} 集。片库已有 {{ batchPreview.plan.existingEpisodes.length }} 集。</span>
                     <span v-if="batchPreview.plan.missingEpisodes.length">暂未找到{{ episodeRangeLabel(batchPreview.plan.missingEpisodes) }}，无法补齐。</span>
-                    <span v-if="batchPreview.plan.plannedEpisodes.length">建议预留约 {{ archiveBytes(batchPreview.plan.recommendedFreeBytes) }} 网盘空间，当前可用 {{ batchPreview.plan.freeBytes == null ? '未确认' : archiveBytes(batchPreview.plan.freeBytes) }}。</span>
-                    <span v-if="batchPreview.plan.plannedEpisodes.length && batchPreview.plan.totalArchiveBytes">补齐后可在片库观看，临时文件会进入回收站。</span>
+                    <span v-if="batchPreview.plan.canStart">建议预留约 {{ archiveBytes(batchPreview.plan.recommendedFreeBytes) }} 网盘空间，当前可用 {{ batchPreview.plan.freeBytes == null ? '未确认' : archiveBytes(batchPreview.plan.freeBytes) }}。</span>
+                    <span v-if="batchPreview.plan.canStart && batchPreview.plan.totalArchiveBytes">补齐后可在片库观看，临时文件会进入回收站。</span>
                     <span v-if="batchPreview.plan.reason">{{ batchPreview.plan.reason }}</span>
                   </div>
                 </div>

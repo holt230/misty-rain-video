@@ -35,6 +35,7 @@ export const getLibrarySaveFeedback = (error: unknown): LibrarySaveFeedback => {
   const code = error instanceof LibrarySaveError ? error.code : '';
   const message = error instanceof Error ? error.message : '';
   if (code === 'OFFICIAL_PROGRESS_UNAVAILABLE') return { title: '暂未保存到片库', message: '已找到剧集资源，但暂时无法核实播出平台更新到了第几集。请稍后重新核对。' };
+  if (code === 'OFFICIAL_EDITION_AMBIGUOUS') return { title: '暂未确认剧集版本', message: '播出平台的集数不同，暂时无法确认找到的是哪个版本。' };
   if (code === 'QUARK_SOURCE_CHANGED') return { title: '片源已变化，尚未保存', message: message || '视频文件已变化，请重新搜索核对。', needsSearch: true };
   if (code === 'QUARK_AUTH_REQUIRED' || code === 'ADMIN_REQUIRED') {
     return { title: '片库认证需要更新', message: '请在“我的”中更新播放与片库认证后重试；普通账户请联系管理员。', needsAuth: true };

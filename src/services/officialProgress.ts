@@ -2,7 +2,7 @@ import type { ResourceItem, SearchCategory } from '../types/search';
 import type { OfficialProgress, OfficialWorkProgress } from '../types/search';
 import { authFetch } from './authService';
 import { apiUrl } from './appUrl';
-import { searchTitleKey } from '../../server/searchTitles.js';
+import { hasConflictingOfficialEditions, searchTitleKey } from '../../server/searchTitles.js';
 import { matchesResourceTitle } from './resourceTitles';
 
 export async function readOfficialProgress(title: string, category: SearchCategory, signal: AbortSignal): Promise<OfficialProgress> {
@@ -35,20 +35,23 @@ export function chooseOfficialProgress(data: OfficialProgress, title: string, ca
   // The same edition can air on several platforms. Prefer the highest confirmed
   // release for that edition, while preserving distinct seasons, years and types.
   const editions = new Map<string, OfficialWorkProgress>();
+  const editionKey = (work: OfficialWorkProgress) => `${searchTitleKey(work.title)}:${work.category}:${work.year}`;
+  const chooseEdition = (work: OfficialWorkProgress) =>
+    hasConflictingOfficialEditions(data.works.filter(other => editionKey(other) === editionKey(work))) ? undefined : work;
   for (const work of data.works) {
-    const key = `${searchTitleKey(work.title)}:${work.category}:${work.year}`;
+    const key = editionKey(work);
     const previous = editions.get(key);
     if (!previous || work.latestEpisode > previous.latestEpisode || (work.latestEpisode === previous.latestEpisode && work.platform.localeCompare(previous.platform) < 0)) editions.set(key, work);
   }
   const works = [...editions.values()].filter(work => (kind === 'all' || kind === work.category) && (!year || work.year === year));
   const structured = works.filter(work => resources.some(resource => resource.workTitle && searchTitleKey(resource.workTitle) === searchTitleKey(work.title)
     && (!resource.year || resource.year === work.year) && (!resource.category || resource.category === work.category)));
-  if (structured.length === 1) return structured[0];
+  if (structured.length === 1) return chooseEdition(structured[0]);
   if (structured.length > 1) return undefined;
   if (resources.some(resource => resource.workTitle)) return undefined;
   const named = works.filter(work => resources.some(resource => matchesResourceTitle(work.title, resource.title)));
-  if (named.length === 1) return named[0];
+  if (named.length === 1) return chooseEdition(named[0]);
   const exact = works.filter(work => searchTitleKey(work.title) === searchTitleKey(title));
-  if (exact.length === 1 && (kind !== 'all' || works.length === 1)) return exact[0];
-  return works.length === 1 ? works[0] : undefined;
+  if (exact.length === 1 && (kind !== 'all' || works.length === 1)) return chooseEdition(exact[0]);
+  return works.length === 1 ? chooseEdition(works[0]) : undefined;
 }

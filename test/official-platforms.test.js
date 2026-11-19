@@ -20,6 +20,39 @@ test('聚合作品只定位官方入口，不使用聚合总集数作为官方�
   assert.deepEqual(discoverOfficialPlatforms(fixture.discovery, '芳华', 'tv'), []);
 });
 
+test('央视频以正片选集确认33集，分页不完整或预告不能建立全集进度', async () => {
+  const title = '嫁金钗', cid = 'sohzqzfplwmsgag';
+  const ids = Array.from({ length: 33 }, (_, index) => `v${String(index + 1).padStart(10, '0')}`);
+  const url = vid => `https://m.yangshipin.cn/video?type=0&vid=${vid}`;
+  const video = { errcode: 0, ShowVideo: true, status: 1, om_info: { isVidQuickView: false }, cid, vid: ids[0],
+    title: `《${title}》第1集`, checkup_time: '2026-10-16', shareLongVideoRec: { episodes: {
+      paging: { hasNextPage: 0, hasPrePage: 0 }, videoList: ids.map((vid, index) => ({ vid, title: String(index + 1),
+        showTitle: `《${title}》第${index + 1}集`, isQuickView: false, videoFlag: 0,
+        shareItem: { shareUrl: url(vid) + '&cid=' + cid } }))
+    } } };
+  const discovery = { ret: 0, data: { normalList: { itemList: [{ doc: { dataType: 2 }, videoInfo: {
+    title, year: 2026, typeName: '电视剧', episodeSites: [{ enName: 'yangshipin', episodeInfoList: [
+      { url: 'https://v.qq.com/search_redirect.html?url=' + encodeURIComponent(url(ids[0])) }
+    ] }]
+  } }] } } };
+  const service = new OfficialProgressService({ fetchImpl: async input => {
+    if (new URL(input).hostname === 'pbaccess.video.qq.com') return Response.json(discovery);
+    assert.equal(input, url(ids[0]));
+    return new Response(`<script>window.__STATE_video__=${JSON.stringify({ payloads: { sharevideo: video } })};</script>`);
+  } });
+  const lookup = () => service.lookup(title, { category: 'tv' });
+  const result = await lookup();
+  assert.equal(result.status, 'confirmed');
+  assert.deepEqual(result.works.map(work => [work.platform, work.latestEpisode, work.sourceUrl]), [['央视频', 33, url(ids[32])]]);
+  video.shareLongVideoRec.episodes.paging.hasNextPage = 1;
+  assert.deepEqual((await lookup()).works, []);
+  video.shareLongVideoRec.episodes.paging.hasNextPage = 0;
+  video.shareLongVideoRec.episodes.videoList[1].isQuickView = true;
+  assert.deepEqual((await lookup()).works, []);
+  assert.equal(chooseOfficialProgress({ ...result, works: [...result.works,
+    { ...result.works[0], platform: '优酷', latestEpisode: 30 }] }, title, 'tv', []), undefined);
+});
+
 test('三个官方域名和已知路径严格限制，腾讯转跳只解码不执行、不访问外站', () => {
   assert.equal(officialPlatformUrl('https://m.youku.com/alipay_video/id_XNjQ5NzI5MTY0MA==.html', 'youku'), candidate('暗河传').url);
   for (const url of ['https://v.qq.com/search_redirect.html?url=https://evil.example/v_nvusov4apo.html',
