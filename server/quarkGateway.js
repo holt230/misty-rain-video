@@ -1,6 +1,7 @@
 import { archiveFormat, supportedArchive, archiveError, requireArchiveCapacity, selectArchiveEpisode } from './archivePolicy.js';
 import dns from 'node:dns';
 import { createOpaqueId } from './http.js';
+import { inspectMp4Stereo } from './mp4Stereo.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { assertVerifiedImport } from './verifiedImport.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
@@ -518,6 +519,7 @@ export class QuarkGateway {
     this.tvPlaybackClient = tvPlaybackClient;
     this.directPlaybackEnabled = process.env.PLAYER_MEDIA_DELIVERY !== 'proxy';
     this.sessions = new Map();
+    this.stereoProbes = new Map();
     this.accountCache = null;
     this.libraryRootCache = null;
     this.namedRootCache = new Map();
@@ -1524,6 +1526,22 @@ export class QuarkGateway {
     if (!replacement) return source;
     Object.assign(source, replacement, { id: sourceId, resolvedAt: Date.now(), touchedAt: Date.now() });
     return source;
+  }
+
+  async stereoPlan(source) {
+    if (source.isHls || source.mimeType !== 'video/mp4') return null;
+    const key = JSON.stringify([source.savedFid, source.resolution, source.requestProfile, source.upstreamUrl]);
+    let cached = this.stereoProbes.get(key);
+    if (!cached || cached.expires <= Date.now()) {
+      const url = source.upstreamUrl, profile = source.requestProfile, cookie = source.requestCookie;
+      const pending = inspectMp4Stereo((range, signal) => this.fetchMedia(url, range, profile, cookie, { signal }),
+        AbortSignal.timeout(1800));
+      cached = { pending, expires: Date.now() + 60_000 };
+      this.stereoProbes.set(key, cached);
+      if (this.stereoProbes.size > 256) this.stereoProbes.delete(this.stereoProbes.keys().next().value);
+      if (await pending) cached.expires = Date.now() + SESSION_TTL_MS;
+    }
+    return cached.pending;
   }
 
   async getDirectStreamUrl(sessionId, sourceId, user = SYSTEM_USER) {

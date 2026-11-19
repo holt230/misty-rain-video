@@ -89,6 +89,11 @@ const episodesDescending = ref(false);
 const settingsToggleRef = ref<HTMLButtonElement | null>(null);
 const episodePanelRef = ref<HTMLElement | null>(null);
 const selectedSourceId = ref('');
+const stereoStream = shallowRef<PlaybackSource | null>(null);
+let stereoProbe: AbortController | undefined;
+let stereoShouldPlay = false;
+let originalAudioEpisode = '';
+let nextPlayback: { sessionId: string; fid: string; expires: number; prepared: Promise<PreparedPlayback> } | undefined;
 const errorMessage = ref('');
 const statusMessage = ref('');
 const playbackStarting = ref(false);
@@ -129,7 +134,7 @@ const loadPlaybackAutomation = (): PlaybackAutomationSettings => {
 };
 const playbackAutomation = ref<PlaybackAutomationSettings>(loadPlaybackAutomation());
 const isIOSPlaybackDevice = typeof navigator !== 'undefined'
-  && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 const nativeHlsSupported = typeof document !== 'undefined'
   && Boolean(document.createElement('video').canPlayType('application/vnd.apple.mpegurl'));
 const storedSoundEffect = localStorage.getItem('misty_rain_sound_effect');
@@ -256,7 +261,8 @@ const episodeBadgeLabel = (episode: { episodeNumber?: number; episodeTitle?: str
   return String(index + 1);
 };
 const sources = computed(() => playback.value?.sources || []);
-const selectedSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value) || sources.value[0]);
+const selectedSource = computed(() => stereoStream.value?.id === selectedSourceId.value ? stereoStream.value
+  : sources.value.find(source => source.id === selectedSourceId.value) || sources.value[0]);
 const sourceAllowsSoundEffects = computed(() => soundEffectAvailable.value && selectedSource.value?.delivery !== 'direct');
 const compatibleSource = computed(() => selectInitialPlaybackSource(
   sources.value.flatMap(source => {
@@ -272,7 +278,8 @@ const audioTracks = computed(() => detectedAudioTracks.value.length
 const audioSwitchable = computed(() => detectedAudioTracks.value.length > 1);
 const canTryCompatibleAudio = computed(() => selectedSource.value?.delivery === 'direct' && !audioSwitchable.value
   && (isIOSPlaybackDevice || Boolean(videoRef.value && getNativeAudioTracks(videoRef.value))));
-const audioChannelLabel = computed(() => audioTrackChannelLabel(detectedAudioTracks.value[selectedAudioIndex.value]?.channels || ''));
+const audioChannelLabel = computed(() => selectedSource.value?.singleStereo ? '立体声'
+  : audioTrackChannelLabel(detectedAudioTracks.value[selectedAudioIndex.value]?.channels || ''));
 const selectedSoundEffect = computed(() => soundEffectOptions.find(option => option.value === soundEffectMode.value));
 const libraryCoverage = computed(() => playbackCoverage(episodes.value, props.media?.category, officialWork.value?.latestEpisode));
 const episodeStatus = computed(() => {
@@ -362,6 +369,8 @@ const releaseSystemMediaSession = () => {
 };
 
 const stopVideo = (resetAudioOutput = false) => {
+  stereoProbe?.abort();
+  stereoStream.value = null;
   if (resetAudioOutput) audioOutputNeedsReset = true;
   if (autoNextTimer !== null) {
     window.clearTimeout(autoNextTimer);
@@ -615,8 +624,23 @@ const attachSource = async (
   source: PlaybackSource,
   resumeAt = 0,
   shouldPlay = false,
-  applyIntroSkip = false
+  applyIntroSkip = false,
+  checkStereo = true
 ) => {
+  const attachSequence = ++sourceAttachSequence;
+  stereoProbe?.abort();
+  if (checkStereo && originalAudioEpisode !== currentEpisode.value?.fid && !source.singleStereo && !source.isHls && source.mimeType === 'video/mp4'
+    && (isIOSPlaybackDevice || source.audioCompatibility)) {
+    stereoProbe = new AbortController();
+    const controller = stereoProbe;
+    const timer = window.setTimeout(() => controller.abort(), 2400);
+    if (shouldPlay && !playbackHasStarted.value) playbackStarting.value = true;
+    try { source = await QuarkStreamService.singleStereoSource(source, controller.signal); }
+    finally { window.clearTimeout(timer); }
+    if (attachSequence !== sourceAttachSequence || !props.isOpen) return;
+  }
+  stereoStream.value = source.singleStereo ? source : null;
+  stereoShouldPlay = shouldPlay;
   if (source.delivery === 'direct') {
     // 跨域媒体接入 Web Audio 会输出静音。已有音频节点无法从媒体元素解绑，
     // 从中转音效切换直连时必须更换元素，而不只是 disconnect。
@@ -629,8 +653,7 @@ const attachSource = async (
   }
   await nextTick();
   const video = videoRef.value;
-  if (!video) return;
-  const attachSequence = ++sourceAttachSequence;
+  if (!video || attachSequence !== sourceAttachSequence || !props.isOpen) return;
   playAttemptSequence += 1;
   destroyPlaybackEngine();
   video.pause();
@@ -729,6 +752,22 @@ const chooseInitialSource = (available: PlaybackSource[]) => {
   });
 };
 
+const warmNextPlayback = () => {
+  const active = session.value;
+  const next = active?.episodes[nextEpisodeIndex()];
+  if (!active || !next || !props.media?.quarkFid || !isIOSPlaybackDevice || selectedSource.value?.mimeType !== 'video/mp4') return;
+  if (nextPlayback?.sessionId === active.sessionId && nextPlayback.fid === next.fid && nextPlayback.expires > Date.now()) return;
+  // Drive sessions reference already-saved files. Share sessions can transfer files during preparation.
+  const prepared = QuarkStreamService.prepareEpisode(active.sessionId, next.fid, { nativeHls: nativeHlsSupported });
+  const warm = { sessionId: active.sessionId, fid: next.fid, expires: Date.now() + 120_000, prepared };
+  nextPlayback = warm;
+  void prepared.then(async result => {
+    if (nextPlayback !== warm || !props.isOpen || !playbackAutomation.value.autoNext) return;
+    const chosen = chooseInitialSource(result.sources);
+    if (chosen) await QuarkStreamService.singleStereoSource(chosen, AbortSignal.timeout(2400));
+  }).catch(() => { /* Normal playback retries a failed preparation when the episode is opened. */ });
+};
+
 const progressPayload = (completed = false): PlaybackHistoryUpdate | null => {
   const media = props.media;
   const episode = currentEpisode.value;
@@ -818,6 +857,11 @@ const handleTimeUpdate = () => {
     }
   }
   const automation = playbackAutomation.value;
+  if (video && !video.paused && phase.value === 'ready' && automation.autoNext && video.currentTime > 0) {
+    const skip = automation.skipIntroOutro && video.duration > automation.introSeconds + automation.outroSeconds + 60;
+    const untilNext = video.duration - video.currentTime - (skip ? automation.outroSeconds : 0);
+    if (untilNext > 0 && untilNext <= 15) warmNextPlayback();
+  }
   if (!automation.skipIntroOutro
     || phase.value !== 'ready'
     || !playbackHasStarted.value
@@ -1017,6 +1061,16 @@ const monitorPlayback = () => {
 
 const handleVideoError = () => {
   if (phase.value !== 'ready') return;
+  if (stereoStream.value && videoRef.value?.error) {
+    const original = sources.value.find(source => source.id === stereoStream.value?.id);
+    stereoStream.value = null;
+    if (original) {
+      const resumeAt = videoRef.value.currentTime || lastPlaybackPosition;
+      const shouldPlay = !videoRef.value.paused || (stereoShouldPlay && !playbackHasStarted.value);
+      void attachSource(original, resumeAt, shouldPlay, false, false);
+      return;
+    }
+  }
   if (selectedSource.value?.resolution === 'original' && videoRef.value?.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
     interruptPlayback('当前设备不支持此原画格式，请在播放设置中选择其他画质');
     return;
@@ -1056,7 +1110,11 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
   announce(`正在准备${episode.episodeTitle}`);
 
   try {
-    const result = await QuarkStreamService.prepareEpisode(activeSession.sessionId, episode.fid, { nativeHls: nativeHlsSupported });
+    const load = () => QuarkStreamService.prepareEpisode(activeSession.sessionId, episode.fid, { nativeHls: nativeHlsSupported });
+    const warm = nextPlayback;
+    nextPlayback = undefined;
+    const result = warm?.sessionId === activeSession.sessionId && warm.fid === episode.fid && warm.expires > Date.now()
+      ? await warm.prepared.catch(load) : await load();
     if (sequence !== requestSequence || !props.isOpen) return;
     playback.value = result;
     const initialSource = chooseInitialSource(result.sources);
@@ -1124,6 +1182,8 @@ const loadSession = async () => {
   if (!props.isOpen || !media) return;
   const sequence = ++requestSequence;
   phase.value = 'resolving';
+  originalAudioEpisode = '';
+  nextPlayback = undefined;
   stopVideo();
   session.value = null;
   playback.value = null;
@@ -1186,6 +1246,7 @@ const tryCompatibleAudio = async () => {
   const original = selectedSource.value;
   if (checkingCompatibleAudio.value || !canTryCompatibleAudio.value || !activeSession || !episode || !activePlayback || !original) return;
   checkingCompatibleAudio.value = true;
+  originalAudioEpisode = '';
   compatibleAudioError.value = '';
   const isCurrent = () => props.isOpen && phase.value === 'ready' && playback.value === activePlayback && selectedSourceId.value === original.id;
   try {
@@ -1212,6 +1273,14 @@ const tryCompatibleAudio = async () => {
   } finally {
     checkingCompatibleAudio.value = false;
   }
+};
+
+const useOriginalAudio = () => {
+  const original = sources.value.find(source => source.id === stereoStream.value?.id);
+  const video = videoRef.value;
+  if (!original || !video || !currentEpisode.value) return;
+  originalAudioEpisode = currentEpisode.value.fid;
+  void attachSource(original, video.currentTime, !video.paused, false, false);
 };
 
 const useCompatibleSource = async () => {
@@ -1335,6 +1404,7 @@ watch(playbackAutomation, value => {
 }, { deep: true });
 
 onBeforeUnmount(() => {
+  nextPlayback = undefined;
   if (playbackWatchdog !== null) window.clearInterval(playbackWatchdog);
   void persistProgress(true, false, true);
   phase.value = 'idle';
@@ -1561,7 +1631,7 @@ defineExpose({ retry, dismissLayer });
                   @click="changeQuality(source)"
                 >
                   <Check v-if="selectedSourceId === source.id" aria-hidden="true" />
-                  {{ playbackSourceLabel(source) }}
+                  {{ playbackSourceLabel(selectedSource?.id === source.id ? selectedSource : source) }}
                 </button>
               </div>
               <p v-if="selectedSource?.delivery === 'proxy'" class="delivery-hint">当前画质经服务器加载，带宽较低时可降低画质。若有“原画直连”，可尝试切换；部分设备不支持原画格式。</p>
@@ -1588,7 +1658,7 @@ defineExpose({ retry, dismissLayer });
                   :disabled="!audioSwitchable"
                   @click="selectAudioTrack(index)"
                 >
-                  {{ track.label }}{{ audioTrackChannelLabel(track.channels) ? ` · ${audioTrackChannelLabel(track.channels)}` : '' }}
+                  {{ selectedSource?.singleStereo ? '立体声' : track.label }}{{ !selectedSource?.singleStereo && audioTrackChannelLabel(track.channels) ? ` · ${audioTrackChannelLabel(track.channels)}` : '' }}
                 </button>
               </div>
               <div v-if="canTryCompatibleAudio" class="compatibility-actions">
@@ -1596,6 +1666,9 @@ defineExpose({ retry, dismissLayer });
                   {{ checkingCompatibleAudio ? '正在检查音轨…' : '试用兼容音频' }}
                 </button>
                 <p v-if="compatibleAudioError" role="status">{{ compatibleAudioError }}</p>
+              </div>
+              <div v-else-if="selectedSource?.singleStereo" class="compatibility-actions">
+                <button type="button" class="text-action" @click="useOriginalAudio">使用原音轨</button>
               </div>
             </div>
 
