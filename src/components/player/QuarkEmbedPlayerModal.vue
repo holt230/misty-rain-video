@@ -93,7 +93,14 @@ const stereoStream = shallowRef<PlaybackSource | null>(null);
 let stereoProbe: AbortController | undefined;
 let stereoShouldPlay = false;
 let originalAudioEpisode = '';
-let nextPlayback: { sessionId: string; fid: string; expires: number; prepared: Promise<PreparedPlayback> } | undefined;
+const stereoCheckTimeoutMs = 5400;
+let nextPlayback: {
+  sessionId: string;
+  fid: string;
+  expires: number;
+  prepared: Promise<PreparedPlayback>;
+  stereo?: { sourceId: string; pending: Promise<PlaybackSource> };
+} | undefined;
 const errorMessage = ref('');
 const statusMessage = ref('');
 const playbackStarting = ref(false);
@@ -620,12 +627,18 @@ const seekAndMaybePlay = (
   else video.addEventListener('loadedmetadata', apply, { once: true });
 };
 
+const checkPlaybackStereo = (source: PlaybackSource, signal: AbortSignal, sessionId?: string, episodeFid?: string) =>
+  QuarkStreamService.singleStereoSource(source, signal, isIOSPlaybackDevice && sessionId && episodeFid
+    ? { sessionId, episodeFid, nativeHls: nativeHlsSupported }
+    : undefined);
+
 const attachSource = async (
   source: PlaybackSource,
   resumeAt = 0,
   shouldPlay = false,
   applyIntroSkip = false,
-  checkStereo = true
+  checkStereo = true,
+  warmedStereo?: Promise<PlaybackSource>
 ) => {
   const attachSequence = ++sourceAttachSequence;
   stereoProbe?.abort();
@@ -633,10 +646,9 @@ const attachSource = async (
     && (isIOSPlaybackDevice || source.audioCompatibility)) {
     stereoProbe = new AbortController();
     const controller = stereoProbe;
-    const timer = window.setTimeout(() => controller.abort(), 2400);
     if (shouldPlay && !playbackHasStarted.value) playbackStarting.value = true;
-    try { source = await QuarkStreamService.singleStereoSource(source, controller.signal); }
-    finally { window.clearTimeout(timer); }
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(stereoCheckTimeoutMs)]);
+    source = await (warmedStereo || checkPlaybackStereo(source, signal, session.value?.sessionId, currentEpisode.value?.fid));
     if (attachSequence !== sourceAttachSequence || !props.isOpen) return;
   }
   stereoStream.value = source.singleStereo ? source : null;
@@ -759,12 +771,13 @@ const warmNextPlayback = () => {
   if (nextPlayback?.sessionId === active.sessionId && nextPlayback.fid === next.fid && nextPlayback.expires > Date.now()) return;
   // Drive sessions reference already-saved files. Share sessions can transfer files during preparation.
   const prepared = QuarkStreamService.prepareEpisode(active.sessionId, next.fid, { nativeHls: nativeHlsSupported });
-  const warm = { sessionId: active.sessionId, fid: next.fid, expires: Date.now() + 120_000, prepared };
+  const warm: NonNullable<typeof nextPlayback> = { sessionId: active.sessionId, fid: next.fid, expires: Date.now() + 120_000, prepared };
   nextPlayback = warm;
-  void prepared.then(async result => {
+  void prepared.then(result => {
     if (nextPlayback !== warm || !props.isOpen || !playbackAutomation.value.autoNext) return;
     const chosen = chooseInitialSource(result.sources);
-    if (chosen) await QuarkStreamService.singleStereoSource(chosen, AbortSignal.timeout(2400));
+    if (chosen) warm.stereo = { sourceId: chosen.id, pending: checkPlaybackStereo(chosen,
+      AbortSignal.timeout(stereoCheckTimeoutMs), active.sessionId, next.fid) };
   }).catch(() => { /* Normal playback retries a failed preparation when the episode is opened. */ });
 };
 
@@ -1123,7 +1136,8 @@ const prepareEpisode = async (index: number, resumeAt = 0) => {
     phase.value = 'ready';
     announce(`${episode.episodeTitle}已就绪，可用画质 ${result.sources.map(item => item.label).join('、')}`);
     if (result.transferred) toast.show(`已按需转存《${episode.fileName}》到烟雨影视目录`, '✓', 3200);
-    await attachSource(initialSource, resumeAt, true, true);
+    const warmedStereo = warm?.stereo?.sourceId === initialSource.id ? warm.stereo.pending : undefined;
+    await attachSource(initialSource, resumeAt, true, true, true, warmedStereo);
     if (resumeAt > 3) announce(`已续播${episode.episodeTitle} ${Math.floor(resumeAt / 60)} 分钟处`);
   } catch (error) {
     if (sequence === requestSequence) handleServiceError(error);
