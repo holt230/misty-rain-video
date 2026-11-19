@@ -700,6 +700,13 @@ export class QuarkGateway {
     }
   }
 
+  async libraryFolderIds(user) {
+    const principal = normalizeUser(user);
+    const cached = this.libraryAccessCache.get(principal.username);
+    if (cached && Date.now() - cached.checkedAt <= 60_000) return cached.fids;
+    return new Set((await this.listLibrary(principal)).map(item => item.quarkFid));
+  }
+
   async importShare({
     shareUrl,
     quarkShareUrl,

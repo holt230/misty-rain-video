@@ -156,15 +156,17 @@ const resumingArchiveBatch = ref('');
 let archiveBatchTimer: ReturnType<typeof setTimeout> | undefined;
 let archiveBatchRefreshing = false;
 let archiveBatchOwner = '';
+let archiveBatchLibraryRevision = 0;
 const refreshArchiveBatches = async () => {
   if (!authenticated.value || !user.value || archiveBatchRefreshing) return;
   archiveBatchRefreshing = true;
   const username = user.value.username;
+  const revision = archiveBatchLibraryRevision;
   const requestedAt = Date.now();
   try {
     const previous = new Map(archiveBatchJobs.value.map(job => [job.id, job]));
     const jobs = await listArchiveBatches();
-    if (username !== user.value?.username) return;
+    if (username !== user.value?.username || revision !== archiveBatchLibraryRevision) return;
     const changed = archiveBatchJobs.value.filter(job => {
       const fromServer = jobs.find(item => item.id === job.id);
       return !fromServer
@@ -184,7 +186,7 @@ const refreshArchiveBatches = async () => {
   finally {
     archiveBatchRefreshing = false;
     clearTimeout(archiveBatchTimer);
-    if (authenticated.value && user.value?.username && user.value.username !== username) {
+    if (authenticated.value && user.value?.username && (user.value.username !== username || revision !== archiveBatchLibraryRevision)) {
       archiveBatchTimer = setTimeout(() => void refreshArchiveBatches(), 0);
     } else if (authenticated.value && archiveBatchJobs.value.some(job => job.status === 'running')) {
       archiveBatchTimer = setTimeout(() => void refreshArchiveBatches(), 5000);
@@ -627,6 +629,11 @@ const confirmDeleteMedia = async () => {
   try {
     const media = deletingMedia.value;
     await removeMedia(media);
+    if (media.quarkFid) {
+      archiveBatchLibraryRevision++;
+      archiveBatchJobs.value = archiveBatchJobs.value.filter(job => job.targetFid !== media.quarkFid);
+      void refreshArchiveBatches();
+    }
     removeLocalMediaHistory(media);
     requestLayerClose('delete', () => { deletingMedia.value = null; });
   } catch {

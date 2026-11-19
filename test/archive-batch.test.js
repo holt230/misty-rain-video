@@ -165,6 +165,39 @@ test('官方集数不能唯一确认时不会把资源标题当作全集证明',
   assert.equal(f.calls.length, 0);
 });
 
+test('央视频33集与只找到30集分别展示，不能启动缺集或版本不明的补集', async t => {
+  const f = await fixture(t);
+  const ysp = { ...official.works[0], platform: '央视频', latestEpisode: 33 };
+  f.service.officialProgress.lookup = async () => ({ works: [ysp] });
+  for (const number of [28, 29, 30]) {
+    f.entries.push({ ...f.entries.find(item => item.fid === 'hdr-27'), fid: 'hdr-' + number, name: number + '.zip', episodeNumber: number });
+  }
+  const preview = await f.service.preview(input, user);
+  assert.equal(preview.officialLatest, 33); assert.equal(preview.officialPlatform, '央视频');
+  assert.deepEqual(preview.missingEpisodes, [31, 32, 33]); assert.equal(preview.canStart, false);
+  await assert.rejects(f.service.start({ ...input, token: preview.token }, user), { code: 'ARCHIVE_BATCH_INCOMPLETE' });
+  f.service.officialProgress.lookup = async () => ({ works: [ysp, { ...ysp, platform: '优酷', latestEpisode: 30 }] });
+  await assert.rejects(f.service.preview(input, user), { code: 'OFFICIAL_EDITION_AMBIGUOUS' });
+  assert.equal(f.calls.length, 0);
+});
+
+test('已移除目录的旧补集记录按 FID 退出列表，网盘暂时不可用时保留记录', async t => {
+  const f = await fixture(t, { failEpisode: 1 });
+  const preview = await f.service.preview(input, user);
+  const job = await f.service.start({ ...input, token: preview.token }, user);
+  await f.service.active.get(job.id);
+  const visible = new Set(['old-library']);
+  f.gateway.libraryFolderIds = async () => visible;
+  assert.equal((await f.service.list(user))[0].status, 'failed');
+  visible.delete('old-library');
+  visible.add('different-folder');
+  assert.deepEqual(await f.service.list(user), []);
+  f.gateway.describeArchiveLibrary = async () => { throw Object.assign(new Error('原片库目录已变化'), { code: 'ARCHIVE_TARGET_CHANGED' }); };
+  await assert.rejects(f.service.resume(job.id, user), { code: 'ARCHIVE_TARGET_CHANGED' });
+  f.gateway.libraryFolderIds = async () => { throw new Error('temporarily unavailable'); };
+  assert.equal((await f.service.list(user))[0].id, job.id);
+});
+
 test('同名同年的多个真实来源可以补齐缺口，其他年份不会混入', async t => {
   const f = await fixture(t), otherUrl = 'https://pan.quark.cn/s/other';
   for (let i = f.entries.length - 1; i >= 0; i--) if (f.entries[i].episodeNumber === 17) f.entries.splice(i, 1);

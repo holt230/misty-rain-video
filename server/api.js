@@ -92,6 +92,11 @@ const readLibrary = async (context, user, userData) => {
     };
   });
   const enriched = await context.posterService.enrich(cards);
+  if (context.catalog?.libraryPoster) {
+    await Promise.all(enriched.filter(card => isGenericPoster(card.poster)).map(async card => {
+      card.poster = await context.catalog.libraryPoster(card).catch(() => '') || card.poster;
+    }));
+  }
   const grouped = new Map();
   const normalizeTitle = value => String(value || '')
     .normalize('NFKC')

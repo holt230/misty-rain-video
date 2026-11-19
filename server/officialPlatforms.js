@@ -5,7 +5,7 @@ const clean = value => String(value || '').replace(/<[^>]*>/g, '').normalize('NF
 const kindOf = value => /^(?:动漫|动画)$/.test(value) ? 'anime' : value === '电视剧' ? 'tv' : undefined;
 const episodeNumber = value => Number.isInteger(Number(value)) && Number(value) > 0 && Number(value) <= 5000 ? Number(value) : 0;
 const ancillary = /预告|花絮|片花|彩蛋|幕后|采访|抢先预览/;
-const platforms = { qiyi: '爱奇艺', youku: '优酷', hunantv: '芒果TV' };
+const platforms = { qiyi: '爱奇艺', youku: '优酷', hunantv: '芒果TV', yangshipin: '央视频' };
 const unavailable = () => new Error('官方正片进度暂未确认');
 
 /** Canonicalize known official links only. Search redirects are decoded, never followed. */
@@ -27,6 +27,11 @@ export function officialPlatformUrl(value, platform) {
     if (platform === 'hunantv' && url.hostname === 'www.mgtv.com' && /^\/b\/\d{1,12}\/\d{1,12}\.html$/.test(url.pathname)) {
       return `https://www.mgtv.com${url.pathname}`;
     }
+    if (platform === 'yangshipin' && url.hostname === 'm.yangshipin.cn' && url.pathname === '/video'
+      && url.searchParams.get('type') === '0' && url.searchParams.getAll('vid').length === 1) {
+      const vid = url.searchParams.get('vid');
+      if (/^[a-z0-9]{11}$/i.test(vid)) return `https://m.yangshipin.cn/video?type=0&vid=${vid}`;
+    }
   } catch { /* No external or malformed URLs enter the official request queue. */ }
   return undefined;
 }
@@ -41,6 +46,7 @@ export function discoverOfficialPlatforms(result, keyword, category = 'all') {
     if (row.doc?.dataType !== 2 || !kind || (category !== 'all' && category !== kind) || !isExactWorkTitle(keyword, title)) continue;
     for (const site of [...(info.episodeSites || []), ...(info.playSites || [])]) {
       if (!Object.hasOwn(platforms, site.enName)) continue;
+      if (site.enName === 'yangshipin' && kind !== 'tv') continue;
       for (const episode of site.episodeInfoList || []) {
         const url = officialPlatformUrl(episode.url, site.enName);
         if (!url) continue;
@@ -151,10 +157,39 @@ export function parseMangoProgress(response, work) {
     platform: platforms.hunantv, sourceUrl: `https://www.mgtv.com${last.url}` };
 }
 
+export function parseYangshipinProgress(html, candidate, keyword) {
+  const vid = new URL(candidate.url).searchParams.get('vid');
+  const video = scriptData(html, '__STATE_video__')?.payloads?.sharevideo;
+  const episodeTitle = value => clean(value).match(/^《(.+)》\s*第\s*(\d{1,4})\s*集$/u);
+  const [, title, number] = episodeTitle(video?.title) || [];
+  const year = String(video?.checkup_time || '').match(/^(?:19|20)\d{2}(?=-)/)?.[0] || '';
+  const episodes = video?.shareLongVideoRec?.episodes;
+  if (video?.errcode !== 0 || video.ShowVideo !== true || video.status !== 1 || video.om_info?.isVidQuickView !== false || video.vid !== vid
+    || !/^[a-z0-9]{10,40}$/i.test(video.cid || '') || !matchesWork(candidate, keyword, title, 'tv')
+    || (candidate.year && year !== candidate.year) || !Array.isArray(episodes?.videoList) || episodes.videoList.length > 5000
+    || episodes.paging?.hasNextPage !== 0 || episodes.paging?.hasPrePage !== 0) throw unavailable();
+  const found = new Map();
+  for (const episode of episodes.videoList) {
+    const [, work, label] = episodeTitle(episode.showTitle) || [];
+    const index = episodeNumber(episode.title);
+    const url = officialPlatformUrl(episode.shareItem?.shareUrl, 'yangshipin');
+    if (work !== title || index !== Number(label) || !index || episode.isQuickView !== false || episode.videoFlag !== 0
+      || !url || new URL(url).searchParams.get('vid') !== episode.vid
+      || new URL(episode.shareItem.shareUrl).searchParams.get('cid') !== video.cid) continue;
+    if (found.has(index) && found.get(index) !== url) throw unavailable();
+    found.set(index, url);
+  }
+  const latest = Math.max(0, ...found.keys());
+  if (found.size !== latest || found.get(Number(number)) !== candidate.url) throw unavailable();
+  return { id: `yangshipin:${video.cid}`, title, category: 'tv', year, latestEpisode: latest,
+    completed: false, platform: platforms.yangshipin, sourceUrl: found.get(latest) };
+}
+
 export class OfficialPlatformCatalog {
   constructor(request) { this.request = request; }
   async confirm(candidate, keyword) {
     if (candidate.provider === 'youku') return parseYoukuProgress(await this.request(candidate.url, {}, 'text'), candidate, keyword);
+    if (candidate.provider === 'yangshipin') return parseYangshipinProgress(await this.request(candidate.url, {}, 'text'), candidate, keyword);
     if (candidate.provider === 'qiyi') {
       const info = await this.request(`https://pcw-api.iqiyi.com/video/video/baseinfo/${iqiyiVideoId(candidate.url)}`);
       const work = parseIqiyiWork(info, candidate, keyword);

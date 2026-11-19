@@ -145,6 +145,26 @@ test('线上部分来源失败且无可用分享时保留官方进度，提供�
  try{await nextTick();assert.match(document.querySelector('.official-availability').textContent,/无法确认/);assert.equal(document.querySelector('.btn-transfer'),null);document.querySelector('.retry-search-button').click();assert.equal(retried,1);}finally{view.app.unmount();}
 });
 
+test('电视剧预览分别展示已找到的集数、官方版本集数和缺集', async () => {
+  const title = '嫁金钗';
+  const item = { ...resource(title, 0), workTitle: title, category: 'tv', year: '2026', batchEligible: true,
+    archivePreparation: { episode: 30, batchEligible: true, summary: '已找到第 1～30 集的资源' } };
+  const view = mount({ searchKeyword: title, searchCategory: 'tv', currentCategory: 'tv',
+    media: { title, category: 'tv' }, quarkResources: [item], batchPreview: { resourceId: '0', plan: {
+      officialPlatform: '央视频', officialLatest: 33, existingEpisodes: [], plannedEpisodes: Array.from({ length: 30 }, (_, i) => i + 1),
+      missingEpisodes: [31, 32, 33], canStart: false, reason: '暂时没有找到全部剧集，请稍后重试。'
+    } } });
+  try {
+    await nextTick();
+    const plan = document.querySelector('.archive-batch-plan').textContent;
+    assert.match(plan, /本次找到第 1～30 集/);
+    assert.match(plan, /央视频已更新至第 33 集/);
+    assert.match(plan, /暂未找到第 31～33 集/);
+    assert.doesNotMatch(plan, /计划补齐|建议预留/);
+    assert.equal(document.querySelector('.btn-transfer').textContent.trim(), '重新检查');
+  } finally { view.app.unmount(); }
+});
+
 test('电视剧展示补集范围和空间，后台任务可以停止并从回执继续',async()=>{
  const item={...resource('折月亮 (2026)',0),workTitle:'折月亮',category:'tv',year:'2026',batchEligible:true,
   archivePreparation:{episode:27,batchEligible:true,summary:'已找到第 1～27 集的资源',notice:'可以检查并补齐缺少的剧集。'}};
