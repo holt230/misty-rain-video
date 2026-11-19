@@ -147,13 +147,35 @@ const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
 };
 
 export class QuarkStreamService {
-  static async singleStereoSource(source: PlaybackSource, signal: AbortSignal): Promise<PlaybackSource> {
+  static async singleStereoSource(source: PlaybackSource, signal: AbortSignal, compatibleEpisode?: {
+    sessionId: string;
+    episodeFid: string;
+    nativeHls: boolean;
+  }): Promise<PlaybackSource> {
     if (source.singleStereo || source.isHls || source.mimeType !== 'video/mp4') return source;
-    const endpoint = source.url.split('?')[0]!;
+    const probe = async (candidate: PlaybackSource, probeSignal: AbortSignal) => {
+      const endpoint = candidate.url.split('?')[0]!;
+      try {
+        const response = await authFetch(endpoint + '/stereo', { method: 'POST', signal: probeSignal });
+        if (response.ok && (await response.json()).data?.available === true) return endpoint + '?audio=stereo';
+      } catch { /* Keep looking for an independently verified source. */ }
+      return undefined;
+    };
+    let url = await probe(source, AbortSignal.any([signal, AbortSignal.timeout(source.audioCompatibility ? 3000 : 2300)]));
+    let confirmed = source;
     try {
-      const response = await authFetch(endpoint + '/stereo', { method: 'POST', signal });
-      if (!response.ok || (await response.json()).data?.available !== true) return source;
-      return { ...source, url: endpoint + '?audio=stereo', singleStereo: true, delivery: 'proxy',
+      if (!url && compatibleEpisode && source.delivery === 'direct' && !source.audioCompatibility && !signal.aborted) {
+        const { sessionId, episodeFid, nativeHls } = compatibleEpisode;
+        const playback = await QuarkStreamService.prepareEpisode(sessionId, episodeFid, { nativeHls, audioCompatibility: true }, signal);
+        const candidate = playback.sources.find(item => item.audioCompatibility && item.resolution === source.resolution
+          && item.mimeType === 'video/mp4' && !item.isHls && !item.colorCompatibilityRisk);
+        if (candidate && !signal.aborted) {
+          url = await probe(candidate, signal);
+          if (url) confirmed = candidate;
+        }
+      }
+      if (!url || signal.aborted) return source;
+      return { ...confirmed, id: source.id, audioCompatibility: source.audioCompatibility, url, singleStereo: true, delivery: 'proxy',
         audioTracks: [{ id: 'stereo', label: '立体声', channels: '2', codec: 'aac', language: '' }] };
     } catch {
       return source;
@@ -205,11 +227,11 @@ export class QuarkStreamService {
     });
   }
 
-  static prepareEpisode(sessionId: string, episodeFid: string, capabilities: { nativeHls: boolean; audioCompatibility?: boolean } = { nativeHls: false }): Promise<PreparedPlayback> {
+  static prepareEpisode(sessionId: string, episodeFid: string, capabilities: { nativeHls: boolean; audioCompatibility?: boolean } = { nativeHls: false }, signal?: AbortSignal): Promise<PreparedPlayback> {
     const action = capabilities.audioCompatibility ? 'compatible-audio' : 'prepare';
     return request<PreparedPlayback>(
       `/api/player/sessions/${encodeURIComponent(sessionId)}/episodes/${encodeURIComponent(episodeFid)}/${action}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nativeHls: capabilities.nativeHls }) }
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nativeHls: capabilities.nativeHls }), signal }
     ).then(playback => ({
       ...playback,
       sources: playback.sources.map(source => ({

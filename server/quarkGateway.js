@@ -1297,7 +1297,7 @@ export class QuarkGateway {
 
     if (savedFid) {
       try {
-        playData = await this.#loadPlayData(savedFid, audioCompatibility);
+        playData = await this.#loadPlayData(savedFid, audioCompatibility, capabilities.signal);
       } catch (error) {
         if (audioCompatibility) throw error;
         if (error.code === 'QUARK_FILE_NOT_FOUND') {
@@ -1534,12 +1534,13 @@ export class QuarkGateway {
     let cached = this.stereoProbes.get(key);
     if (!cached || cached.expires <= Date.now()) {
       const url = source.upstreamUrl, profile = source.requestProfile, cookie = source.requestCookie;
-      const pending = inspectMp4Stereo((range, signal) => this.fetchMedia(url, range, profile, cookie, { signal }),
-        AbortSignal.timeout(1800));
+      const deadline = AbortSignal.timeout(source.audioCompatibility ? 2700 : 1800);
+      const pending = inspectMp4Stereo((range, signal) => this.fetchMedia(url, range, profile, cookie, { signal }), deadline);
       cached = { pending, expires: Date.now() + 60_000 };
       this.stereoProbes.set(key, cached);
       if (this.stereoProbes.size > 256) this.stereoProbes.delete(this.stereoProbes.keys().next().value);
       if (await pending) cached.expires = Date.now() + SESSION_TTL_MS;
+      else if (deadline.aborted && this.stereoProbes.get(key) === cached) this.stereoProbes.delete(key);
     }
     return cached.pending;
   }
@@ -2442,7 +2443,7 @@ export class QuarkGateway {
     );
   }
 
-  async #loadPlayData(savedFid, webOnly = false) {
+  async #loadPlayData(savedFid, webOnly = false, signal) {
     const cookie = this.#requireCookie();
     let webData = { __playbackProfile: 'web' };
 
@@ -2473,6 +2474,7 @@ export class QuarkGateway {
         `${MEDIA_HOST}/file/v2/play?pr=ucpro&fr=pc`,
         `${API_HOST}/file/v2/play?pr=ucpro&fr=pc`
       ]) {
+        signal?.throwIfAborted();
         try {
           const result = await this.#requestJson(endpoint, {
             method: 'POST',
@@ -2480,7 +2482,8 @@ export class QuarkGateway {
             body: requestBody,
             acceptErrorCodes: true,
             captureResponseCookies: true,
-            userAgent: QUARK_DESKTOP_USER_AGENT
+            userAgent: QUARK_DESKTOP_USER_AGENT,
+            signal
           });
           if (Number(result?.code) === 0 && result?.data) {
             webData = {
@@ -2491,6 +2494,7 @@ export class QuarkGateway {
             if (hasRawPlaybackSource(webData)) return webData;
           }
         } catch (error) {
+          signal?.throwIfAborted();
           if (error?.code === 'QUARK_AUTH_REQUIRED') throw error;
           // Try the alternate host/profile, then the optional advanced profile.
         }

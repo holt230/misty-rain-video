@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { transform } from 'esbuild';
+import { build, transform } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
 const { code } = await transform(fs.readFileSync('src/services/playbackSource.ts', 'utf8'), { loader: 'ts', format: 'esm' });
@@ -87,4 +87,47 @@ test('音轨清单不一致或立体声属于另一语言时保留当前音轨',
   assert.equal(describeNativeAudioTracks([{ id: '1' }], metadata)[0].channels, '');
   const native = [{ id: '1', language: 'und' }, { id: '2', language: 'und' }];
   assert.equal(findStereoAudioTrack(describeNativeAudioTracks(native, metadata), 0), -1);
+});
+
+test('iPhone 直连未通过检查时只切换到同画质且已确认的兼容立体声', async t => {
+  const [{ text }] = (await build({
+    entryPoints: ['src/services/quarkStreamService.ts'], bundle: true, write: false, format: 'esm',
+    define: { 'import.meta.env.BASE_URL': '"/misty-rain/"' }
+  })).outputFiles;
+  const { QuarkStreamService } = await import(`data:text/javascript;base64,${Buffer.from(text).toString('base64')}`);
+  const streaming = '/misty-rain/api/player/sessions/session/streams/';
+  const source = { id: 'direct', resolution: 'super', delivery: 'direct', mimeType: 'video/mp4', url: streaming + 'direct' };
+  const fallback = { sessionId: 'session', episodeFid: 'e2', nativeHls: true };
+  const calls = [];
+  let directAvailable = false, compatibleAvailable = true, resolution = 'super';
+  const ok = data => Response.json({ code: 0, data });
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push(url);
+    assert.equal(options.method, 'POST');
+    if (url === source.url + '/stereo') return ok({ available: directAvailable });
+    if (url === streaming + 'web/stereo') return ok({ available: compatibleAvailable });
+    assert.equal(url, '/misty-rain/api/player/sessions/session/episodes/e2/compatible-audio');
+    return ok({ sources: [{ ...source, id: 'web', resolution, delivery: 'proxy', audioCompatibility: true,
+      url: '/api/player/sessions/session/streams/web' }], subtitles: [] });
+  });
+  const pick = options => QuarkStreamService.singleStereoSource(source, new AbortController().signal, options);
+  const selected = await pick(fallback);
+  assert.equal(selected.id, source.id);
+  assert.equal(selected.url, streaming + 'web?audio=stereo');
+  assert.equal(selected.singleStereo, true);
+  assert.equal(selected.audioTracks[0].channels, '2');
+  assert.equal(calls.length, 3);
+  compatibleAvailable = false;
+  assert.equal(await pick(fallback), source);
+  resolution = 'high';
+  calls.length = 0;
+  assert.equal(await pick(fallback), source);
+  assert.equal(calls.length, 2);
+  calls.length = 0;
+  assert.equal(await pick(undefined), source);
+  assert.deepEqual(calls, [source.url + '/stereo']);
+  directAvailable = true;
+  calls.length = 0;
+  assert.equal((await pick(fallback)).url, source.url + '?audio=stereo');
+  assert.deepEqual(calls, [source.url + '/stereo']);
 });
