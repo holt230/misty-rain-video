@@ -26,3 +26,17 @@ test('不知道来源应有集数时不能把目录仅有的一集宣称成最�
   const unknown = resourceCompleteness(details([entry(1)]), 'anime', 0);
   assert.equal(unknown.complete, false); assert.match(unknown.reason, /无法确认/);
 });
+
+test('同集优先选文件实际所在的 SDR 发行分组，仍按实际文件核对缺集', () => {
+  const video = (n, fid, folder, size) => ({ ...entry(n), fid, ancestorFids: [folder], size });
+  const result = resourceCompleteness(details([
+    { fid: 'dv', name: '4K 杜比视界', isDirectory: true },
+    { fid: 'sdr', name: '1080p SDR', isDirectory: true },
+    video(1, 'one-dv', 'dv', 300), video(1, 'one-sdr', 'sdr', 200),
+    video(2, 'two-dv', 'dv', 240)
+  ]), 'tv', 3);
+  assert.deepEqual(result.selectedFids, ['one-sdr', 'two-dv']);
+  assert.equal(result.colorFormat, 'dolby-vision');
+  assert.deepEqual(result.missing, [3]);
+  assert.equal(result.complete, false);
+});

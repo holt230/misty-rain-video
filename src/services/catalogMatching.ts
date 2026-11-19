@@ -3,7 +3,7 @@ import type { MediaItem } from '../types/media';
 import type { ResourceItem } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
-import { matchResource } from './resourceMatching';
+import { compareResourceColors, matchResource, resourceEpisode } from './resourceMatching';
 import { isExactWorkTitle } from '../../server/searchTitles.js';
 import { matchesResourceTitle } from './resourceTitles';
 
@@ -62,7 +62,11 @@ export function automaticCatalogCandidates(item: PlaybackWork, resources: Resour
       && (!resource.category || resource.category === item.category) : matchesCatalogTitle(item, resource.title))
     && matchResource(item.title, resource.title, item.category).matches
     && !matchResource(item.title, resource.title, item.category).conflict
-    && !(item.category === 'anime' && /短剧|真人/.test(resource.title)));
+    && !(item.category === 'anime' && /短剧|真人/.test(resource.title)))
+    .sort((a, b) => (item.category === 'movie' ? 0
+      : (b.verification?.latestEpisode ?? b.latestEpisode ?? resourceEpisode(b.title))
+        - (a.verification?.latestEpisode ?? a.latestEpisode ?? resourceEpisode(a.title)))
+      || compareResourceColors(a, b));
 }
 
 export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem, { allowUnspecifiedSeason = false } = {}) {

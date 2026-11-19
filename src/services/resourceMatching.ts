@@ -3,6 +3,7 @@ import type { ResourceItem } from '../types/search';
 import { isNonVideoResource } from './resourceFiltering';
 import { resourceHeading, resourceTitleMatch } from './resourceTitles';
 import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { sourceColor, sourceColorRank } from '../../server/sourceColor.js';
 
 export function matchResource(keyword: string, title: string, category?: CategoryType) {
   const heading = resourceHeading(title);
@@ -53,10 +54,19 @@ export function rankResourceCandidates(resources: ResourceItem[], keyword: strin
     .filter(item => item.match.matches)
     .sort((a, b) => (category === 'movie' ? 0 : b.episode - a.episode)
       || Number(a.match.otherVersion) - Number(b.match.otherVersion)
+      || compareResourceColors(a.resource, b.resource)
       || b.match.score - a.match.score || b.date - a.date);
   const seen = new Set<string>();
   return ranked.filter(({ resource }) => {
     if (seen.has(resource.url)) return false;
     seen.add(resource.url); return true;
   });
+}
+
+/** Compare releases only after the caller accounts for identity and episode coverage. */
+export function compareResourceColors(a: ResourceItem, b: ResourceItem) {
+  return Number(b.verification?.complete === true) - Number(a.verification?.complete === true)
+    || (b.verification?.episodeCount ?? b.archivePreparation?.availableEpisodes?.length ?? 0)
+      - (a.verification?.episodeCount ?? a.archivePreparation?.availableEpisodes?.length ?? 0)
+    || sourceColorRank(a.colorFormat ?? sourceColor(a.title)) - sourceColorRank(b.colorFormat ?? sourceColor(b.title));
 }

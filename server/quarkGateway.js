@@ -2,6 +2,7 @@ import { archiveFormat, supportedArchive, archiveError, requireArchiveCapacity, 
 import dns from 'node:dns';
 import { createOpaqueId } from './http.js';
 import { inspectMp4Stereo } from './mp4Stereo.js';
+import { firstLabeledColor, sourceColorRank } from './sourceColor.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
 import { assertVerifiedImport } from './verifiedImport.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
@@ -465,7 +466,12 @@ const serializeEpisode = item => {
   };
 };
 
-const preferEpisode = (left, right) => {
+const preferEpisode = (left, right, preferCompatibleColor) => {
+  if (preferCompatibleColor) {
+    const color = episode => firstLabeledColor([episode.fileName, ...episode.sourcePath.split('/').reverse()]);
+    const difference = sourceColorRank(color(left)) - sourceColorRank(color(right));
+    if (difference) return difference > 0 ? right : left;
+  }
   const leftScore = [left.duration, left.height, left.width, left.size];
   const rightScore = [right.duration, right.height, right.width, right.size];
   for (let index = 0; index < leftScore.length; index += 1) {
@@ -474,7 +480,7 @@ const preferEpisode = (left, right) => {
   return collator.compare(right.fileName, left.fileName) > 0 ? right : left;
 };
 
-export const normalizePlaybackEpisodes = items => {
+export const normalizePlaybackEpisodes = (items, { preferCompatibleColor = false } = {}) => {
   const playable = items
     .filter(isVideoFile)
     .filter(item => !ancillaryVideoPattern.test(String(item.file_name || ''))
@@ -487,7 +493,7 @@ export const normalizePlaybackEpisodes = items => {
     const key = episode.episodeNumber > 0
       ? episodeKey(episode)
       : `file:${String(episode.fileName).normalize('NFKC').toLowerCase()}`;
-    unique.set(key, unique.has(key) ? preferEpisode(unique.get(key), episode) : episode);
+    unique.set(key, unique.has(key) ? preferEpisode(unique.get(key), episode, preferCompatibleColor) : episode);
   }
   return [...unique.values()].sort((left, right) => {
     if ((left.seasonNumber || 1) !== (right.seasonNumber || 1)) return (right.seasonNumber || 1) - (left.seasonNumber || 1);
@@ -1194,7 +1200,7 @@ export class QuarkGateway {
   }
 
   #selectedLibraryEpisodes(tree, selected, category) {
-    const episodes = normalizePlaybackEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })));
+    const episodes = normalizePlaybackEpisodes(entriesInSelection(tree, selected).map(item => ({ ...item, pdir_fid: item.parentFid })), { preferCompatibleColor: true });
     const numbered = episodes.filter(episode => episode.episodeNumber > 0);
     return category !== 'movie' && numbered.length ? numbered : episodes;
   }
@@ -1887,7 +1893,7 @@ export class QuarkGateway {
     if (queue.length || files.length >= 5000) throw new QuarkApiError('分享目录过大，请选择单部影片的分享', { code: 'LIBRARY_SCAN_LIMIT', statusCode: 422 });
     if (rawEpisodes) return files.filter(item => !ancillaryVideoPattern.test(item.file_name || '')
       && !isAncillaryVideoPath(`${item.source_path}/${item.file_name}`)).map(serializeEpisode);
-    const episodes = normalizePlaybackEpisodes(files);
+    const episodes = normalizePlaybackEpisodes(files, { preferCompatibleColor: true });
     const numbered = episodes.filter(episode => episode.episodeNumber > 0);
     return category && category !== 'movie' && numbered.length ? numbered : episodes;
   }

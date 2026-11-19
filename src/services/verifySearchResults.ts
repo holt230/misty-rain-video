@@ -5,6 +5,7 @@ import { validatesCatalogShare } from './catalogMatching';
 import { episodeRangeLabel, resourceCompleteness } from './resourceCompleteness';
 import { isExactWorkTitle } from '../../server/searchTitles.js';
 import { matchResource, resourceEpisode } from './resourceMatching';
+import { fileSourceColor, leastCompatibleColor, sourceColorRank } from '../../server/sourceColor.js';
 
 interface Options {
   title: string;
@@ -50,19 +51,25 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
         if (!category) { reasons.push('无法确认作品类型。'); return; }
         const publicationMatches = resource.workTitle && isExactWorkTitle(options.title, resource.workTitle)
           && (!options.year || !resource.year || options.year === resource.year);
+        const folders = new Map(details.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
+        const color = (file: QuarkShareDetails['entries'][number]) => fileSourceColor(file, folders, resource.title);
+        const compareFiles = (a: QuarkShareDetails['entries'][number], b: QuarkShareDetails['entries'][number]) =>
+          sourceColorRank(color(a)) - sourceColorRank(color(b)) || b.size - a.size || a.fid.localeCompare(b.fid);
         const archives = publicationMatches ? details.entries.filter(entry => entry.isArchive && ['zip','rar','7z'].includes(entry.archiveFormat || '')
           && Number.isInteger(entry.episodeNumber) && entry.episodeNumber > 0 && entry.episodeNumber <= 5000 && !ancillary.test(entry.name)) : [];
         const requestedArchive = options.episode ? archives.filter(entry => entry.episodeNumber === options.episode) : archives;
         const archiveEpisode = options.episode || (archives.some(entry => entry.episodeNumber === options.officialLatest) ? options.officialLatest : Math.max(0,...archives.map(entry => entry.episodeNumber)));
         const chosenArchives = requestedArchive.filter(entry => entry.episodeNumber === archiveEpisode);
         if (chosenArchives.length && archiveEpisode) {
-          const file = [...chosenArchives].sort((a,b)=>b.size-a.size||a.fid.localeCompare(b.fid))[0];
+          const file = [...chosenArchives].sort(compareFiles)[0];
           const availableEpisodes = [...new Set(requestedArchive.map(entry => entry.episodeNumber))].sort((a,b)=>a-b);
           const expectedLatest = options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
           const missingEpisodes = !options.episode && Number.isInteger(expectedLatest) && expectedLatest > 0 && expectedLatest <= 5000
             ? Array.from({ length: expectedLatest }, (_, i) => i + 1).filter(episode => !availableEpisodes.includes(episode)) : [];
           const missingNotice = missingEpisodes.length ? `${episodeRangeLabel(missingEpisodes)}暂未找到。` : '';
-          accepted.push({ ...resource, category, batchEligible: category === 'tv' && !options.episode, archivePreparation: { archiveFid: file.fid, episode: archiveEpisode, fileName: file.name, bytes: file.size,
+          // A batch can use other folders. Describe the share's formats conservatively until the plan selects files.
+          const colorFormat = category === 'tv' && !options.episode ? leastCompatibleColor(requestedArchive.map(color)) : color(file);
+          accepted.push({ ...resource, category, colorFormat, batchEligible: category === 'tv' && !options.episode, archivePreparation: { archiveFid: file.fid, episode: archiveEpisode, fileName: file.name, bytes: file.size,
             availableEpisodes, missingEpisodes, summary: `已找到${episodeRangeLabel(availableEpisodes)}的资源`,
             batchEligible: category === 'tv' && !options.episode,
             requiredMembership: '夸克SVIP', notice: category === 'tv' && !options.episode
@@ -76,18 +83,18 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
           reasons.push('无法确认分享中的片名或版本。'); return;
         }
         if (options.episode) {
-          const files = details.entries.filter(entry => entry.isVideo && entry.episodeNumber === options.episode && !ancillary.test(entry.name)).sort((a, b) => b.size - a.size);
+          const files = details.entries.filter(entry => entry.isVideo && entry.episodeNumber === options.episode && !ancillary.test(entry.name)).sort(compareFiles);
           if (!files[0]?.fid) { reasons.push(`分享中没有第 ${options.episode} 集。`); return; }
-          accepted.push({ ...resource, category, verification: { summary: `已核对第 ${options.episode} 集的视频文件`, episodeCount: 1,
+          accepted.push({ ...resource, category, colorFormat: color(files[0]), verification: { summary: `已核对第 ${options.episode} 集的视频文件`, episodeCount: 1,
             latestEpisode: options.episode, requestedEpisode: options.episode, selectedFids: [files[0].fid], requiredEpisodes: [options.episode], shareTitle: details.title, complete: true } });
           return;
         }
         const target = category === 'tv' ? options.officialLatest || 0 : options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
-        const coverage = resourceCompleteness(details, category, target);
+        const coverage = resourceCompleteness(details, category, target, resource.title);
         if (!coverage.available) {
           reasons.push('视频文件未标明可识别的集数，暂时无法确认剧集范围。'); return;
         }
-        accepted.push({ ...resource, category, batchEligible: category === 'tv', verification: {
+        accepted.push({ ...resource, category, colorFormat: coverage.colorFormat, batchEligible: category === 'tv', verification: {
           summary: category === 'movie' ? '已核对可用正片文件' : `已核对${episodeRangeLabel(coverage.episodes)}，共 ${coverage.available} 集`,
           episodeCount: coverage.available, latestEpisode: coverage.actualLatest,
           selectedFids: category === 'movie' || !coverage.complete ? coverage.selectedFids : undefined,
@@ -119,7 +126,9 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
   })
     .sort((a, b) => Number(Boolean(b.verification)) - Number(Boolean(a.verification))
       || (b.verification?.latestEpisode || b.archivePreparation?.episode || 0) - (a.verification?.latestEpisode || a.archivePreparation?.episode || 0)
-      || (b.verification?.episodeCount || 0) - (a.verification?.episodeCount || 0) || a.url.localeCompare(b.url));
+      || (b.verification?.episodeCount || b.archivePreparation?.availableEpisodes?.length || 0)
+        - (a.verification?.episodeCount || a.archivePreparation?.availableEpisodes?.length || 0)
+      || sourceColorRank(a.colorFormat) - sourceColorRank(b.colorFormat) || a.url.localeCompare(b.url));
   if (verified.length) return { resources: verified, message: errors.length ? '部分分享暂时无法核对，结果中已标注可直接保存或需解压核对。' : '' };
   if (errors.length) return { resources: [], message: '', error: errors.sort()[0] };
   const explanation = reasons.find(reason => reason.startsWith('分享中没有第'))

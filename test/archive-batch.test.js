@@ -95,6 +95,18 @@ test('来源缺一集或容量不足时只给出原因，不启动部分补集',
   assert.equal(f.calls.length, 0);
 });
 
+test('片库补集覆盖相同优先 SDR 标注，少一集时仍优先能找齐的版本', async t => {
+  const f = await fixture(t);
+  f.entries.find(item => item.fid === 'dv').name = '1080P SDR';
+  const compatible = await f.service.preview(input, user);
+  assert.deepEqual(compatible.qualities, ['1080P SDR']);
+  assert.equal(compatible.totalArchiveBytes, 360);
+  f.entries.splice(f.entries.findIndex(item => item.fid === 'dv-1'), 1);
+  const complete = await f.service.preview(input, user);
+  assert.deepEqual(complete.qualities, ['4K HDR']);
+  assert.deepEqual(complete.missingEpisodes, []);
+});
+
 test('预览后片源变化必须重新核对，不能使用过时计划启动', async t => {
   const f = await fixture(t), preview = await f.service.preview(input, user);
   f.entries.find(entry => entry.fid === 'hdr-1').size = 11;
