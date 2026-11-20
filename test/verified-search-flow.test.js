@@ -170,3 +170,70 @@ test('同一电视剧分享同时含视频和压缩包时保留两种实际覆�
  assert.equal(result.resources[0].archivePreparation.batchEligible,true);
  assert.equal(result.resources[0].archivePreparation.availableEpisodes.length,26);
 });
+
+test('电影分享根目录乱命名时，用发布片名与视频中的官方别名、年份共同核对', async () => {
+  const title = '给阿嬷的情书';
+  const root = 'G 给阿.MDQS 1080P';
+  const published = { ...resource, title, workTitle: title, workTitleAliases: ['Dear You'], year: '2026', category: 'movie', source: 'erxiaopan' };
+  const movie = { fid: 'film', name: 'Dear.You.2026.1080p.H264.mkv', isVideo: true, episodeNumber: 0, size: 5682931662, ancestorFids: ['root'] };
+  const verify = (files, row = published, directory = root) => verifySearchResults([row], options({ title, category: 'movie', year: '2026',
+    inspect: async () => ({ title: directory, videoCount: files.length, entries: [{ fid: 'root', name: directory, isDirectory: true }, ...files] }) }));
+  const result = await verify([movie]);
+  assert.deepEqual(result.resources[0].verification.selectedFids, ['film']);
+  for (const name of ['Dear.You.2025.1080p.mkv', 'Dear.You.1080p.mkv', 'Dear.You.2026.Trailer.mkv', 'Dear.You.2.2026.mkv', '4K.H264.mkv']) {
+    assert.equal((await verify([{ ...movie, name }])).resources.length, 0, name);
+  }
+  assert.equal((await verify([movie, { ...movie, fid: 'other', name: '其他电影.2026.mkv' }])).resources.length, 0);
+  assert.equal((await verify([movie], { ...published, year: '2025' })).resources.length, 0);
+  assert.equal((await verify([movie], { ...published, source: 'unknown' })).resources.length, 0);
+  assert.equal((await verify([movie], published, '其他版本 2025')).resources.length, 0);
+});
+
+test('同一部动漫接受 II 与 2 写法，仍只显示实际文件并排除原作', async () => {
+  const { SilentSearchEngine } = await compile('src/services/silentSearchEngine.ts');
+  const { rankResourceCandidates } = await compile('src/services/resourceMatching.ts');
+  const anime = { ...resource, title: '【国漫】斗罗大陆2：绝世唐门 更新179集', source: 'public_guoman4K', workTitle: undefined };
+  const title = '斗罗大陆Ⅱ绝世唐门';
+  const remote = new SilentSearchEngine();
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({ code: 0, data: { merged_by_type: { quark: [{ url: anime.url, note: anime.title, category: 'anime' }] } } });
+    assert.equal((await remote.search(title, 'anime')).quarkItems.length, 1);
+    assert.equal((await remote.search('斗罗大陆', 'anime')).quarkItems.length, 0);
+  } finally { globalThis.fetch = original; }
+  assert.equal(rankResourceCandidates([anime], title, 'anime').length, 1);
+  assert.equal(rankResourceCandidates([anime], '斗罗大陆', 'anime').length, 0);
+  const share = { title: '斗罗大陆2：绝世唐门', videoCount: 1, entries: [file(179)] };
+  const accepted = await verifySearchResults([anime], options({ title, episode: 179, inspect: async () => share }));
+  assert.deepEqual(accepted.resources[0].verification.requiredEpisodes, [179]);
+  const missing = await verifySearchResults([anime], options({ title, episode: 180, inspect: async () => share }));
+  assert.equal(missing.resources.length, 0);
+});
+
+
+test('资料的任意作品别名可用于文件核验，只有匿名目录和空白文件名时保持未确认', async () => {
+  const title = '肖申克的救赎';
+  const { SilentSearchEngine } = await compile('src/services/silentSearchEngine.ts');
+  const raw = { url: resource.url, note: title, work_title: title, work_title_aliases: ['The Shawshank Redemption', '月黑高飞'], year: '1994', category: 'movie', source: 'erxiaopan' };
+  const original = globalThis.fetch;
+  let rows;
+  try {
+    globalThis.fetch = async () => Response.json({ code: 0, data: { merged_by_type: { quark: [raw] } } });
+    rows = (await new SilentSearchEngine().search(title, 'movie')).quarkItems;
+  } finally { globalThis.fetch = original; }
+  for (const [name, accepted] of [['The.Shawshank.Redemption.1994.1080p.mkv', true], ['月黑高飞.1994.1080p.mp4', true], ['月黑高飞.1995.1080p.mp4', false], ['A.1994.1080p.mp4', false]]) {
+    const verified = await verifySearchResults(rows, options({ title, category: 'movie', year: '1994', inspect: async () => ({
+      title: '截图存档', videoCount: 1, entries: [{ fid: 'main', isVideo: true, name, size: 2000 }]
+    }) }));
+    assert.equal(verified.resources.length, Number(accepted), name);
+  }
+});
+
+test('其他续作也能匹配罗马数字和阿拉伯数字，保留原作和集号边界', async () => {
+  const { rankResourceCandidates } = await compile('src/services/resourceMatching.ts');
+  const title = '黑客帝国Ⅱ重装上阵';
+  const movie = { ...resource, category: 'movie', workTitle: undefined, title: '【电影】黑客帝国2：重装上阵 (2003) 4K' };
+  assert.equal(rankResourceCandidates([movie], title, 'movie').length, 1);
+  assert.equal(rankResourceCandidates([movie], '黑客帝国', 'movie').length, 0);
+  assert.equal(rankResourceCandidates([{ ...resource, title: '【国漫】测试动漫 12集', workTitle: undefined }], '测试动漫', 'anime').length, 1);
+});

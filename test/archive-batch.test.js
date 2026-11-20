@@ -285,3 +285,45 @@ test('批量任务串联真实单集任务服务，逐集核对后保留原来�
   assert.equal(record.quarkFid, 'old-library'); assert.equal(record.quarkShareUrl, 'https://pan.quark.cn/s/original');
   assert.equal(record.poster, 'old-poster'); assert.equal(record.quarkArchiveImported, undefined);
 });
+
+test('发布页与文件名均确认同一部剧时，无需完整分享目录名即可生成补集计划', async t => {
+  const f = await fixture(t);
+  f.service.resourceSearch.search = async () => ({ merged_by_type: { quark: [{ ...row, source: 'erxiaopan' }] } });
+  const root = { fid: 'encoded', name: '匿名分享', isDirectory: true };
+  const files = Array.from({ length: 27 }, (_, i) => ({ fid: 'episode-' + (i + 1),
+    name: `折月亮.2026.E${i + 1}.mp4`, isVideo: true, size: 100, episodeNumber: i + 1, ancestorFids: [root.fid] }));
+  f.gateway.getShareDetails = async () => ({ title: root.name, entries: [root, ...files] });
+  const preview = await f.service.preview(input, user);
+  assert.equal(preview.canStart, true);
+  assert.equal(preview.totalVideoBytes, 1800);
+  assert.deepEqual(preview.missingEpisodes, []);
+  for (const name of ['其他作品.2026.E1.mp4', '折月亮.2026.S00E01.mp4', '折月亮.2026.S02E01.mp4']) {
+    files[0].name = name;
+    const blocked = await f.service.preview(input, user);
+    assert.equal(blocked.canStart, false, name);
+    assert.deepEqual(blocked.plannedEpisodes, []);
+  }
+});
+
+
+test('补集可从匹配到官方别名的目录读取编号文件，保持原有全集核对', async t => {
+  const f = await fixture(t);
+  f.service.catalog.matchingAliases = async work => {
+    assert.deepEqual(work, { title: '折月亮', category: 'tv', year: '2026' });
+    return ['Moonlight Contract'];
+  };
+  f.service.resourceSearch.search = async () => ({ merged_by_type: { quark: [{ ...row, source: 'erxiaopan' }] } });
+  const root = { fid: 'series', name: 'Moonlight Contract 2026', isDirectory: true };
+  const files = Array.from({ length: 27 }, (_, index) => ({
+    fid: 'episode-' + (index + 1), parentFid: root.fid, ancestorFids: [root.fid],
+    name: `E${index + 1}.mp4`, isVideo: true, size: 100, episodeNumber: index + 1
+  }));
+  f.gateway.getShareDetails = async () => ({ title: root.name, entries: [root, ...files] });
+  const preview = await f.service.preview(input, user);
+  assert.equal(preview.canStart, true);
+  assert.deepEqual(preview.missingEpisodes, []);
+  files.splice(5, 1);
+  const incomplete = await f.service.preview(input, user);
+  assert.equal(incomplete.canStart, false);
+  assert.deepEqual(incomplete.missingEpisodes, [6]);
+});

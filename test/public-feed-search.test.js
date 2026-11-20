@@ -40,3 +40,14 @@ test('原索引只给非视频分享时，同轮公开网页的匹配分享仍�
  assert.deepEqual(result.sources.map(({name,status,count})=>({name,status,count})),[{name:'erxiaopan',status:'success',count:1},{name:'public_guoman4K',status:'success',count:1},{name:'quark4k',status:'success',count:0}]);
  assert.equal(result.merged_by_type.quark[1].url,'https://pan.quark.cn/s/7162c13a74d7');
 });
+
+
+test('公开索引里的数字2能匹配官方 II 片名，原作仍独立', async () => {
+  const renamed = structuredClone(fixture);
+  renamed.messages[0].message = renamed.messages[0].message.replace('斗破苍穹 年番（2022）更新219集', '【国漫】斗罗大陆2：绝世唐门 更新179集');
+  const search = new PublicFeedResourceSearch({ fetchImpl: async () => Response.json(renamed) });
+  const matches = await search.search('斗罗大陆II绝世唐门', { category: 'anime' });
+  assert.equal(matches.total, 1);
+  assert.equal(matches.merged_by_type.quark[0].latest_episode, 179);
+  assert.equal((await search.search('斗罗大陆', { category: 'anime' })).total, 0);
+});

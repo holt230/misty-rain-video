@@ -379,7 +379,17 @@ export const handleApiRequest = async (request, response, context) => {
         throw Object.assign(new Error('搜索不再读取旧结果，请重新搜索'), { code: 'RESOURCE_SEARCH_CACHE_DISABLED', statusCode: 400 });
       }
       const category = url.searchParams.get('category') || 'all';
-      sendSuccess(response, await context.resourceSearch.search(keyword, { category }));
+      const result = await context.resourceSearch.search(keyword, { category });
+      const rows = result.merged_by_type?.quark || [];
+      if (context.catalog?.matchingAliases && rows.length) {
+        const key = row => JSON.stringify([row.work_title, row.category, row.year]);
+        const editions = [...new Map(rows.filter(row => row.work_title && row.category && row.year)
+          .map(row => [key(row), row])).values()].slice(0, 3);
+        const aliases = new Map(await Promise.all(editions.map(async row => [key(row),
+          await context.catalog.matchingAliases({ title: row.work_title, year: row.year, category: row.category })])));
+        sendSuccess(response, { ...result, merged_by_type: { ...result.merged_by_type, quark: rows.map(row =>
+          aliases.get(key(row))?.length ? { ...row, work_title_aliases: aliases.get(key(row)) } : row) } });
+      } else sendSuccess(response, result);
       return true;
     }
 

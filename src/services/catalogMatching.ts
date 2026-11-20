@@ -5,7 +5,7 @@ import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
 import { compareResourceColors, matchResource, resourceEpisode } from './resourceMatching';
 import { isExactWorkTitle } from '../../server/searchTitles.js';
-import { matchesIndexedTvDirectory, shareVideoCandidates, validateSourceCandidate } from '../../server/libraryPolicy.js';
+import { hasPublishedVideoIdentity, matchesIndexedTvDirectory, shareVideoCandidates, validateSourceCandidate } from '../../server/libraryPolicy.js';
 import { matchesResourceTitle } from './resourceTitles';
 
 export type PlaybackWork = Pick<CatalogItem, 'title' | 'category'> & { year?: string };
@@ -75,6 +75,11 @@ export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDet
     const videos = shareVideoCandidates(details.entries);
     return Boolean(details.videoCount) && validateSourceCandidate({ card: item, shareTitle: details.title,
       episodes: videos, localEpisodes: videos, publication: resource });
+  }
+  if (details.videoCount && resource?.workTitle) {
+    const videos = shareVideoCandidates(details.entries);
+    if (videos.length === details.entries.filter(entry => entry.isVideo).length
+      && hasPublishedVideoIdentity(item, details.title, videos, resource)) return true;
   }
   if (allowUnspecifiedSeason && explicitSeason(item.title) === undefined) {
     const match = matchResource(item.title, details.title, item.category);

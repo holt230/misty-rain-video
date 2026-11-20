@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { CatalogService } from './catalog.js';
 import { OfficialCatalogProviders } from './officialCatalogProviders.js';
+import { searchTitleKey, workTitleKeys } from './searchTitles.js';
 import { PLATFORM_NAMES, CATALOG_CHANNELS, cleanText, titleKey } from './officialCatalogData.js';
 
 const TTL = 60 * 60_000, RETRY = 60_000, PAGE_SIZE = 24;
@@ -203,6 +204,37 @@ export class OfficialCatalogService extends CatalogService {
       && (category === 'all' || category === item.category);
     const feeds = [...this.platformFeeds.values()].map(feed => feed.items.filter(matches));
     return [...mergeOfficialCatalog(feeds), ...[...this.officialWorks.values()].filter(matches)];
+  }
+  async matchingAliases({ title, category, year }) {
+    if (!title || title.length > 160 || !/^(?:19|20)\d{2}$/.test(year || '')
+      || !['movie', 'tv', 'anime', 'variety'].includes(category)) return [];
+    const keys = workTitleKeys(title);
+    const matches = value => keys.includes(searchTitleKey(value));
+    const kind = category === 'movie' ? 'movie' : 'tv';
+    const key = 'titles-' + hash([keys[0], category, year]).slice(0, 24);
+    const lookup = this.details.cached(key, 24 * TTL, { aliases: [] }, async () => {
+      const rows = await this.providers.request('https://movie.douban.com/j/subject_suggest?' + new URLSearchParams({ q: title }), 'json');
+      if (!Array.isArray(rows)) throw new Error('影片资料结构异常');
+      const ids = [...new Set(rows.filter(row => matches(row.title) && String(row.year) === year
+        && /^\d{1,20}$/.test(String(row.id)) && (kind === 'movie' ? !Number(row.episode) : Number(row.episode) > 0)).map(row => String(row.id)))];
+      if (ids.length !== 1) return { aliases: [] };
+      const row = await this.details.json(kind + '/' + ids[0]);
+      if (String(row?.id) !== ids[0] || !matches(row.title) || String(row.year) !== year || row.type !== kind) return { aliases: [] };
+      const genres = Array.isArray(row.genres) ? row.genres : [];
+      const actual = kind === 'movie' ? 'movie' : genres.includes('动画') ? 'anime'
+        : genres.some(genre => ['真人秀', '脱口秀'].includes(genre)) ? 'variety' : 'tv';
+      if (actual !== category) return { aliases: [] };
+      const aliases = [row.original_title, ...(Array.isArray(row.aka) ? row.aka : [])].map(value => cleanText(value, 160))
+        .map(value => value.replace(/\s*[(（](?:中国)?(?:大陆|香港|台湾|港|台|国际)[)）]\s*$/u, '').trim())
+        .filter(value => searchTitleKey(value).length >= 2 && !matches(value));
+      return { aliases: [...new Set(aliases)].slice(0, 16) };
+    });
+    let timer;
+    try {
+      const result = await Promise.race([lookup, new Promise(resolve => { timer = setTimeout(() => resolve(null), 1800); })]);
+      return Array.isArray(result?.aliases) ? result.aliases : [];
+    } catch { return []; }
+    finally { clearTimeout(timer); }
   }
   async libraryPoster(card) {
     const matchesEdition = work => work.category === card.category && titleKey(work.title) === titleKey(card.title)

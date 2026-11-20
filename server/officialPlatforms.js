@@ -74,16 +74,17 @@ export function parseYoukuProgress(html, candidate, keyword) {
   if (candidate.albumId && info.showId !== candidate.albumId) throw unavailable();
   const requestedId = candidate.albumId ? info.videoId : candidate.url.match(/id_([^/]+)\.html$/)?.[1];
   if (info.videoId !== requestedId || info.videoType !== '正片') throw unavailable();
-  const latest = episodeNumber(info.episodeLast);
-  if (!latest) throw unavailable();
+  const standardLatest = episodeNumber(info.episodeLast);
+  if (!standardLatest) throw unavailable();
   const components = (data.moduleList || []).flatMap(module => module.components || []);
   const list = components.find(component => component.type === 10013 && Array.isArray(component.itemList));
   if (!list) throw unavailable();
   const subtitle = clean(list.subtitle);
-  const updated = Number(subtitle.match(/更新至\s*(\d+)\s*(?:\/\s*\d+)?\s*[集话]/)?.[1] || 0);
+  const updated = episodeNumber(subtitle.match(/更新至\s*(\d+)\s*(?:\/\s*\d+)?\s*[集话]/)?.[1]);
+  const latest = updated || standardLatest;
   const full = subtitle.match(/(\d+)\s*[集话]全|全\s*(\d+)\s*[集话]/);
   const total = Number(full?.[1] || full?.[2] || 0);
-  if (updated ? updated !== latest : !total || latest > total) throw unavailable();
+  if (updated ? updated < standardLatest : !total || latest > total) throw unavailable();
   // Paged anime lists may contain 1..60 while episodeLast describes the current
   // release. Use the explicit update marker, never lastStage or episodeTotal
   // (both may include unreleased trailers).
@@ -91,7 +92,8 @@ export function parseYoukuProgress(html, candidate, keyword) {
     && item.episodeInfo?.isZp === true && item.action?.type === 'JUMP_TO_VIDEO'
     && (!item.action.extra?.showId || item.action.extra.showId === info.showId));
   const lastUrl = episode && officialPlatformUrl(`https://v.youku.com/v_show/id_${episode.action.value}.html`, 'youku');
-  if (!lastUrl && (!list.more || (!updated && total !== latest))) throw unavailable();
+  // Preview schedules can differ from the normal VIP count. An advance only counts if the same album lists it as a full episode.
+  if (!lastUrl && (latest !== standardLatest || !list.more || (!updated && total !== latest))) throw unavailable();
   return { id: `youku:${info.showId}`, title, category, year, latestEpisode: latest,
     completed: info.completed === true && episodeNumber(info.episodeTotal) === latest,
     platform: platforms.youku, sourceUrl: lastUrl || candidate.url };

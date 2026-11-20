@@ -162,3 +162,38 @@ test('selecting one platform never waits for or requests another provider', asyn
   assert.deepEqual(calls, ['mango']); assert.deepEqual(feed.sources.map(source => source.id), ['mango']);
   assert.equal(feed.items[0].sourceName, '芒果TV');
 });
+
+
+test('资源搜索只附带相同片名、分类和年份的资料别名，存在同年同名时不取别名', async t => {
+  const movie = { id: '1292052', title: '肖申克的救赎', year: '1994', type: 'movie', original_title: 'The Shawshank Redemption', aka: ['月黑高飞(港)'] };
+  const series = { id: '36618936', title: '无声的回响', year: '2026', type: 'tv', genres: ['剧情'], aka: ['Silent Echoes'] };
+  const ambiguous = { title: '同名作品', year: '2026' };
+  const subjects = [movie, series];
+  const catalog = new OfficialCatalogService(await directory(t), { fetcher: async input => {
+    const url = new URL(input);
+    if (url.pathname === '/j/subject_suggest') {
+      const title = url.searchParams.get('q');
+      if (title === ambiguous.title) return Response.json(['124', '125'].map(id => ({ ...ambiguous, id })));
+      return Response.json(subjects.filter(work => work.title === title).map(work => ({ ...work, episode: work.type === 'tv' ? '14' : '' })));
+    }
+    assert.equal(url.hostname, 'm.douban.com');
+    const id = url.pathname.split('/').at(-1);
+    const subject = subjects.find(work => work.id === id);
+    assert.ok(subject);
+    return Response.json(subject);
+  } });
+  const rows = [
+    { url: 'https://pan.quark.cn/s/movie1994', work_title: movie.title, category: 'movie', year: movie.year },
+    { url: 'https://pan.quark.cn/s/movie2026', work_title: movie.title, category: 'movie', year: '2026' },
+    { url: 'https://pan.quark.cn/s/ambiguous', work_title: ambiguous.title, category: 'movie', year: ambiguous.year }
+  ];
+  const context = { authService: { authenticate: () => ({ username: 'viewer' }) }, userContext: () => ({}), catalog,
+    resourceSearch: { search: async () => ({ total: rows.length, merged_by_type: { quark: rows } }) } };
+  let payload;
+  const response = { setHeader() {}, end: text => { payload = JSON.parse(text); } };
+  await handleApiRequest({ method: 'GET', url: '/api/resource-search?kw=' + encodeURIComponent(movie.title), headers: { host: 'localhost' } }, response, context);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(payload.data.merged_by_type.quark.map(row => row.work_title_aliases), [['The Shawshank Redemption', '月黑高飞'], undefined, undefined]);
+  assert.deepEqual(await catalog.matchingAliases({ ...series, category: 'tv' }), ['Silent Echoes']);
+  assert.deepEqual(await catalog.matchingAliases({ ...series, category: 'anime' }), []);
+});
