@@ -34,6 +34,7 @@ export interface ResourceItem {
   colorFormat?: SourceColor;
   size?: string;
   workTitle?: string;
+  workTitleAliases?: string[];
   category?: CategoryType;
   updateText?: string;
   latestEpisode?: number;

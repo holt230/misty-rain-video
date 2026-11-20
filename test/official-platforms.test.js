@@ -208,3 +208,23 @@ test('known homepage platform IDs remain usable when Tencent discovery fails', a
   assert.equal(result.status, 'confirmed'); assert.equal(result.works[0].platform, '爱奇艺');
   assert.equal(result.works[0].latestEpisode, 99);
 });
+
+test('优酷普通 VIP 更新2集、SVIP正片到第3集时采纳3集，预告不计', () => {
+  const base = structuredClone(fixture.youku);
+  const title = '无声的回响';
+  const info = base.pageMap.extra;
+  Object.assign(info, { showName: title, showReleaseTime: '2026-11-20 12:00:00', episodeLast: 2, episodeTotal: 14, completed: false });
+  const component = base.moduleList.flatMap(module => module.components || []).find(item => item.type === 10013);
+  const playable = component.itemList.find(item => item.videoType === '正片' && item.episodeInfo?.isZp && item.action?.value);
+  assert.ok(playable);
+  component.subtitle = '更新至3/14集，优酷VIP会员首更2集，SVIP每个更新日提前多看1集';
+  component.more = true;
+  component.itemList = [{ ...playable, stage: 3 }, { ...playable, stage: 4, videoType: '预告片', episodeInfo: { isZp: false } }];
+  const work = { title, category: 'tv', albumId: info.showId, url: 'https://v.youku.com/video?s=' + info.showId };
+  assert.equal(parseYoukuProgress(html(base), work, title).latestEpisode, 3);
+  component.subtitle = '更新至4/14集';
+  assert.throws(() => parseYoukuProgress(html(base), work, title));
+  component.subtitle = '更新至3/14集';
+  component.itemList[0].action = { ...playable.action, extra: { showId: 'otherAlbum' } };
+  assert.throws(() => parseYoukuProgress(html(base), work, title));
+});

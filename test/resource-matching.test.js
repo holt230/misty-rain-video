@@ -4,12 +4,12 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/services/resourceMatching.ts'], bundle: true, write: false, format: 'esm', logLevel: 'silent' });
 const { matchResource, rankResourceCandidates, resourceEpisode } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const resource = (title, i) => ({ title, id: String(i), url: 'https://pan.quark.cn/s/test' + i, datetime: '2026-02-25' });
-test('截图同名电影与特别篇不会压过动漫年番和更新正篇', () => {
+test('编号不同的电影不混入动漫原作，特别篇不会压过年番正篇', () => {
   const notes = ['斗破苍穹3：除恶 (2024)[4K][剧情 动作 奇幻][附前2部]', '斗破苍穹 三年之约.2160p.q',
     '斗破苍穹 特别篇1.2160p.q', '斗破苍穹年番 更新至176集 1080P', '国漫斗破苍穹 4K 更新176集'];
   const results = rankResourceCandidates(notes.map(resource), '斗破苍穹', 'anime');
   assert.deepEqual(results.filter(x => !x.match.otherVersion).map(x => x.resource.title), [notes[4], notes[3]]);
-  assert.equal(results.find(x => x.resource.title === notes[0]).match.inferred, 'movie');
+  assert.equal(results.some(x => x.resource.title === notes[0]), false);
 });
 test('标题后面的小说改编简介不会过滤正片，简介中提到关键词不会冒充同名影片', () => {
   assert.equal(matchResource('斗破苍穹', '斗破苍穹 年番 更新176集 ·📜介绍：改编自天蚕土豆的同名小说。', 'anime').matches, true);

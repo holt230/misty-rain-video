@@ -133,6 +133,7 @@ export class ArchiveBatchService {
     }
     const orderedRows = [...new Map(rows.map(row => [row.url, row])).values()]
       .sort((a, b) => Number(b.url === input.shareUrl) - Number(a.url === input.shareUrl) || a.url.localeCompare(b.url)).slice(0, 8);
+    const aliases = editionYear ? this.catalog?.matchingAliases?.({ title: input.title, category: 'tv', year: editionYear }) : undefined;
     const details = new Array(orderedRows.length); let cursor = 0;
     await Promise.all(Array.from({ length: Math.min(3, orderedRows.length) }, async () => {
       while (cursor < orderedRows.length) {
@@ -144,6 +145,7 @@ export class ArchiveBatchService {
       }
     }));
 
+    const workTitleAliases = await aliases;
     const groups = new Map(), wantedSeason = seasonNumber(input.title);
     for (const [index, detail] of details.entries()) {
       if (!detail) continue;
@@ -165,7 +167,7 @@ export class ArchiveBatchService {
       const videos = shareVideoCandidates(detail.entries);
       if (!validateSourceCandidate({ card: { title: input.title, category: 'tv', year: editionYear },
         shareTitle: detail.title, episodes: videos, localEpisodes: videos,
-        publication: { source: row.source, workTitle: row.work_title, category: row.category, year: row.year } })) continue;
+        publication: { source: row.source, workTitle: row.work_title, category: row.category, year: row.year, workTitleAliases } })) continue;
       for (const video of videos) {
         const entry = video.entry;
         if (!Number.isInteger(video.episodeNumber) || video.episodeNumber < 1 || video.episodeNumber > official.latestEpisode

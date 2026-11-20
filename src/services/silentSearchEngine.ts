@@ -78,6 +78,7 @@ export class SilentSearchEngine {
     return { id: `quark-${share.url.split('/').pop()}`, title, url: share.url, password: raw.password || share.passcode,
       driveType: 'quark', datetime: Number.isFinite(parsed) && new Date(parsed).getFullYear() >= 2001 ? rawDate.substring(0, 10) : '', source: raw.source || '', quality, is4k, colorFormat: sourceColor(title),
       workTitle: typeof raw.work_title === 'string' ? raw.work_title : undefined,
+      workTitleAliases: Array.isArray(raw.work_title_aliases) ? raw.work_title_aliases.filter((value: unknown) => typeof value === 'string').slice(0, 16) : undefined,
       category: ['tv', 'anime', 'movie', 'variety'].includes(raw.category) ? raw.category : undefined,
       updateText: typeof raw.update_text === 'string' ? raw.update_text : undefined,
       latestEpisode: Number.isInteger(raw.latest_episode) && raw.latest_episode >= 0 ? raw.latest_episode : undefined,
