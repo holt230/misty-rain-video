@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { archiveError, mergeArchiveMetadata, requireArchiveCapacity } from './archivePolicy.js';
 import { matchingShareFiles } from './libraryPolicy.js';
-import { hasConflictingOfficialEditions, searchTitleKey } from './searchTitles.js';
+import { hasConflictingOfficialEditions, sameWorkEdition, searchTitleKey } from './searchTitles.js';
 import { fileSourceColor, leastCompatibleColor, sourceColor, sourceColorRank } from './sourceColor.js';
 
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -22,7 +22,7 @@ function validateInput(input) {
 
 function chooseOfficialWork(progress, input) {
   const works = (progress?.works || []).filter(work => work.category === 'tv'
-    && searchTitleKey(work.title) === searchTitleKey(input.title)
+    && sameWorkEdition(work.title, input.title)
     && Number.isInteger(work.latestEpisode) && work.latestEpisode > 0 && work.latestEpisode <= 5000
     && (!input.year || !work.year || String(input.year) === String(work.year)));
   const years = new Set(works.map(work => String(work.year || '')).filter(Boolean));
@@ -126,7 +126,7 @@ export class ArchiveBatchService {
     }
     const editionYear = String(official.year || input.year || '');
     const rows = (search?.merged_by_type?.quark || []).filter(row => row.category === 'tv'
-      && searchTitleKey(row.work_title || '') === searchTitleKey(input.title)
+      && sameWorkEdition(row.work_title, input.title)
       && (!editionYear || String(row.year || '') === editionYear));
     if (!previousJob && !rows.some(row => row.url === input.shareUrl)) {
       throw archiveError(search.partial ? '部分剧集暂时无法查找，请稍后重试。' : '暂时没有找到可用剧集，请稍后重试。', 'ARCHIVE_WORK_MISMATCH', 422);
@@ -310,7 +310,7 @@ export class ArchiveBatchService {
         if (item.kind === 'video') {
           const fresh = await this.resourceSearch.search(job.input.title, { category: 'tv' });
           const source = (fresh?.merged_by_type?.quark || []).find(row => row.url === item.shareUrl && row.category === 'tv'
-            && searchTitleKey(row.work_title || '') === searchTitleKey(job.input.title)
+            && sameWorkEdition(row.work_title, job.input.title)
             && (!job.input.year || String(row.year || '') === job.input.year));
           if (!source) throw archiveError('本轮未确认该集的来源与作品版本，补集已停止。', 'ARCHIVE_WORK_MISMATCH', 409);
           const saved = await this.gateway.importShare({ title: job.input.title, category: 'tv', shareUrl: item.shareUrl,

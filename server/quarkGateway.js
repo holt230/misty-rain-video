@@ -1172,7 +1172,7 @@ export class QuarkGateway {
         const episode = video ? serializeEpisode(item) : null;
         return {
           ...(sidecars.has(item.fid) ? { sidecarTag: sidecars.get(item.fid) } : {}),
-          ...(video ? { duration: Number(item.duration) || 0 } : {}),
+          ...(video ? { duration: Number(item.duration) || 0, ...(episode.episodePart ? { episodePart: episode.episodePart } : {}) } : {}),
           ...(video || archiveFormat(item.file_name) ? { identityTag: shareFileTag(item) } : {}),
           fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
           name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),

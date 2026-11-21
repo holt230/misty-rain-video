@@ -16,21 +16,26 @@ export function resourceCompleteness(details: QuarkShareDetails, category: Categ
     return { complete: Boolean(chosen), actualLatest: 0, available: chosen ? 1 : 0, target: 1, missing: chosen ? [] : [1], episodes: [],
       selectedFids: chosen?.fid ? [chosen.fid] : [], colorFormat: chosen?.colorFormat || 'unknown' as const };
   }
-  const numbered = new Map<number, typeof videos[number]>();
+  const byPart = new Map<string, typeof videos[number]>();
   for (const entry of videos) {
     const number = entry.episodeNumber;
     if (!Number.isInteger(number) || number < 1 || number > 5000) continue;
-    const previous = numbered.get(number);
-    if (!previous || preferColor(entry, previous) < 0) numbered.set(number, entry);
+    const key = `${number}:${category === 'variety' ? entry.episodePart || '' : ''}`;
+    const previous = byPart.get(key);
+    if (!previous || preferColor(entry, previous) < 0) byPart.set(key, entry);
   }
-  const actualLatest = Math.max(0, ...numbered.keys());
+  const selected = [...byPart.values()].filter(entry => category !== 'variety' || !entry.episodePart || !byPart.has(`${entry.episodeNumber}:`))
+    .sort((a, b) => a.episodeNumber - b.episodeNumber || '上中下'.indexOf(a.episodePart || '') - '上中下'.indexOf(b.episodePart || ''));
+  const numbered = new Set(selected.map(entry => entry.episodeNumber));
+  const actualLatest = Math.max(0, ...numbered);
   const target = Math.max(actualLatest, Math.min(5000, Math.max(0, advertisedLatest)));
   const missing = Array.from({ length: target }, (_, i) => i + 1).filter(number => !numbered.has(number));
   const knownTarget = Number.isInteger(advertisedLatest) && advertisedLatest > 0 && advertisedLatest <= 5000;
-  return { complete: knownTarget && target > 0 && !missing.length, actualLatest, available: numbered.size, target, missing, episodes: [...numbered.keys()].sort((a, b) => a - b),
-    colorFormat: leastCompatibleColor([...numbered.values()].map(entry => entry.colorFormat)),
+  const partialIssue = category === 'variety' && selected.some(entry => entry.episodePart && (!byPart.has(`${entry.episodeNumber}:上`) || !byPart.has(`${entry.episodeNumber}:下`)));
+  return { complete: knownTarget && target > 0 && !missing.length && !partialIssue, partialIssue, actualLatest, available: numbered.size, target, missing, episodes: [...numbered],
+    colorFormat: leastCompatibleColor(selected.map(entry => entry.colorFormat)),
     reason: knownTarget ? '' : '来源未提供可核对的更新集数，无法确认是否已找齐最新剧集。',
-    selectedFids: [...numbered.entries()].sort((a, b) => a[0] - b[0]).map(([, entry]) => entry.fid).filter(Boolean) };
+    selectedFids: selected.map(entry => entry.fid).filter(Boolean) };
 }
 
 export function episodeRangeLabel(episodes: number[], unit: '集' | '期' = '集') {
