@@ -333,7 +333,7 @@ test('分享者封禁只拒绝该分享，不误判当前账号认证，也不�
 
 test('单集ZIP解压后核对再入库，失败不写片库，重试不重复解压或复制；临时目录按账号隔离', async t=>{
  const f=fakeDrive(t);f.share.clear();
- f.share.set('a167',video('a167','167.zip','0',100));
+ f.share.set('a167',video('a167','167 SDR.zip','0',100));
  f.drive.set('anime-category',folder('anime-category','动漫','user'));
  f.drive.set('existing-series',folder('existing-series','仙逆','anime-category'));
  f.drive.set('old-episode',video('old-episode','165.mkv','existing-series',200));
@@ -343,8 +343,8 @@ test('单集ZIP解压后核对再入库，失败不写片库，重试不重复�
   const target=new URL(url),body=init.body?JSON.parse(init.body):{};
   if(target.pathname.endsWith('/archive/unarchive')){
    extracts++;
-   f.drive.set('unpacked',folder('unpacked','167',body.to_pdir_fid));
-   f.drive.set('v167',video('v167','167.mkv','unpacked',101));
+   f.drive.set('unpacked',folder('unpacked','167 SDR',body.to_pdir_fid));
+   f.drive.set('v167',video('v167','167 SDR.mkv','unpacked',101));
    return Response.json({code:0,data:{task_id:'task'}});
   }
   if(target.pathname.endsWith('/task'))return Response.json({code:0,data:{status:2}});

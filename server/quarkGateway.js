@@ -1089,7 +1089,7 @@ export class QuarkGateway {
       const found = committed.find(item => item.fid === state.publishFid && item.episodeNumber === input.episode);
       if (found) selected = found;
     }
-    if (!selected) selected = selectArchiveEpisode(episodes, input, publication);
+    if (!selected) selected = selectArchiveEpisode(episodes, input, publication, prepared.archive.name);
     const folderName = QUARK_LIBRARY_FOLDERS[input.category], mediaTitle = sanitizeFolderName(input.title);
     if (!folderName || !mediaTitle) throw archiveError('影片信息不正确', 'INVALID_ARCHIVE_REQUEST', 400);
     const releaseTitle = acquireLibraryMutationLocks(this.libraryMutationLocks, [libraryTitleMutationKey(principal, input.category, mediaTitle)]);
