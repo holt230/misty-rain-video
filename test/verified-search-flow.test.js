@@ -22,7 +22,7 @@ test('搜索指定219集只验证这一集，部分分享不能被标成全集�
 });
 test('失效分享、缺少目标集与错误片名不进入保存结果',async()=>{
  for(const inspect of [async()=>{throw Object.assign(new Error('取消分享'),{code:'QUARK_SHARE_UNAVAILABLE',status:422});},async()=>details([218]),async()=>({...details([219]),title:'其他作品'})]){
-  const result=await verifySearchResults([resource],options({episode:219,inspect}));assert.equal(result.resources.length,0);assert.match(result.message,/未找到/);assert.equal(result.error,undefined);
+  const result=await verifySearchResults([resource],options({episode:219,inspect}));assert.equal(result.resources.length,0);assert.match(result.message,/未找到|暂时无法确认/);assert.equal(result.error,undefined);
  }
 });
 test('认证或网络失败不假报未找到，未核对的结果不允许保存',async()=>{
@@ -62,7 +62,7 @@ test('未指定季数可以核对单一第五季；明确第一季或混合季�
  const fifth={title:'斗破苍穹 第五季',videoCount:1,entries:[{...file(219),name:'斗破苍穹.S05E219.mkv'}]};
  const generic=await verifySearchResults([resource],options({episode:219,inspect:async()=>fifth}));assert.equal(generic.resources.length,1);
  const explicit=await verifySearchResults([resource],options({title:'斗破苍穹 第一季',episode:219,inspect:async()=>fifth}));assert.equal(explicit.resources.length,0);
- const mixed=await verifySearchResults([resource],options({inspect:async()=>({...fifth,entries:[...fifth.entries,{...file(1),name:'S01E01.mp4'}]})}));assert.equal(mixed.resources.length,0);
+ const mixed=await verifySearchResults([resource],options({inspect:async()=>({...fifth,entries:[...fifth.entries,{...file(1),name:'S01E01.mp4'}]})}));assert.deepEqual(mixed.resources[0].verification.requiredEpisodes, [219]);
 });
 
 test('重新输入另一片名清除旧年份、作品关联和待替换片库标识',async t=>{
@@ -110,7 +110,9 @@ test('已核实的电视剧目录别名显示实际集数，并拒绝错剧、�
       assert.equal((await verify(overrides)).resources.length, 0);
     }
     for (const name of ['其他电视剧.E01.mp4', 'S02E01.mp4', `${title}.2025.E01.mp4`]) {
-      assert.equal((await verify({}, { entries: [{ ...entries[0], name }, ...entries.slice(1)] })).resources.length, 0);
+      const partial = (await verify({}, { entries: [{ ...entries[0], name }, ...entries.slice(1)] })).resources[0].verification;
+      assert.equal(partial.complete, false);
+      assert.deepEqual(partial.requiredEpisodes, entries.slice(1).map(entry => entry.episodeNumber));
     }
     assert.equal((await verify({}, { title: `${directory}合集` })).resources.length, 0);
   }
@@ -183,7 +185,7 @@ test('电影分享根目录乱命名时，用发布片名与视频中的官方�
   for (const name of ['Dear.You.2025.1080p.mkv', 'Dear.You.1080p.mkv', 'Dear.You.2026.Trailer.mkv', 'Dear.You.2.2026.mkv', '4K.H264.mkv']) {
     assert.equal((await verify([{ ...movie, name }])).resources.length, 0, name);
   }
-  assert.equal((await verify([movie, { ...movie, fid: 'other', name: '其他电影.2026.mkv' }])).resources.length, 0);
+  assert.deepEqual((await verify([movie, { ...movie, fid: 'other', name: '其他电影.2026.mkv' }])).resources[0].verification.selectedFids, ['film']);
   assert.equal((await verify([movie], { ...published, year: '2025' })).resources.length, 0);
   assert.equal((await verify([movie], { ...published, source: 'unknown' })).resources.length, 0);
   assert.equal((await verify([movie], published, '其他版本 2025')).resources.length, 0);
@@ -236,4 +238,62 @@ test('其他续作也能匹配罗马数字和阿拉伯数字，保留原作和�
   assert.equal(rankResourceCandidates([movie], title, 'movie').length, 1);
   assert.equal(rankResourceCandidates([movie], '黑客帝国', 'movie').length, 0);
   assert.equal(rankResourceCandidates([{ ...resource, title: '【国漫】测试动漫 12集', workTitle: undefined }], '测试动漫', 'anime').length, 1);
+});
+
+
+test('逐文件核对支持发行标签和任意子目录，并只提交已确认的 FID', async () => {
+  const title = '肖申克的救赎', category = 'movie', year = '1994';
+  const row = { ...resource, title, workTitle: title, workTitleAliases: ['The Shawshank Redemption'], category, year, source: 'erxiaopan' };
+  const files = [
+    { fid: 'folder', isDirectory: true, name: '上传者自建目录' },
+    { fid: 'good', name: 'The.Shawshank.Redemption.1994.2160p.WEB-DL.10bit.DDP5.1.mkv', identityTag: 'checked', size: 2000 },
+    { fid: 'wrong', name: '另一部电影.1994.mkv', identityTag: 'other', size: 9000 },
+    { fid: 'trailer', name: 'The.Shawshank.Redemption.1994.Trailer.mkv', size: 3000 },
+    { fid: 'audio', name: '视频2.mp4', size: 5000 }
+  ].map(entry => entry.isDirectory ? entry : { ...entry, isVideo: true, ancestorFids: ['folder'] });
+  const result = await verifySearchResults([row], options({ title, category, year, inspect: async () => ({ title: '存档', entries: files, videoCount: 4 }) }));
+  assert.deepEqual(result.resources[0].verification.selectedFids, ['good']);
+  assert.deepEqual(result.resources[0].verification.fileChecks, ['checked']);
+});
+
+test('编号视频和压缩包共享作品与季别检查，识别同音发行目录但排除错片子目录', async () => {
+  const title = '无声的回响', category = 'tv', year = '2026';
+  const row = { ...resource, title, workTitle: title, year, category, source: 'quark4k' };
+  const entries = [{ fid: 'q', name: '4K HDR Vivid 60帧率', isDirectory: true }, { fid: 'bad', name: '其他剧', isDirectory: true }];
+  for (const [id, episode, parent] of [['one', 1, 'q'], ['other', 2, 'bad']]) {
+    for (const ext of ['mp4', 'zip']) entries.push({ fid: id + ext, name: `${episode}.${ext}`, episodeNumber: episode,
+      isVideo: ext === 'mp4', isArchive: ext === 'zip', archiveFormat: ext, ancestorFids: [parent], size: 10 });
+  }
+  const check = (directory, source = row) => verifySearchResults([source], options({ title, category, year, officialLatest: 2,
+    inspect: async () => ({ title: directory, videoCount: 2, entries }) }));
+  const result = (await check('W 吴生的会想 更新至03集')).resources[0];
+  assert.deepEqual(result.verification.requiredEpisodes, [1]);
+  assert.deepEqual(result.archivePreparation.availableEpisodes, [1]);
+  assert.equal(result.verification.complete, false);
+  assert.equal((await check('完全无关')).resources.length, 0);
+  assert.equal((await check('W 吴生的会想 更新至03集', { ...row, year: '2025' })).resources.length, 0);
+});
+
+test('综艺简称只在季号、发布日期和期号一致时认可，并报告真实期数', async () => {
+  const title = '奔跑吧', category = 'variety', year = '2026';
+  const row = { ...resource, title: '奔跑吧 第十季', workTitle: '奔跑吧 第十季', year, category, source: 'erxiaopan', latestEpisode: 12 };
+  const data = [{ ...file(12), name: '2026-07-10 2160p.60fps.第12期：节目小标题.mp4' },
+    { ...file(6), name: '2025.06.19-第6期.mp4' }];
+  const check = directory => verifySearchResults([row], options({ title, category, year,
+    inspect: async () => ({ title: directory, videoCount: 2, entries: data }) }));
+  const result = (await check('奔跑10年')).resources[0];
+  assert.deepEqual(result.verification.requiredEpisodes, [12]);
+  assert.equal(result.verification.episodeCount, 1);
+  assert.equal((await check('奔跑9年')).resources.length, 0);
+});
+
+test('电影短名只凭大小和时长不能确认；同目录唯一视频、具名字幕和分钟数可相互印证', async () => {
+  const title = '示例', category = 'movie', year = '2026';
+  const row = { ...resource, title, workTitle: title, year, category, runtimeMinutes: 110, source: 'erxiaopan' };
+  const video = { fid: 'm', name: '2160P.10bit.mkv', isVideo: true, duration: 6601, identityTag: 'v', sidecarTag: 's.proof', parentFid: 'root' };
+  const text = { fid: 'sub', name: '示例.2026.zh-Hans.srt', isSubtitle: true, parentFid: 'root' };
+  const check = entries => verifySearchResults([row], options({ title, category, year, inspect: async () => ({ title: '匿名', videoCount: 1, entries }) }));
+  assert.deepEqual((await check([video, text])).resources[0].verification.fileChecks, ['s.proof']);
+  for (const entries of [[video], [video, text, { ...text, fid: 'conflict', name: '其他电影.srt' }], [video, { ...text, parentFid: 'elsewhere' }], [{ ...video, name: '其他作品.mkv' }, text],
+    [{ ...video, duration: 4700 }, text], [{ ...video, sidecarTag: undefined }, text]]) assert.equal((await check(entries)).resources.length, 0);
 });

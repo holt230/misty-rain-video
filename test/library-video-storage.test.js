@@ -363,3 +363,37 @@ test('单集ZIP解压后核对再入库，失败不写片库，重试不重复�
  assert.equal(same.item.quarkFid,result.item.quarkFid);assert.equal(extracts,1);assert.equal(moves,1);
  await assert.rejects(f.gateway.finalizeArchiveImport(prepared,{title:'仙逆',category:'anime',episode:167},{work_title:'仙逆',category:'anime'}, {username:'other',folder:'other'}),{code:'ARCHIVE_JOB_FORBIDDEN'});
 });
+
+
+test('实际选择的文件改名、大小或目录变更时在写入前拒绝，无关文件变化不影响转存', async t => {
+  const f = fakeDrive(t);
+  const details = await f.gateway.getShareDetails({ shareUrl: f.input.quarkShareUrl });
+  const checked = details.entries.find(entry => entry.fid === 'ep1');
+  const request = { ...f.input, quarkSelectionFids: ['ep1'], quarkFileChecks: [checked.identityTag], quarkRequiredEpisodes: [1], quarkVerifiedShareTitle: details.title };
+  for (const [id, key, value] of [['ep1', 'file_name', '其他剧.E01.mp4'], ['ep1', 'size', 200], ['nested', 'file_name', '别的目录']]) {
+    const before = f.share.get(id)[key]; f.share.get(id)[key] = value;
+    await assert.rejects(f.gateway.importShare(request, user), { code: 'QUARK_SOURCE_CHANGED' });
+    assert.deepEqual(f.saves, []); f.share.get(id)[key] = before;
+  }
+  f.share.get('ep2').file_name = '其他剧.E02.mp4';
+  await f.gateway.importShare(request, user);
+  assert.deepEqual(f.saves, ['ep1']);
+});
+
+
+test('依赖字幕确认的电影在字幕被换或同目录变成多部影片时停止保存', async t => {
+  const f = fakeDrive(t);
+  f.share.clear();
+  const source = video('main', '2160p.mkv', '0'); source.duration = 6600;
+  f.share.set('main', source); f.share.set('sub', video('sub', '示例电影.2026.zh.srt', '0'));
+  const details = await f.gateway.getShareDetails({ shareUrl: f.input.quarkShareUrl });
+  const tag = details.entries.find(entry => entry.fid === 'main').sidecarTag;
+  assert.match(tag, /^s\./);
+  const request = { ...f.input, title: '示例电影', category: 'movie', quarkSelectionFids: ['main'], quarkFileChecks: [tag] };
+  f.share.get('sub').file_name = '其他电影.srt';
+  await assert.rejects(f.gateway.importShare(request, user), { code: 'QUARK_SOURCE_CHANGED' });
+  f.share.get('sub').file_name = '示例电影.2026.zh.srt';
+  f.share.set('extra-film', video('extra-film', '另一个文件.mkv', '0'));
+  await assert.rejects(f.gateway.importShare(request, user), { code: 'QUARK_SOURCE_CHANGED' });
+  assert.deepEqual(f.saves, []);
+});

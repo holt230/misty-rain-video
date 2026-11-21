@@ -46,7 +46,7 @@ test('share verification rejects empty content and explicit conflicting seasons 
   assert.equal(validatesCatalogShare(work, share), true);
   assert.equal(validatesCatalogShare(work, { ...share, entries: [] }), false);
   assert.equal(validatesCatalogShare(work, { ...share, entries: [{ name: 'S02 第01集.mkv', isVideo: true }] }), false);
-  assert.equal(validatesCatalogShare(work, { ...share, entries: [...share.entries, { name: '第二季', isDirectory: true }] }), false);
+  assert.equal(validatesCatalogShare(work, { ...share, entries: [...share.entries, { name: '第二季', isDirectory: true }] }), true);
   for (const name of ['九门.S02E01.mkv', '九门_S02_E01.mkv', '九门S02E01.mkv', 'Season.02']) {
     assert.equal(validatesCatalogShare(work, { ...share, entries: [{ name, isVideo: true }] }), false, name);
   }

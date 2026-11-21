@@ -205,13 +205,13 @@ export class OfficialCatalogService extends CatalogService {
     const feeds = [...this.platformFeeds.values()].map(feed => feed.items.filter(matches));
     return [...mergeOfficialCatalog(feeds), ...[...this.officialWorks.values()].filter(matches)];
   }
-  async matchingAliases({ title, category, year }) {
+  async matchingEdition({ title, category, year }) {
     if (!title || title.length > 160 || !/^(?:19|20)\d{2}$/.test(year || '')
-      || !['movie', 'tv', 'anime', 'variety'].includes(category)) return [];
+      || !['movie', 'tv', 'anime', 'variety'].includes(category)) return { aliases: [] };
     const keys = workTitleKeys(title);
     const matches = value => keys.includes(searchTitleKey(value));
     const kind = category === 'movie' ? 'movie' : 'tv';
-    const key = 'titles-' + hash([keys[0], category, year]).slice(0, 24);
+    const key = 'edition-' + hash([keys[0], category, year]).slice(0, 24);
     const lookup = this.details.cached(key, 24 * TTL, { aliases: [] }, async () => {
       const rows = await this.providers.request('https://movie.douban.com/j/subject_suggest?' + new URLSearchParams({ q: title }), 'json');
       if (!Array.isArray(rows)) throw new Error('影片资料结构异常');
@@ -227,14 +227,19 @@ export class OfficialCatalogService extends CatalogService {
       const aliases = [row.original_title, ...(Array.isArray(row.aka) ? row.aka : [])].map(value => cleanText(value, 160))
         .map(value => value.replace(/\s*[(（](?:中国)?(?:大陆|香港|台湾|港|台|国际)[)）]\s*$/u, '').trim())
         .filter(value => searchTitleKey(value).length >= 2 && !matches(value));
-      return { aliases: [...new Set(aliases)].slice(0, 16) };
+      const runtime = kind === 'movie' && Array.isArray(row.durations) && row.durations.length === 1
+        ? Number(String(row.durations[0]).match(/^(\d{2,3})\s*分钟$/u)?.[1]) : 0;
+      return { aliases: [...new Set(aliases)].slice(0, 16), ...(runtime >= 40 && runtime <= 360 ? { runtimeMinutes: runtime } : {}) };
     });
     let timer;
     try {
       const result = await Promise.race([lookup, new Promise(resolve => { timer = setTimeout(() => resolve(null), 1800); })]);
-      return Array.isArray(result?.aliases) ? result.aliases : [];
-    } catch { return []; }
+      return Array.isArray(result?.aliases) ? result : { aliases: [] };
+    } catch { return { aliases: [] }; }
     finally { clearTimeout(timer); }
+  }
+  async matchingAliases(work) {
+    return (await this.matchingEdition(work)).aliases;
   }
   async libraryPoster(card) {
     const matchesEdition = work => work.category === card.category && titleKey(work.title) === titleKey(card.title)

@@ -305,6 +305,7 @@ useDialog(dialogRef, () => props.isOpen && !props.inline, requestBack);
         <strong>{{ rankedQuarkResources.length }}</strong>
         <span>个结果</span>
       </div>
+      <p v-if="!detailResource && !savedMedia && !searchBusy && !officialProgress && !batchPreview && !saveError && rankedQuarkResources.some(row => row.batchEligible)" class="result-summary" role="status">已找到剧集资源。暂未确认播出平台更新到了哪一集，保存前会再检查。</p>
       <p v-if="!detailResource && !savedMedia && !searchBusy && searchNotice && rankedQuarkResources.length" class="result-summary" role="status">{{ searchNotice }}</p>
 
       <div v-if="!detailResource && !savedMedia && !searchBusy && !searchError && rankedQuarkResources.length > 1" class="result-filters" role="radiogroup" aria-label="资源筛选">

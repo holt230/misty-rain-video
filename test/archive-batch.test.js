@@ -9,7 +9,7 @@ import { ArchiveImportService } from '../server/archiveImport.js';
 const user = { username: 'viewer', folder: 'viewer', role: 'user' };
 const url = 'https://pan.quark.cn/s/verified';
 const input = { title: '折月亮', category: 'tv', year: '2026', shareUrl: url, quarkFid: 'old-library' };
-const row = { url, work_title: '折月亮', category: 'tv', year: '2026' };
+const row = { url, source: 'quark4k', work_title: '折月亮', category: 'tv', year: '2026' };
 const official = { works: [{ title: '折月亮', category: 'tv', year: '2026', latestEpisode: 27, platform: '爱奇艺' }] };
 
 async function fixture(t, { failEpisode = 0, holdFirst = false } = {}) {
@@ -203,7 +203,7 @@ test('同名同年的多个真实来源可以补齐缺口，其他年份不会�
   for (let i = f.entries.length - 1; i >= 0; i--) if (f.entries[i].episodeNumber === 17) f.entries.splice(i, 1);
   let otherYear = '2026';
   f.service.resourceSearch.search = async () => ({ merged_by_type: { quark: [row, { ...row, url: otherUrl, year: otherYear }] } });
-  f.gateway.getShareDetails = async ({ shareUrl }) => shareUrl === url ? { entries: f.entries } : { entries: [
+  f.gateway.getShareDetails = async ({ shareUrl }) => shareUrl === url ? { title: '折月亮', entries: f.entries } : { title: '折月亮', entries: [
     { fid: 'other-folder', name: '4K HDR', isDirectory: true },
     { fid: 'other-17', parentFid: 'other-folder', ancestorFids: ['other-folder'], name: '17.zip', isArchive: true, episodeNumber: 17, size: 11 }
   ] };
@@ -301,7 +301,8 @@ test('发布页与文件名均确认同一部剧时，无需完整分享目录�
     files[0].name = name;
     const blocked = await f.service.preview(input, user);
     assert.equal(blocked.canStart, false, name);
-    assert.deepEqual(blocked.plannedEpisodes, []);
+    assert.deepEqual(blocked.missingEpisodes, [1]);
+    assert.deepEqual(blocked.plannedEpisodes, Array.from({ length: 17 }, (_, i) => i + 2));
   }
 });
 
@@ -326,4 +327,19 @@ test('补集可从匹配到官方别名的目录读取编号文件，保持原�
   const incomplete = await f.service.preview(input, user);
   assert.equal(incomplete.canStart, false);
   assert.deepEqual(incomplete.missingEpisodes, [6]);
+});
+
+
+test('MP4 与 ZIP 覆盖和色彩相同，预览选择直接文件；修改已选文件须重做预览', async t => {
+  const f = await fixture(t);
+  const direct = f.entries.filter(entry => entry.parentFid === 'hdr').map(entry => ({ ...entry,
+    fid: 'direct-' + entry.episodeNumber, identityTag: 'first', name: entry.episodeNumber + '.mp4', isArchive: false, isVideo: true, size: 50 }));
+  f.entries.push(...direct);
+  const preview = await f.service.preview(input, user);
+  assert.equal(preview.canStart, true);
+  assert.equal(preview.totalVideoBytes, 18 * 50);
+  assert.equal(preview.totalArchiveBytes, 0);
+  direct[0].identityTag = 'changed';
+  await assert.rejects(f.service.start({ ...input, token: preview.token }, user), { code: 'ARCHIVE_PLAN_CHANGED' });
+  assert.equal(f.calls.length, 0);
 });
