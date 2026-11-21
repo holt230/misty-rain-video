@@ -27,6 +27,18 @@ test('unpacked files must be actual requested episodes with fresh exact publicat
  assert.throws(()=>selectArchiveEpisode([episode],input,{...publication,work_title:'其他作品'}));
  assert.throws(()=>selectArchiveEpisode([episode],input,{...publication,year:'2020'}));
 });
+test('解压只跳过与已核对压缩包同名的外层目录，正片与集号仍须核对', () => {
+ const request={title:'多喜一家人',category:'tv',year:'2026',episode:13};
+ const source={work_title:request.title,category:request.category,year:request.year,source:'erxiaopan'};
+ const file={fid:'v13',fileName:'13 SDR.mkv',episodeNumber:13,sourcePath:'/13 SDR',duration:2809};
+ const select=(episode, archive='13 SDR.zip')=>selectArchiveEpisode([episode],request,source,archive);
+ assert.equal(select(file),file);
+ assert.throws(()=>select(file,'13 HDR.zip'),{code:'ARCHIVE_EPISODE_UNCONFIRMED'});
+ for (const changed of [{sourcePath:'/其他作品/13 SDR'},{sourcePath:'/13 SDR/其他作品'},
+  {sourcePath:'/13 SDR/花絮'},{fileName:'其他作品.E13.mkv'},{episodeNumber:14}]) {
+  assert.throws(()=>select({...file,...changed}),{code:'ARCHIVE_EPISODE_UNCONFIRMED'});
+ }
+});
 const forum=(title,url)=>({data:[{type:'discussions',id:'188',attributes:{title,createdAt:'2024-11-04T03:25:10Z'},relationships:{firstPost:{data:{id:'1'}}}}],included:[{type:'posts',id:'1',attributes:{contentHtml:'<p><a href="'+url+'">分享链接</a></p>'}}]});
 test('restored forum source accepts exact anime publication and real share domain, rejects stage films, novels and impostor URLs',()=>{
  const rows=parseForumResources(forum('【动漫】仙逆 (2023) 4K 夸克网盘下载','https://pan.quark.cn/s/current'),'仙逆','anime');
