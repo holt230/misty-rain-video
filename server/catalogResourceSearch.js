@@ -1,6 +1,6 @@
 import { parse } from 'parse5';
 import { readWebResponseText } from './http.js';
-import { isExactWorkTitle } from './searchTitles.js';
+import { isExactWorkTitle, seasonQuery } from './searchTitles.js';
 
 const ORIGIN = 'https://www.2xiaopan.one';
 const MAX_DETAILS = 3;
@@ -97,12 +97,16 @@ export class CatalogResourceSearch {
     return readWebResponseText(response, { maxBytes: 2 * 1024 * 1024, idleTimeoutMs: this.timeoutMs });
   }
   async run(keyword, category, signal) {
-    const searchUrl = `${ORIGIN}/index.php/vod/search/wd/${encodeURIComponent(keyword)}.html`;
-    let pageUrl = searchUrl;
+    // The upstream text index lists the same season as “剧名3” or “剧名 第三季”. Only exact editions survive parseResourceIndex.
+    const base = category !== 'movie' && seasonQuery(keyword)?.base;
     let works = [];
-    for (let page = 0; page < 2 && pageUrl && !works.length; page++) {
-      const result = parseResourceIndex(await this.page(pageUrl, signal), keyword, category);
-      works = result.matches; pageUrl = result.nextUrl;
+    for (const lookup of base ? [keyword, base] : [keyword]) {
+      let pageUrl = `${ORIGIN}/index.php/vod/search/wd/${encodeURIComponent(lookup)}.html`;
+      for (let page = 0; page < 2 && pageUrl && !works.length; page++) {
+        const result = parseResourceIndex(await this.page(pageUrl, signal), keyword, category);
+        works = result.matches; pageUrl = result.nextUrl;
+      }
+      if (works.length) break;
     }
     if (!works.length) return { total: 0, merged_by_type: { quark: [] }, partial: false };
     const selected = works.sort((a, b) => b.latestEpisode - a.latestEpisode || Number(b.year) - Number(a.year) || a.title.localeCompare(b.title)).slice(0, MAX_DETAILS);

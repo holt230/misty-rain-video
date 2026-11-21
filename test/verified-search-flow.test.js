@@ -11,6 +11,38 @@ const file = n => ({fid:'e'+n,name:`第${n}集.mp4`,isVideo:true,episodeNumber:n
 const details = nums => ({title:'斗破苍穹年番',videoCount:nums.length,entries:nums.map(file)});
 const options = extra => ({title:'斗破苍穹',category:'anime',signal:new AbortController().signal,progress(){},...extra});
 
+test('只更新目录而没有更新分享标题，不会丢失已核对的压缩包或纳入其他目录', async () => {
+ const title='多喜一家人', year='2026', category='tv';
+ const root='D 多洗宜家仁 更新至11集', current='D 多洗宜家仁 更新至13集';
+ const folders=[['work',current],['dv','4K 杜比视界'],['other','另一家人'],['old','多喜一家人 2025']].map(([fid,name])=>({fid,name,isDirectory:true}));
+ const zip=(fid,n,parents)=>({fid,name:`${n} SDR.zip`,ancestorFids:parents,episodeNumber:n,isArchive:true,archiveFormat:'zip',size:100});
+ const entries=[...folders,zip('good',13,['work','dv']),zip('other-show',14,['work','other']),zip('old-year',15,['old'])];
+ const row={...resource,title,workTitle:title,source:'erxiaopan',category,year};
+ const check=async source=>(await verifySearchResults([{...row,source}],options({title,category,year,officialLatest:14,inspect:async()=>({title:root,videoCount:0,entries})}))).resources;
+ const [result]=await check('erxiaopan');assert.deepEqual(result.archivePreparation.availableEpisodes,[13]);assert.equal(result.verification,undefined);
+ assert.deepEqual(await check('unknown'),[]);
+});
+
+test('发布日期加期号的综艺只保留同季上下集，不把加更、花絮、衍生节目或上一季算作正片', async () => {
+ const title='日落时分说爱你 第2季', category='variety', year='2026';
+ const names=['20261116 第1期上.mkv','20261117(第1期下).mp4','20261121(花絮特辑第1期).mp4','20261118(加更第1期).mp4','20261119(陪你追日落2第1期).mp4','20260231(第2期).mp4'];
+ const entries=names.map((name,i)=>({...file(i===5?2:1),fid:`v${i}`,name,episodePart:['上','下'][i]}));
+ const row={...resource,title:'日落时分说爱你2',workTitle:'日落时分说爱你2',source:'forum',category,year};
+ const check=(root,episode,files=entries)=>verifySearchResults([row],options({title,year,category,episode,inspect:async()=>({title:root,entries:files,videoCount:files.length})}));
+ for(const episode of [undefined,1])assert.deepEqual((await check('日落时分说 爱你2',episode)).resources[0].verification.selectedFids,['v0','v1']);
+ assert.equal((await check('日落时分说 爱你2',1,entries.slice(0,1))).resources[0].verification.complete,false);
+ assert.deepEqual((await check('日落时分说爱你 第一季')).resources,[]);
+});
+
+test('前18条全部失效仍能找到下一条；未检查完不能报告没有资源',async()=>{
+ const rows=Array.from({length:40},(_,i)=>({...resource,url:`https://pan.quark.cn/s/${String(i).padStart(3,'0')}`}));
+ const expired=()=>{throw Object.assign(Error('失效'),{code:'QUARK_SHARE_EXPIRED'})};
+ const found=await verifySearchResults(rows,options({episode:219,inspect:async row=>row===rows[18]?details([219]):expired()}));
+ assert.deepEqual(found.resources.map(row=>row.url),[rows[18].url]);
+ const limited=await verifySearchResults(rows,options({episode:219,inspect:expired}));
+ assert.match(limited.error,/未核对完/);
+});
+
 test('明确集数语法只提取目标要求，不把年份、季数或正常片名裁剪掉',()=>{
  for(const query of ['斗破苍穹 第219集','斗破苍穹219集','斗破苍穹 EP219'])assert.deepEqual(searchIntent(query),{title:'斗破苍穹',episode:219});
  for(const title of ['请回答1988','斗破苍穹 第二季','第八个嫌疑人','Cube3','Episode1'])assert.deepEqual(searchIntent(title),{title,episode:undefined});

@@ -10,6 +10,18 @@ const index = fs.readFileSync('test/fixtures/resource-index/doupo-index.html', '
 const detail = fs.readFileSync('test/fixtures/resource-index/doupo-detail.html', 'utf8');
 const html = body => new Response(body, { headers: { 'Content-Type': 'text/html' } });
 
+test('按原词无结果后可用剧名查找数字季名，只打开目标季度的详情',async()=>{
+ const q='大王饶命 第3季', urls=[];
+ const idx=index.replaceAll('斗破苍穹年番','大王饶命3').replaceAll('斗破苍穹3：除恶','大王饶命2');
+ const svc=new CatalogResourceSearch({fetchImpl:async url=>{
+   urls.push(decodeURI(url));return html(url.includes('/search/')?(decodeURI(url).includes(q)?'<i class="mac_total">0</i>':idx):detail.replaceAll('斗破苍穹年番','大王饶命3'));
+ }});
+ const result=await svc.search(q,{category:'anime'});
+ assert.deepEqual(result.merged_by_type.quark.map(row=>row.work_title),['大王饶命3']);
+ assert.equal(urls.length,3);assert.match(urls[1],/wd\/大王饶命\.html$/);
+ assert.equal(isExactWorkTitle(q,'大王饶命 第一季'),false);
+});
+
 test('真实六条来源卡片只匹配年番219集，不接受同名电影、衍生剧或简介命中', () => {
   const parsed = parseResourceIndex(index, '斗破苍穹', 'anime');
   assert.equal(parsed.matches.length, 1);

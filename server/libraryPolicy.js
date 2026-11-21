@@ -1,6 +1,6 @@
 // Pure identity rules shared by storage and background source maintenance.
-import Pinyin from 'tiny-pinyin';
-import { isExactWorkTitle, searchTitleKey, workTitleKeys } from './searchTitles.js';
+import { pinyin, polyphonic } from 'pinyin-pro';
+import { isExactWorkTitle, searchTitleKey, seasonQuery, workTitleKeys } from './searchTitles.js';
 
 const chineseNumbers = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 export const seasonNumber = value => {
@@ -35,7 +35,7 @@ export const isAncillaryVideoPath = value => String(value || '').split('/').some
   /(?:^|[\s._\-【\[(（])(?:预告片?|花絮|幕后花絮|宣传片|广告|推广|片头|片尾|资源说明)(?=[\s._\-】\])）\d]|$)/.test(part));
 
 const cleanTitle = value => searchTitleKey(value);
-const releaseTags = /^(?:(?:19|20)\d{2}|[248]k|(?:360|480|576|720|1080|1440|2160)p|(?:8|10|12)bit|(?:24|25|30|48|50|60|120)(?:fps|帧率?)|hq|uhd|fhd|hdr(?:10plus|10|vivid)?|sdr|dv|dolbyvision|atmos|ddp?(?:[257]1)?|dtshdma|dts|aac|truehd|flac|ac3|eac3|h26[45]|x26[45]|hevc|avc|av1|webdl|webrip|bluray|bdrip|remux|web|正片|高清|超清|蓝光|原盘|中字|中文字幕|国语|粤语|双语|简繁|无水印|全集|完结|更新至?\d+集?|全\d+集|\d+集全?|高码率)*$/i;
+const releaseTags = /^(?:(?:19|20)\d{2}|[248]k|(?:360|480|576|720|1080|1440|2160)p|(?:8|10|12)bit|(?:24|25|30|48|50|60|120)(?:fps|帧率?)|hq|uhd|fhd|hdr(?:10plus|10|vivid)?|sdr|dv|dolbyvision|杜比视界|杜比全景声|atmos|ddp?(?:[257]1)?|dtshdma|dts(?:[257]1)?|aac|truehd|flac|ac3|eac3|h26[45]|x26[45]|hevc|avc|av1|webdl|webrip|bluray|bdrip|remux|web|正片|高清|超清|蓝光|原盘|中字|中文字幕|国语|粤语|双语|简繁|无水印|全集|完结|更新至?\d+集?|全\d+集|\d+集全?|(?:高|低)码率?)*$/i;
 const titleMatches = (title, value) => {
   const expected = cleanTitle(title), actual = cleanTitle(value);
   return expected.length >= 2 && actual.startsWith(expected) && releaseTags.test(actual.slice(expected.length));
@@ -60,11 +60,28 @@ const numericName = /^(?:\d{1,4}(?![\dkp])|(?:s\d{1,2}[ ._-]*)?(?:ep?|episode)[ 
 const indexedTvDirectories = new Map([['多喜一家人', '多喜'], ['折月亮', '【z】折丨y越亮']]);
 const directoryKey = value => String(value || '').normalize('NFKC').trim().toLowerCase();
 
-/** Compare the complete reading only for a publisher-marked series directory with exact edition metadata. */
-function sameReading(title, directory) {
-  const marked = directory.normalize('NFKC').match(/^[A-Z]\s+([\p{Script=Han}]{3,24})(?:\s+(?:更新至?0*\d+集|全?\d+集全?))?$/u);
-  if (!marked || !/^[\p{Script=Han}]{3,24}$/u.test(title) || marked[1].length !== title.length || !Pinyin.isSupported()) return false;
-  return Pinyin.convertToPinyin(marked[1], '/', true) === Pinyin.convertToPinyin(title, '/', true);
+// Strip only a complete release suffix. A numeric update label can legitimately differ
+// between the share header and its newer directory listing.
+function readingMatches(title, directory, year, allowRomanized, seasonScoped = false) {
+  const titleKey = cleanTitle(title);
+  if (!/^[\p{Script=Han}]{2,24}$/u.test(titleKey)) return false;
+  const marked = /^(?:[A-Z]\s+|【[A-Z]】)/i.test(directory);
+  const label = cleanTitle(directory.replace(/^(?:[A-Z]\s+|【[A-Z]】)\s*/i, ''));
+  const dated = years(directory).includes(year);
+  if (!marked && !dated) return false;
+  const expected = pinyin(titleKey, { type: 'array', toneType: 'none' });
+  if (allowRomanized && dated && label === expected.join('') + year) return true;
+  const chars = [...label], length = [...titleKey].length;
+  const text = chars.slice(0, length).join('');
+  if (chars.length < length || !/^[\p{Script=Han}]+$/u.test(text) || !releaseTags.test(chars.slice(length).join(''))) return false;
+  const readings = polyphonic(text, { type: 'array', toneType: 'none' });
+  const differences = expected.flatMap((syllable, i) => readings[i]?.includes(syllable) ? [] : [i]);
+  if (!differences.length) return true;
+  // A near reading alone never identifies a series. This path also requires a matching release year,
+  // an unchanged two-character prefix and the requested season on the actual file or enclosing folder.
+  if (!seasonScoped || !dated || length < 4 || differences.length !== 1 || text.slice(0, 2) !== titleKey.slice(0, 2)) return false;
+  const i = differences[0];
+  return readings[i].some(value => value.replace(/ng$/, 'n') === expected[i].replace(/ng$/, 'n'));
 }
 
 /** A share identifies the edition; only the returned files can contribute episodes or be selected. */
@@ -87,15 +104,27 @@ export function matchingShareFiles(work, details, publication = {}, { allowUnspe
   const season = wanted ?? (allowUnspecifiedSeason && work.category !== 'tv' ? rootSeasons[0] : 1);
   const wrongSeason = list => new Set(list).size > 1 || (season !== undefined && list.some(n => n !== season));
   if (wrongSeason(rootSeasons)) return [];
-  const prefixed = share.replace(/^(?:[a-z]\s+|【[a-z]】\s*)/i, '');
-  const prefix = share.match(/^[A-Z]\s+([\p{Script=Han}]{2,})$/u)?.[1];
-  const publicPrefix = publication.source === 'public_guoman4K' && prefix && work.title.startsWith(prefix)
-    && prefix.length >= Math.ceil(work.title.length / 2) && titleMatches(work.title, (publication.title || '').replace(/^(?:【[^】]+】\s*)+/u, ''));
-  const alias = trusted && work.category === 'tv' && publication.source === 'erxiaopan'
-    && workTitleKeys(work.title).includes(cleanTitle(postedTitle))
-    && indexedTvDirectories.get(cleanTitle(work.title)) === directoryKey(share);
-  const rootMatch = named(share) || (postedTitle && named(prefixed)) || alias || publicPrefix
-    || (trusted && work.category !== 'movie' && sameReading(postedTitle, share));
+  const knownAlias = trusted && work.category === 'tv' && publication.source === 'erxiaopan'
+    && workTitleKeys(work.title).includes(cleanTitle(postedTitle)) ? indexedTvDirectories.get(cleanTitle(work.title)) : undefined;
+  const seasonTitle = seasonQuery(work.title) || seasonQuery(postedTitle);
+  const evidence = new Map();
+  function directoryEvidence(name) {
+    if (evidence.has(name)) return evidence.get(name);
+    const prefixed = name.replace(/^(?:[a-z]\s+|【[a-z]】)\s*/i, '');
+    const prefix = name.match(/^[A-Z]\s+([\p{Script=Han}]{2,})$/u)?.[1];
+    const publicPrefix = publication.source === 'public_guoman4K' && prefix && work.title.startsWith(prefix)
+      && prefix.length >= Math.ceil(work.title.length / 2) && titleMatches(work.title, (publication.title || '').replace(/^(?:【[^】]+】\s*)+/u, ''));
+    let match = '';
+    if (named(name) || (postedTitle && named(prefixed)) || publicPrefix || (knownAlias && knownAlias === directoryKey(name))) match = 'title';
+    else if (trusted && [postedTitle, knownAlias].filter(Boolean).some(title => readingMatches(title, name, year, work.category !== 'movie'))) {
+      match = work.category === 'movie' ? 'verify-runtime' : 'title';
+    } else if (trusted && seasonTitle && (titleMatches(seasonTitle.base, prefixed) || readingMatches(seasonTitle.base, name, year, false, true))) {
+      match = 'verify-season';
+    }
+    evidence.set(name, match);
+    return match;
+  }
+  const rootMatch = directoryEvidence(share);
   const folders = new Map(details.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
   const parentKey = entry => entry.parentFid || '0';
   const subtitledFolders = new Set(), ambiguousSubtitles = new Set();
@@ -124,11 +153,15 @@ export function matchingShareFiles(work, details, publication = {}, { allowUnspe
     if (parents.some(part => !part) || conflict(stem) || parents.some(conflict)) return false;
     const fileSeasons = [...rootSeasons, ...parents.flatMap(seasonsIn), ...seasonsIn(stem), ...(entry.seasonNumber ? [entry.seasonNumber] : [])];
     if (wrongSeason(fileSeasons)) return false;
-    let identified = Boolean(rootMatch);
+    let context = rootMatch;
     for (const part of parents) {
       if (part === share || qualityFolder(part)) continue;
-      identified = named(part);
+      context = directoryEvidence(part);
     }
+    const runtimeMatches = trusted && publication.runtimeMinutes > 0 && entry.duration > 0
+      && Math.abs(entry.duration - publication.runtimeMinutes * 60) <= 90;
+    const identified = context === 'title' || (context === 'verify-season' && fileSeasons.includes(seasonTitle.number))
+      || (context === 'verify-runtime' && runtimeMatches && years(stem).includes(year));
     const explicit = stem.match(episodeMarker);
     const prefix = explicit ? stem.slice(0, explicit.index) : stem;
     const ownTitle = named(work.category === 'movie' ? stem : prefix);
@@ -136,11 +169,11 @@ export function matchingShareFiles(work, details, publication = {}, { allowUnspe
     const neutral = work.category === 'movie' ? releaseTags.test(cleanTitle(stem))
       : numbered && releaseTags.test(cleanTitle(stem.slice(numbered[0].length)));
     // A self-identifying file can live under an opaque folder. An anonymous file needs an identified parent.
-    const date = varietyMatch && stem.match(/^((?:19|20)\d{2})[-.]?(\d{2})[-.]?(\d{2})[ ._-]*(?:(?:2160p|1080p|60fps)[ ._-]*)*第\s*(\d{1,3})\s*期/u);
-    const datedIssue = date && date[1] === year && Number(date[2]) >= 1 && Number(date[2]) <= 12 && Number(date[3]) >= 1
-      && Number(date[3]) <= 31 && Number(date[4]) === entry.episodeNumber && parents.every(part => part === share || qualityFolder(part));
-    const corroborated = entry.sidecarTag && subtitledFolders.has(parentKey(entry)) && !ambiguousSubtitles.has(parentKey(entry)) && neutral && entry.duration > 0
-      && Math.abs(entry.duration - publication.runtimeMinutes * 60) <= 90;
+    const date = work.category === 'variety' && (identified || varietyMatch) && stem.match(/^((?:19|20)\d{2})[-.]?(\d{2})[-.]?(\d{2})[ ._-]*(?:(?:2160p|1080p|60fps)[ ._-]*)*\(?第\s*(\d{1,3})\s*期\s*[上中下]?\s*\)?(?:\s*[:：].+)?$/u);
+    const datedIssue = date && (!year || date[1] === year) && Number(date[2]) >= 1 && Number(date[2]) <= 12 && Number(date[3]) >= 1
+      && Number(date[3]) <= new Date(Date.UTC(+date[1], +date[2], 0)).getUTCDate() && Number(date[4]) === entry.episodeNumber
+      && (identified || parents.every(part => part === share || qualityFolder(part)));
+    const corroborated = entry.sidecarTag && subtitledFolders.has(parentKey(entry)) && !ambiguousSubtitles.has(parentKey(entry)) && neutral && runtimeMatches;
     const accept = (ownTitle && (identified || (trusted && (work.category !== 'movie' || years(stem).includes(year)))))
       || (identified && neutral) || datedIssue;
     if (!accept && corroborated) viaSubtitle.add(entry);

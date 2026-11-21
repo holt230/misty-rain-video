@@ -18,6 +18,7 @@ export interface QuarkEpisode {
 }
 
 export interface QuarkShareEntry {
+  episodePart?: string;
   identityTag?: string;
   sidecarTag?: string;
   duration?: number;

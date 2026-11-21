@@ -31,8 +31,11 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
     return target ? latest === target ? 2 : latest > target ? 1 : 0 : 0;
   };
   const rows = [...resources].sort((a, b) => priority(b) - priority(a) || (b.latestEpisode || resourceEpisode(b.title)) - (a.latestEpisode || resourceEpisode(a.title))
-    || (b.datetime || '').localeCompare(a.datetime || '') || a.url.localeCompare(b.url)).slice(0, 18);
+    || (b.datetime || '').localeCompare(a.datetime || '') || a.url.localeCompare(b.url));
+  let inspected = 0;
   for (let start = 0; start < rows.length && !options.signal.aborted && !needsAuth && Date.now() < deadline; start += 3) {
+    // Keep the normal request budget after finding usable files. If the first links are dead, keep looking within the same deadline.
+    if (start >= 18 && (accepted.length || start >= 36)) break;
     options.progress(`正在核对${label}的实际视频文件…`);
     await Promise.all(rows.slice(start, start + 3).map(async resource => {
       const controller = new AbortController();
@@ -83,8 +86,10 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
         if (options.episode) {
           const files = details.entries.filter(entry => entry.isVideo && entry.episodeNumber === options.episode && !ancillary.test(entry.name)).sort(compareFiles);
           if (!files[0]?.fid) { reasons.push(`分享中没有第 ${options.episode} 集。`); return; }
-          accepted.push({ ...resource, category, colorFormat: color(files[0]), verification: { summary: `已核对第 ${options.episode} 集的视频文件`, episodeCount: 1,
-            latestEpisode: options.episode, requestedEpisode: options.episode, ...fileSelection(details, [files[0].fid]), requiredEpisodes: [options.episode], shareTitle: details.title, complete: true } });
+          const issue = category === 'variety' ? resourceCompleteness({ ...details, entries: details.entries.filter(entry => entry.isDirectory || files.includes(entry)) }, category, 0, resource.title) : undefined;
+          accepted.push({ ...resource, category, colorFormat: issue?.colorFormat || color(files[0]), verification: { summary: `已核对第 ${options.episode} ${issue ? '期' : '集'}的视频文件`, episodeCount: 1,
+            latestEpisode: options.episode, requestedEpisode: options.episode, ...fileSelection(details, issue?.selectedFids || [files[0].fid]), requiredEpisodes: [options.episode], shareTitle: details.title,
+            complete: !issue?.partialIssue, ...(issue?.partialIssue ? { notice: '这一期仅找到部分分段。' } : {}) } });
           return;
         }
         const target = category === 'tv' ? options.officialLatest || 0 : options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
@@ -115,7 +120,7 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
         } else if (/SHARE_EMPTY/.test(e.code || '')) reasons.push('分享目录没有可用视频。');
         else if (/SHARE_UNAVAILABLE|SHARE_NOT_FOUND|SHARE_EXPIRED/.test(e.code || '')) reasons.push('分享已失效或没有可用视频。');
         else errors.push(e.message || '视频文件暂时无法核对，请重试。');
-      } finally { clearTimeout(timer); options.signal.removeEventListener('abort', cancel); }
+      } finally { inspected++; clearTimeout(timer); options.signal.removeEventListener('abort', cancel); }
     }));
   }
   if (options.signal.aborted) return { resources: [], message: '' };
@@ -130,7 +135,8 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
       || (b.verification?.episodeCount || b.archivePreparation?.availableEpisodes?.length || 0)
         - (a.verification?.episodeCount || a.archivePreparation?.availableEpisodes?.length || 0)
       || sourceColorRank(a.colorFormat) - sourceColorRank(b.colorFormat) || a.url.localeCompare(b.url));
-  if (verified.length) return { resources: verified, message: errors.length ? '部分分享暂时无法核对，结果中已标注可直接保存或需解压核对。' : '' };
+  if (inspected < rows.length) errors.push('还有分享未核对完，请重新搜索。');
+  if (verified.length) return { resources: verified, message: errors.length ? '以下是已核对的结果，部分分享尚未确认。' : '' };
   if (errors.length) return { resources: [], message: '', error: errors.sort()[0] };
   const explanation = reasons.find(reason => reason.startsWith('分享中没有第'))
     || reasons.find(reason => reason.includes('没有识别到正片')) || [...new Set(reasons)].sort()[0] || '';
@@ -148,6 +154,6 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
   const diagnostic = reasons.length > 1 && details.length
     ? `本次核对 ${reasons.length} 个分享：${details.join('，')}。${counted < reasons.length ? explanation : ''}`
     : explanation;
-  if (mismatch > 0 && mismatch === reasons.length) return { resources: [], message: `找到相关分享，暂时无法确认里面是${label}的正片。` };
+  if (mismatch > 0 && !missingEpisode) return { resources: [], message: `找到相关分享，暂时无法确认里面是${label}的正片。${mismatch === reasons.length ? '' : diagnostic}` };
   return { resources: [], message: `未找到${label}的可用视频。${diagnostic}` };
 }

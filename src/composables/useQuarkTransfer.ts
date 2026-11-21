@@ -59,7 +59,7 @@ export function useQuarkTransfer() {
       officialCheckedAt.value = official.checkedAt;
       officialNotice.value = officialProgress.value ? '' : official.message || '官方有多个作品版本，暂未确认对应的更新进度。';
       if (result.success) {
-        if (!result.quarkItems.length) { searchNotice.value = `没找到《${intent.title}》${intent.episode ? `第 ${intent.episode} 集` : ''}。`; return; }
+        if (!result.quarkItems.length) { searchNotice.value = `当前片源里没找到《${intent.title}》${intent.episode ? `第 ${intent.episode} 集` : ''}。`; return; }
         searchPhase.value = 'verifying';
         const checked = await verifySearchResults(result.quarkItems, { title: intent.title, category, year: currentMedia.value?.year, episode: intent.episode,
           officialLatest: officialProgress.value?.latestEpisode,
