@@ -4,7 +4,7 @@ import { createOpaqueId } from './http.js';
 import { inspectMp4Stereo } from './mp4Stereo.js';
 import { firstLabeledColor, sourceColorRank } from './sourceColor.js';
 import { resolveShareSelection, entriesInSelection } from './shareSelection.js';
-import { assertVerifiedImport } from './verifiedImport.js';
+import { assertVerifiedImport, assertFileSelection, shareFileTag, sidecarEvidenceTags } from './verifiedImport.js';
 import { includeSubtitleCompanions, isSubtitleFile, isTextSubtitleFile, subtitleMatchesVideo, subtitleLanguage, decodeSubtitle, subtitleToVtt } from './subtitles.js';
 import { searchTitleKey } from './searchTitles.js';
 import { episodeKey, isAncillaryVideoPath, libraryVideoName, missingLibraryEpisodes, seasonNumber, validateSourceCandidate } from './libraryPolicy.js';
@@ -718,7 +718,7 @@ export class QuarkGateway {
     appendToFid = '',
     quarkSelectionFids,
     quarkRequiredEpisodes,
-    quarkVerifiedShareTitle
+    quarkVerifiedShareTitle, quarkFileChecks
   }, user = SYSTEM_USER) {
     const principal = normalizeUser(user);
     const cookie = this.#requireCookie();
@@ -745,6 +745,9 @@ export class QuarkGateway {
     // Validate the complete selection before creating or replacing any library directory.
     const selectionTree = quarkSelectionFids === undefined
       ? null : await this.#readShareTree(share, cookie);
+    const sidecars = Array.isArray(quarkFileChecks) && quarkFileChecks.some(tag => typeof tag === 'string' && tag.startsWith('s.'))
+      ? sidecarEvidenceTags(selectionTree || [], isVideoFile, isTextSubtitleFile) : undefined;
+    assertFileSelection(selectionTree || [], quarkSelectionFids, quarkFileChecks, sidecars);
     const selectedItems = selectionTree
       ? includeSubtitleCompanions(selectionTree, resolveShareSelection(selectionTree, quarkSelectionFids)) : null;
     const subtitleTree = selectionTree || await this.#readShareTree(share, cookie);
@@ -983,7 +986,7 @@ export class QuarkGateway {
   }
 
   /** Stage one archive in an account-owned system folder. No library record is created here. */
-  async prepareArchiveImport({ shareUrl, archiveFid, episode = 0, passcode = '', archivePassword = '', operationId }, user = SYSTEM_USER,
+  async prepareArchiveImport({ shareUrl, archiveFid, fileCheck, episode = 0, passcode = '', archivePassword = '', operationId }, user = SYSTEM_USER,
     { state = {}, checkpoint = async () => {}, progress = () => {}, timeoutMs = 180000 } = {}) {
     const principal = normalizeUser(user);
     if (!/^[a-zA-Z0-9_-]{8,80}$/.test(operationId || '') || !archiveFid || archivePassword.length > 128) {
@@ -997,14 +1000,16 @@ export class QuarkGateway {
     const capability = await this.getArchiveCapabilities();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie });
     const tree = await this.#readShareTree(share, cookie);
+    assertFileSelection(tree, [archiveFid], fileCheck ? [fileCheck] : undefined);
     const archive = tree.find(item => item.fid === archiveFid && item.file_type !== 0 && !item.dir);
     if (!archive || !supportedArchive(archive.file_name)) {
       throw archiveError(archiveFormat(archive?.file_name) === 'iso' ? '当前不支持自动解压 ISO，尚未转存；将继续使用可解压或可直播放的来源。' : '该文件不是支持的 ZIP、RAR 或7Z压缩包', 'QUARK_ARCHIVE_FORMAT_UNSUPPORTED');
     }
     if (episode && extractEpisodeNumber(archive.file_name) !== episode) throw archiveError('压缩包集号已变化，未开始转存。', 'QUARK_SOURCE_CHANGED', 409);
+    if (state.fileCheck && state.fileCheck !== shareFileTag(archive)) throw archiveError('原压缩包已变化，请重新核对。', 'QUARK_SOURCE_CHANGED', 409);
     if (state.archiveFid && state.archiveFid !== archive.fid) throw archiveError('解压任务的来源已变化', 'QUARK_SOURCE_CHANGED', 409);
     requireArchiveCapacity(capability, Number(archive.size));
-    state.archiveFid = archive.fid; state.sourceShareId = share.pwdId;
+    state.fileCheck = shareFileTag(archive); state.archiveFid = archive.fid; state.sourceShareId = share.pwdId;
     state.archiveName = archive.file_name; state.archiveSize = Number(archive.size);
     const root = await this.#getUserRoot(cookie, principal, true);
     const area = await this.#ensureDriveFolder(root.fid, RESERVED_LIBRARY_FOLDER_PREFIX + '自动解压', cookie);
@@ -1077,7 +1082,7 @@ export class QuarkGateway {
     const stage = area && (await this.#listDriveFolder(area.fid, cookie)).find(item => item.fid === state.stageFid && /^job_[a-zA-Z0-9_-]{8,80}$/.test(item.file_name || ''));
     const output = stage && (await this.#listDriveFolder(stage.fid, cookie)).find(item => item.fid === state.outputFid && item.file_name === '解压内容');
     if (!area || !stage || !output) throw archiveError('无权使用该临时目录，未入库。', 'ARCHIVE_JOB_FORBIDDEN', 403);
-    const episodes = await this.#walkDriveDirectory(output.fid, cookie);
+    const episodes = await this.#walkDriveDirectory(output.fid, cookie, { keepAllFiles: true });
     let selected;
     if (state.publishFid && state.targetFid) {
       const committed = await this.#walkDriveDirectory(state.targetFid, cookie);
@@ -1151,6 +1156,7 @@ export class QuarkGateway {
     const cookie = this.#requireCookie();
     const share = await this.#resolveShareCredentials({ shareUrl, passcode, cookie, signal });
     const entries = await this.#readShareTree(share, cookie, signal);
+    const sidecars = sidecarEvidenceTags(entries, isVideoFile, isTextSubtitleFile);
     const videoCounts = new Map();
     for (const item of entries.filter(isVideoFile)) {
       for (const fid of item.ancestorFids) videoCounts.set(fid, (videoCounts.get(fid) || 0) + 1);
@@ -1165,6 +1171,9 @@ export class QuarkGateway {
         const video = isVideoFile(item);
         const episode = video ? serializeEpisode(item) : null;
         return {
+          ...(sidecars.has(item.fid) ? { sidecarTag: sidecars.get(item.fid) } : {}),
+          ...(video ? { duration: Number(item.duration) || 0 } : {}),
+          ...(video || archiveFormat(item.file_name) ? { identityTag: shareFileTag(item) } : {}),
           fid: item.fid, parentFid: item.parentFid, ancestorFids: item.ancestorFids,
           name: item.file_name, isDirectory: item.file_type === 0 || Boolean(item.dir),
           isVideo: video, isArchive: Boolean(archiveFormat(item.file_name) && item.file_type !== 0 && !item.dir), archiveFormat: archiveFormat(item.file_name), isSubtitle: isSubtitleFile(item), size: Number(item.size) || 0, sizeFormatted: formatBytes(item.size),
@@ -1756,7 +1765,7 @@ export class QuarkGateway {
     throw incomplete();
   }
 
-  async #walkDriveDirectory(rootFid, cookie) {
+  async #walkDriveDirectory(rootFid, cookie, { keepAllFiles = false } = {}) {
     const queue = [{ fid: rootFid, path: '' }];
     const visited = new Set();
     const files = [];
@@ -1777,7 +1786,7 @@ export class QuarkGateway {
       }
     }
     if (queue.length || files.length >= 5000) throw new QuarkApiError('影片目录过大，无法安全确认完整剧集', { code: 'LIBRARY_SCAN_LIMIT', statusCode: 422 });
-    return normalizePlaybackEpisodes(files);
+    return keepAllFiles ? files.map(serializeEpisode) : normalizePlaybackEpisodes(files);
   }
 
   #libraryUpdateCacheKey(card, user) {

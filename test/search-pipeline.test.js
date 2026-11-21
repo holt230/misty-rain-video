@@ -173,6 +173,7 @@ test('电视剧展示补集范围和空间，后台任务可以停止并从回�
   {onSaveToCards:()=>actions.push('preview-or-start'),onStopBatch:id=>actions.push(id),onResumeBatch:id=>actions.push('resume:'+id)});
  try{
   await nextTick();assert.equal(document.querySelector('.btn-transfer').textContent.trim(),'检查可存集数');
+  assert.match(document.body.textContent, /暂未确认播出平台更新到了哪一集/);
   document.querySelector('.btn-transfer').click();assert.deepEqual(actions,['preview-or-start']);
   view.state.batchPreview={resourceId:'0',plan:{officialLatest:27,existingEpisodes:Array.from({length:9},(_,i)=>i+19),
    plannedEpisodes:Array.from({length:18},(_,i)=>i+1),missingEpisodes:[],totalArchiveBytes:36.6*1024**3,recommendedFreeBytes:75.4*1024**3,freeBytes:100*1024**3,qualities:['4K HDR'],canStart:true,reason:''}};

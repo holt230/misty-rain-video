@@ -35,19 +35,21 @@ export interface ResourceItem {
   size?: string;
   workTitle?: string;
   workTitleAliases?: string[];
+  runtimeMinutes?: number;
   category?: CategoryType;
   updateText?: string;
   latestEpisode?: number;
   year?: string;
   sourceUrl?: string;
   batchEligible?: boolean;
-  archivePreparation?: { archiveFid: string; episode: number; fileName: string; bytes: number; requiredMembership: string; notice: string; summary?: string; availableEpisodes?: number[]; missingEpisodes?: number[]; batchEligible?: boolean };
+  archivePreparation?: { archiveFid: string; fileCheck?: string; episode: number; fileName: string; bytes: number; requiredMembership: string; notice: string; summary?: string; availableEpisodes?: number[]; missingEpisodes?: number[]; batchEligible?: boolean };
   verification?: {
     summary: string;
     episodeCount: number;
     latestEpisode: number;
     requestedEpisode?: number;
     selectedFids?: string[];
+    fileChecks?: string[];
     requiredEpisodes: number[];
     shareTitle: string;
     complete?: boolean;

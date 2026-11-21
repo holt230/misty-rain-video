@@ -63,7 +63,7 @@ export const createApiContext = ({ dataDir = path.resolve(__dirname, '..', 'data
     tvPlaybackClient,
     quarkGateway: new QuarkGateway({ credentialStore, libraryConfigStore, tvPlaybackClient })
   };
-  context.archiveImport = new ArchiveImportService(dataDir, { gateway: context.quarkGateway, resourceSearch: context.resourceSearch, userContext });
+  context.archiveImport = new ArchiveImportService(dataDir, { catalog: context.catalog, gateway: context.quarkGateway, resourceSearch: context.resourceSearch, userContext });
   context.archiveBatch = new ArchiveBatchService(dataDir, { gateway: context.quarkGateway, resourceSearch: context.resourceSearch,
     officialProgress: context.officialProgress, catalog: context.catalog, archiveImport: context.archiveImport, userContext });
   context.libraryMaintenance = new LibraryMaintenance(context);
@@ -381,14 +381,17 @@ export const handleApiRequest = async (request, response, context) => {
       const category = url.searchParams.get('category') || 'all';
       const result = await context.resourceSearch.search(keyword, { category });
       const rows = result.merged_by_type?.quark || [];
-      if (context.catalog?.matchingAliases && rows.length) {
+      if (context.catalog?.matchingEdition && rows.length) {
         const key = row => JSON.stringify([row.work_title, row.category, row.year]);
         const editions = [...new Map(rows.filter(row => row.work_title && row.category && row.year)
           .map(row => [key(row), row])).values()].slice(0, 3);
-        const aliases = new Map(await Promise.all(editions.map(async row => [key(row),
-          await context.catalog.matchingAliases({ title: row.work_title, year: row.year, category: row.category })])));
-        sendSuccess(response, { ...result, merged_by_type: { ...result.merged_by_type, quark: rows.map(row =>
-          aliases.get(key(row))?.length ? { ...row, work_title_aliases: aliases.get(key(row)) } : row) } });
+        const evidence = new Map(await Promise.all(editions.map(async row => [key(row),
+          await context.catalog.matchingEdition({ title: row.work_title, year: row.year, category: row.category })])));
+        sendSuccess(response, { ...result, merged_by_type: { ...result.merged_by_type, quark: rows.map(row => {
+          const edition = evidence.get(key(row));
+          return { ...row, ...(edition?.aliases.length ? { work_title_aliases: edition.aliases } : {}),
+            ...(edition?.runtimeMinutes ? { runtime_minutes: edition.runtimeMinutes } : {}) };
+        }) } });
       } else sendSuccess(response, result);
       return true;
     }
@@ -472,7 +475,7 @@ export const handleApiRequest = async (request, response, context) => {
         }
         if (/pan\.quark\.cn\/s\/[a-zA-Z0-9]+/i.test(item.quarkShareUrl || '')) {
           const imported = await context.quarkGateway.importShare(item, user);
-          const { quarkRequiredEpisodes, quarkVerifiedShareTitle, ...persistentItem } = item;
+          const { quarkRequiredEpisodes, quarkVerifiedShareTitle, quarkFileChecks, ...persistentItem } = item;
           if (imported.replacedFid) {
             userData.mediaRepository.removeFid(imported.replacedFid);
             userData.playbackHistory.removeByMediaFid(imported.replacedFid);
@@ -641,7 +644,7 @@ export const handleApiRequest = async (request, response, context) => {
     if (pathname === '/api/library/import' && request.method === 'POST') {
       const item = await readRequestBody(request);
       const imported = await context.quarkGateway.importShare(item, user);
-      const { quarkRequiredEpisodes, quarkVerifiedShareTitle, ...persistentItem } = item;
+      const { quarkRequiredEpisodes, quarkVerifiedShareTitle, quarkFileChecks, ...persistentItem } = item;
       if (imported.replacedFid) {
         userData.mediaRepository.removeFid(imported.replacedFid);
         userData.playbackHistory.removeByMediaFid(imported.replacedFid);

@@ -40,7 +40,7 @@ test('archive jobs revalidate source, isolate users, coalesce clicks and only wr
  let preparations=0,writes=0,release;
  const gate=new Promise(resolve=>release=resolve),user={username:'one'};
  const gateway={
-  getShareDetails:async()=>({entries:[{fid:'a167',name:'167.zip',isArchive:true,archiveFormat:'zip',episodeNumber:167}]}),
+  getShareDetails:async()=>({title:'仙逆',entries:[{fid:'a167',name:'167.zip',isArchive:true,archiveFormat:'zip',episodeNumber:167}]}),
   prepareArchiveImport:async(_input,_user,{state,checkpoint})=>{preparations++;await checkpoint({...state,owner:'one',stageFid:'tmp'});await gate;return {state:{...state,owner:'one'}};},
   finalizeArchiveImport:async()=>({item:{id:'quark:new',quarkFid:'new',title:'仙逆',category:'anime'},state:{owner:'one',published:true}}),
   cleanupArchiveStage:async()=>true
@@ -57,4 +57,12 @@ test('archive jobs revalidate source, isolate users, coalesce clicks and only wr
  await service.start(args,user);assert.equal(preparations,1);assert.equal(writes,1);
  assert.doesNotMatch(JSON.stringify(finished),/stageFid|passcode|archivePassword|savedArchive/);
  assert.doesNotMatch(await fs.readFile(`${dir}/archive-jobs/${first.id}.json`,'utf8'),/quarkPasscode/);
+});
+
+
+test('解压后同集错片不会挡住有明确作品名的正片，但两个可确认版本仍需消歧', () => {
+  const good = { ...episode, fileName: '仙逆.E167.2160p.mkv' };
+  const wrong = { ...episode, fid: 'bad', fileName: '其他剧.E167.mkv', size: 100000 };
+  assert.equal(selectArchiveEpisode([wrong, good], input, publication).fid, good.fid);
+  assert.throws(() => selectArchiveEpisode([good, { ...good, fid: 'duplicate' }], input, publication), { code: 'ARCHIVE_EPISODE_UNCONFIRMED' });
 });

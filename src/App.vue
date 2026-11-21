@@ -476,6 +476,7 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
     quarkSelectionFids: selectedFids ?? bestRes?.verification?.selectedFids,
     quarkRequiredEpisodes: bestRes?.verification?.requiredEpisodes,
     quarkVerifiedShareTitle: bestRes?.verification?.shareTitle,
+    quarkFileChecks: bestRes?.verification?.fileChecks,
     tag: bestRes?.quality || media.tag || '',
     quarkQuality: bestRes?.quality || media.quarkQuality || '',
     quarkShareUrl: bestRes?.url || media.quarkShareUrl,
@@ -724,6 +725,7 @@ watch([isAnalyzing, searchPending, quarkResources], async () => {
     return;
   }
   const result = await prepareCatalogPlayback(item, {
+    officialLatest: officialProgress.value?.latestEpisode,
     resources: () => quarkResources.value,
     searching: () => searchPending.value,
     cancelled: () => sequence !== automaticSequence || !isTransferOpen.value,

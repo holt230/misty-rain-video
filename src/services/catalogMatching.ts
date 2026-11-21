@@ -5,8 +5,7 @@ import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
 import { compareResourceColors, matchResource, resourceEpisode } from './resourceMatching';
 import { isExactWorkTitle } from '../../server/searchTitles.js';
-import { hasPublishedVideoIdentity, matchesIndexedTvDirectory, shareVideoCandidates, validateSourceCandidate } from '../../server/libraryPolicy.js';
-import { matchesResourceTitle } from './resourceTitles';
+import { matchingShareFiles } from '../../server/libraryPolicy.js';
 
 export type PlaybackWork = Pick<CatalogItem, 'title' | 'category'> & { year?: string };
 
@@ -70,45 +69,18 @@ export function automaticCatalogCandidates(item: PlaybackWork, resources: Resour
       || compareResourceColors(a, b));
 }
 
-export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem, { allowUnspecifiedSeason = false } = {}) {
-  if (matchesIndexedTvDirectory(item, details.title, resource)) {
-    const videos = shareVideoCandidates(details.entries);
-    return Boolean(details.videoCount) && validateSourceCandidate({ card: item, shareTitle: details.title,
-      episodes: videos, localEpisodes: videos, publication: resource });
-  }
-  if (details.videoCount && resource?.workTitle) {
-    const videos = shareVideoCandidates(details.entries);
-    if (videos.length === details.entries.filter(entry => entry.isVideo).length
-      && hasPublishedVideoIdentity(item, details.title, videos, resource)) return true;
-  }
-  if (allowUnspecifiedSeason && explicitSeason(item.title) === undefined) {
-    const match = matchResource(item.title, details.title, item.category);
-    // Public posts often use a publisher marker plus a shortened directory name
-    // (e.g. "M 牧神"). Only accept a strict Han prefix when the posted work name
-    // independently matches, with no other edition/season or extra title text.
-    const directoryPrefix = details.title.normalize('NFKC').match(/^[A-Z]\s+([\p{Script=Han}]{2,})(?:\s*[(（](?:19|20)\d{2}[)）])?\s*$/u)?.[1] || '';
-    const workKey = normalize(item.title);
-    const posted = resource ? matchResource(item.title, resource.title, item.category) : undefined;
-    const publishedPrefix = Boolean(resource?.source === 'public_guoman4K' && posted?.matches && !posted.otherVersion
-      && directoryPrefix && workKey.startsWith(normalize(directoryPrefix)) && directoryPrefix.length >= Math.ceil(workKey.length / 2));
-    const exactPublished = Boolean(resource?.workTitle && isExactWorkTitle(item.title, resource.workTitle));
-    const literalDirectory = normalize(details.title).replace(/^[a-z](?=[\p{Script=Han}])/u, '').replace(/(?:19|20)\d{2}$/, '');
-    const punctuatedName = exactPublished && literalDirectory === workKey;
-    if (!details.videoCount || (!(match.matches && !match.otherVersion) && !publishedPrefix && !punctuatedName)
-      || (item.year && year(details.title) && year(details.title) !== item.year)) return false;
-    const videos = details.entries.filter(entry => entry.isVideo);
-    const seasons = new Set([details.title, ...details.entries.filter(entry => entry.isVideo || entry.isDirectory).map(entry => entry.name)]
-      .map(explicitSeason).filter(value => value !== undefined));
-    return videos.length > 0 && seasons.size <= 1;
-  }
-  const metadataMatch = resource?.workTitle && isExactWorkTitle(item.title, resource.workTitle) && matchesResourceTitle(item.title, details.title)
-    && (!item.year || !year(details.title) || year(details.title) === item.year);
-  if (!details.videoCount || !(matchesCatalogTitle(item, details.title, false) || metadataMatch)) return false;
-  const videos = details.entries.filter(entry => entry.isVideo);
-  if (!videos.length) return false;
-  if (metadataMatch && resource?.workTitle && explicitSeason(item.title) === undefined && explicitSeason(resource.workTitle) === undefined) {
-    const found = new Set(details.entries.filter(entry => entry.isVideo || entry.isDirectory).map(entry => explicitSeason(entry.name)).filter(value => value !== undefined));
-    return found.size <= 1;
-  }
-  return details.entries.every(entry => !(entry.isVideo || entry.isDirectory) || explicitSeason(entry.name) === undefined || season(entry.name) === season(item.title));
+export function matchedShareDetails(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem, allowUnspecifiedSeason = false) {
+  const files = matchingShareFiles(item, details, resource, { allowUnspecifiedSeason });
+  const entries = [...details.entries.filter(entry => entry.isDirectory), ...files];
+  return { ...details, entries, videoCount: files.filter(entry => entry.isVideo).length };
+}
+
+export function validatesCatalogShare(item: PlaybackWork, details: QuarkShareDetails, resource?: ResourceItem) {
+  return matchedShareDetails(item, details, resource).videoCount > 0;
+}
+
+export function fileSelection(details: QuarkShareDetails, selectedFids: string[]) {
+  const tags = new Map(details.entries.map(entry => [entry.fid, entry.identityTag]));
+  const selectedTags = selectedFids.map(fid => tags.get(fid));
+  return { selectedFids, fileChecks: selectedTags.every((tag): tag is string => Boolean(tag)) ? selectedTags : undefined };
 }

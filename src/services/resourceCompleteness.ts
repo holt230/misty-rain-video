@@ -33,12 +33,12 @@ export function resourceCompleteness(details: QuarkShareDetails, category: Categ
     selectedFids: [...numbered.entries()].sort((a, b) => a[0] - b[0]).map(([, entry]) => entry.fid).filter(Boolean) };
 }
 
-export function episodeRangeLabel(episodes: number[]) {
+export function episodeRangeLabel(episodes: number[], unit: '集' | '期' = '集') {
   const ranges: string[] = [];
   for (let index = 0; index < episodes.length; index++) {
     const start = episodes[index]; let end = start;
     while (episodes[index + 1] === end + 1) end = episodes[++index];
     ranges.push(start === end ? String(start) : `${start}～${end}`);
   }
-  return ranges.length > 5 ? `第 ${ranges.slice(0, 5).join('、')} 等集，最高第 ${episodes[episodes.length - 1]} 集` : `第 ${ranges.join('、')} 集`;
+  return ranges.length > 5 ? `第 ${ranges.slice(0, 5).join('、')} 等${unit}，最高第 ${episodes[episodes.length - 1]} ${unit}` : `第 ${ranges.join('、')} ${unit}`;
 }

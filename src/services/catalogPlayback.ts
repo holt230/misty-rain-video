@@ -1,6 +1,6 @@
 import type { ResourceItem } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
-import { automaticCatalogCandidates, validatesCatalogShare, type PlaybackWork } from './catalogMatching';
+import { automaticCatalogCandidates, matchedShareDetails, fileSelection, type PlaybackWork } from './catalogMatching';
 import { resourceCompleteness } from './resourceCompleteness';
 import { resourceEpisode } from './resourceMatching';
 
@@ -10,6 +10,7 @@ interface AutomaticPlaybackOptions {
   cancelled: () => boolean;
   inspect: (resource: ResourceItem, signal?: AbortSignal) => Promise<QuarkShareDetails>;
   save: (resource: ResourceItem, selectedFids?: string[]) => Promise<boolean>;
+  officialLatest?: number;
   previewBatch?: (resource: ResourceItem) => Promise<boolean>;
   progress: (message: string) => void;
   now?: () => number;
@@ -72,23 +73,19 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
     }
     finally { clearTimeout(inspectionTimer); }
     if (options.cancelled()) return { status: 'cancelled' as const, attempts: checked.size };
-    if (!validatesCatalogShare(item, details, resource)) continue;
-    let selectedFids: string[] | undefined;
-    {
-      const coverage = resourceCompleteness(details, item.category, resource.latestEpisode || resourceEpisode(resource.title), resource.title);
-      if (!coverage.complete && !(item.category === 'anime' && coverage.available > 0)) {
-        if (!bestPartial || coverage.available > bestPartial.available) bestPartial = coverage;
-        options.progress(`当前来源实际可识别 ${coverage.available} 集，缺 ${coverage.missing.length} 集，继续核对其他来源…`);
-        continue;
-      }
-      // A fully verified series retains the whole-source scope so future
-      // updates can add episode 220+, instead of freezing the selected FIDs.
-      selectedFids = (item.category === 'movie' || !coverage.complete) && coverage.selectedFids.length ? coverage.selectedFids : undefined;
-      options.progress(item.category === 'movie' ? '已核对正片文件，正在加入片库…'
-        : coverage.complete ? `已核对第 1～${coverage.actualLatest} 集连续完整，正在加入片库…`
-          : `已核对 ${coverage.available} 集视频，正在保存这部分剧集…`);
+    details = matchedShareDetails(item, details, resource, item.category === 'anime');
+    if (!details.videoCount) continue;
+    const target = item.category === 'tv' ? options.officialLatest || 0 : resource.latestEpisode || resourceEpisode(resource.title);
+    const coverage = resourceCompleteness(details, item.category, target, resource.title);
+    if (!coverage.complete && !(item.category === 'anime' && coverage.available > 0)) {
+      if (!bestPartial || coverage.available > bestPartial.available) bestPartial = coverage;
+      options.progress(`当前来源实际可识别 ${coverage.available} 集，缺 ${coverage.missing.length} 集，继续核对其他来源…`);
+      continue;
     }
-    const saved = await options.save(resource, selectedFids);
+    options.progress(item.category === 'movie' ? '已核对正片文件，正在加入片库…' : `已核对 ${coverage.available} 集视频，正在保存…`);
+    const saved = await options.save({ ...resource, verification: { summary: '已核对视频文件', episodeCount: coverage.available,
+      latestEpisode: coverage.actualLatest, shareTitle: details.title, requiredEpisodes: coverage.episodes,
+      ...fileSelection(details, coverage.selectedFids) } }, coverage.selectedFids);
     return { status: saved ? 'saved' as const : 'failed' as const, attempts: checked.size };
   }
   return {

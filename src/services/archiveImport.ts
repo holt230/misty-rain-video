@@ -30,7 +30,7 @@ export async function importArchiveResource(media:MediaItem,resource:ResourceIte
   const archive=resource.archivePreparation;
   if(!archive)throw new LibrarySaveError('该结果不是可解压的资源','INVALID_ARCHIVE_REQUEST');
   let job=await request<Job>('/api/library/archive-jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    title:media.title,category,shareUrl:resource.url,archiveFid:archive.archiveFid,episode:archive.episode,passcode:resource.password||'',
+    title:media.title,category,shareUrl:resource.url,archiveFid:archive.archiveFid,fileCheck:archive.fileCheck,episode:archive.episode,passcode:resource.password||'',
     quarkFid:media.quarkFid||'',year:media.year||resource.year||'',catalogId:media.catalogId||'',poster:media.poster||''
   })});
   const deadline=Date.now()+240000;

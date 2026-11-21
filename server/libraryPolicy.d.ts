@@ -1,12 +1,5 @@
-import type { QuarkShareEntry } from '../src/services/quarkStreamService';
+import type { QuarkShareDetails, QuarkShareEntry } from '../src/services/quarkStreamService';
+import type { ResourceItem } from '../src/types/search';
 
-type Work = { title: string; category: string; year?: string };
-type Publication = { source: string; workTitle?: string; category?: string; year?: string; workTitleAliases?: string[] };
-type SourceVideo = { entry: QuarkShareEntry; fileName: string; episodeNumber: number; size: number; sourcePath: string; seasonNumber: number };
-
-export function hasPublishedVideoIdentity(card: Work, shareTitle: string, videos: SourceVideo[], publication?: Publication): boolean;
-export function matchesIndexedTvDirectory(card: Work, shareTitle: string, publication?: Publication): boolean;
-export function shareVideoCandidates(entries: QuarkShareEntry[]): SourceVideo[];
-export function validateSourceCandidate(input: {
-  card: Work; shareTitle: string; episodes: SourceVideo[]; localEpisodes: SourceVideo[]; publication?: Publication;
-}): boolean;
+export function matchingShareFiles(work: { title: string; category: string; year?: string }, details: QuarkShareDetails,
+  publication?: ResourceItem, options?: { allowUnspecifiedSeason?: boolean }): QuarkShareEntry[];

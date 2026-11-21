@@ -7,7 +7,7 @@ const { prepareCatalogPlayback } = await import('data:text/javascript;base64,' +
 const work = { title: '测试剧', year: '2026', category: 'tv' };
 const resource = n => ({ title: '测试剧 2026 全1集', url: 'https://pan.quark.cn/s/test' + n });
 const details = { title: '测试剧', videoCount: 1, entries: [{ fid: 'e1', name: 'S01E01.mp4', isVideo: true, episodeNumber: 1 }] };
-const defaults = { searching: () => false, cancelled: () => false, progress() {} };
+const defaults = { officialLatest: 1, searching: () => false, cancelled: () => false, progress() {} };
 
 test('checks beyond the first three candidates, skips unavailable and ambiguous shares, and saves only verified content', async () => {
   let inspected = 0, saves = 0;
@@ -117,4 +117,11 @@ test('目录请求挂起时按限时取消，不无限等待或保存', async t 
   t.mock.timers.tick(8000);
   const result = await pending;
   assert.equal(signal.aborted, true); assert.equal(result.status, 'manual'); assert.match(result.message, /超时/);
+});
+
+
+test('电视剧发布方标全一集但缺少官方进度时，自动找源不能直接转存', async () => {
+  const response = await prepareCatalogPlayback(work, { ...defaults, officialLatest: undefined, resources: () => [resource(1)],
+    inspect: async () => details, save: async () => assert.fail('不能用来源标题代替官方进度') });
+  assert.equal(response.status, 'manual');
 });

@@ -1,9 +1,8 @@
 import type { CategoryType } from '../types/media';
 import type { ResourceItem, SearchCategory } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
-import { validatesCatalogShare } from './catalogMatching';
+import { matchedShareDetails, fileSelection } from './catalogMatching';
 import { episodeRangeLabel, resourceCompleteness } from './resourceCompleteness';
-import { isExactWorkTitle } from '../../server/searchTitles.js';
 import { matchResource, resourceEpisode } from './resourceMatching';
 import { fileSourceColor, leastCompatibleColor, sourceColorRank } from '../../server/sourceColor.js';
 
@@ -42,21 +41,20 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
       if (options.signal.aborted) controller.abort();
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const details = await Promise.race([options.inspect(resource, controller.signal), new Promise<never>((_, reject) => {
+        const raw = await Promise.race([options.inspect(resource, controller.signal), new Promise<never>((_, reject) => {
           timer = setTimeout(() => { controller.abort(); reject(new Error('核对剧集超时，请重试')); }, Math.max(1, Math.min(6000, deadline - Date.now())));
         })]);
         if (options.signal.aborted) return;
         const category: CategoryType | undefined = options.category === 'all'
           ? resource.category || matchResource(options.title, resource.title).inferred : options.category;
         if (!category) { reasons.push('无法确认作品类型。'); return; }
-        const publicationMatches = resource.workTitle && isExactWorkTitle(options.title, resource.workTitle)
-          && (!options.year || !resource.year || options.year === resource.year);
+        const details = matchedShareDetails({ title: options.title, category, year: options.year || resource.year }, raw, resource, true);
         const folders = new Map(details.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
         const color = (file: QuarkShareDetails['entries'][number]) => fileSourceColor(file, folders, resource.title);
         const compareFiles = (a: QuarkShareDetails['entries'][number], b: QuarkShareDetails['entries'][number]) =>
           sourceColorRank(color(a)) - sourceColorRank(color(b)) || b.size - a.size || a.fid.localeCompare(b.fid);
-        const archives = publicationMatches ? details.entries.filter(entry => entry.isArchive && ['zip','rar','7z'].includes(entry.archiveFormat || '')
-          && Number.isInteger(entry.episodeNumber) && entry.episodeNumber > 0 && entry.episodeNumber <= 5000 && !ancillary.test(entry.name)) : [];
+        const archives = details.entries.filter(entry => entry.isArchive && ['zip','rar','7z'].includes(entry.archiveFormat || '')
+          && Number.isInteger(entry.episodeNumber) && entry.episodeNumber > 0 && entry.episodeNumber <= 5000 && !ancillary.test(entry.name));
         const requestedArchive = options.episode ? archives.filter(entry => entry.episodeNumber === options.episode) : archives;
         const archiveEpisode = options.episode || (archives.some(entry => entry.episodeNumber === options.officialLatest) ? options.officialLatest : Math.max(0,...archives.map(entry => entry.episodeNumber)));
         const chosenArchives = requestedArchive.filter(entry => entry.episodeNumber === archiveEpisode);
@@ -69,24 +67,24 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
           const missingNotice = missingEpisodes.length ? `${episodeRangeLabel(missingEpisodes)}暂未找到。` : '';
           // A batch can use other folders. Describe the share's formats conservatively until the plan selects files.
           const colorFormat = category === 'tv' && !options.episode ? leastCompatibleColor(requestedArchive.map(color)) : color(file);
-          accepted.push({ ...resource, category, colorFormat, batchEligible: category === 'tv' && !options.episode, archivePreparation: { archiveFid: file.fid, episode: archiveEpisode, fileName: file.name, bytes: file.size,
+          accepted.push({ ...resource, category, colorFormat, batchEligible: category === 'tv' && !options.episode, archivePreparation: { archiveFid: file.fid, fileCheck: file.identityTag, episode: archiveEpisode, fileName: file.name, bytes: file.size,
             availableEpisodes, missingEpisodes, summary: `已找到${episodeRangeLabel(availableEpisodes)}的资源`,
             batchEligible: category === 'tv' && !options.episode,
             requiredMembership: '夸克SVIP', notice: category === 'tv' && !options.episode
               ? `${missingNotice}可以检查并补齐缺少的剧集。`
               : `${missingNotice}保存时会确认视频是否可播放，并占用网盘空间。` } });
         }
-        if (!details.entries.some(entry => entry.isVideo && !ancillary.test(entry.name))) {
-          reasons.push('分享中没有识别到正片视频文件。'); return;
-        }
-        if (!validatesCatalogShare({ title: options.title, category, year: options.year || resource.year }, details, resource, { allowUnspecifiedSeason: true })) {
-          reasons.push('无法确认分享中的片名或版本。'); return;
+        if (!details.videoCount) {
+          if (options.episode && archives.length && !chosenArchives.length) reasons.push(`分享中没有第 ${options.episode} 集。`);
+          else if (!chosenArchives.length) reasons.push(raw.entries.some(entry => entry.isVideo || entry.isArchive)
+            ? '无法确认分享中的片名或版本。' : '分享中没有识别到正片视频文件。');
+          return;
         }
         if (options.episode) {
           const files = details.entries.filter(entry => entry.isVideo && entry.episodeNumber === options.episode && !ancillary.test(entry.name)).sort(compareFiles);
           if (!files[0]?.fid) { reasons.push(`分享中没有第 ${options.episode} 集。`); return; }
           accepted.push({ ...resource, category, colorFormat: color(files[0]), verification: { summary: `已核对第 ${options.episode} 集的视频文件`, episodeCount: 1,
-            latestEpisode: options.episode, requestedEpisode: options.episode, selectedFids: [files[0].fid], requiredEpisodes: [options.episode], shareTitle: details.title, complete: true } });
+            latestEpisode: options.episode, requestedEpisode: options.episode, ...fileSelection(details, [files[0].fid]), requiredEpisodes: [options.episode], shareTitle: details.title, complete: true } });
           return;
         }
         const target = category === 'tv' ? options.officialLatest || 0 : options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
@@ -94,17 +92,20 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
         if (!coverage.available) {
           reasons.push('视频文件未标明可识别的集数，暂时无法确认剧集范围。'); return;
         }
+        const unit = category === 'variety' ? '期' : '集';
         accepted.push({ ...resource, category, colorFormat: coverage.colorFormat, batchEligible: category === 'tv', verification: {
-          summary: category === 'movie' ? '已核对可用正片文件' : `已核对${episodeRangeLabel(coverage.episodes)}，共 ${coverage.available} 集`,
+          summary: category === 'movie' ? '已核对可用正片文件' : `已核对${episodeRangeLabel(coverage.episodes, unit)}，共 ${coverage.available} ${unit}`,
           episodeCount: coverage.available, latestEpisode: coverage.actualLatest,
-          selectedFids: category === 'movie' || !coverage.complete ? coverage.selectedFids : undefined,
+          ...fileSelection(details, coverage.selectedFids),
           requiredEpisodes: coverage.episodes,
           shareTitle: details.title, complete: coverage.complete,
-          notice: coverage.complete ? '' : category === 'anime'
+          notice: coverage.complete ? '' : category === 'variety'
+            ? coverage.missing.length ? `${episodeRangeLabel(coverage.missing, '期')}暂未找到。` : '仅保存已核对的期数。'
+            : category === 'anime'
             ? `分段资源，仅包含以上已核对的 ${coverage.available} 集。`
             : coverage.missing.length
-            ? `当前来源缺少 ${coverage.missing.length} 集，仅保存已找到的 ${coverage.available} 集。`
-            : '最新更新集数尚未确认，仅保存已核对的剧集。'
+            ? `当前来源缺少 ${coverage.missing.length} 集，整剧保存前会检查其他来源。`
+            : '暂未确认播出平台更新到了哪一集。'
         } });
       } catch (failure) {
         if (options.signal.aborted) return;
@@ -140,12 +141,13 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
   const details = [
     unavailable ? `${unavailable} 个已失效` : '',
     noVideo ? `${noVideo} 个未识别到正片视频` : '',
-    mismatch ? `${mismatch} 个片名或版本不符` : '',
+    mismatch ? `${mismatch} 个暂未确认作品或版本` : '',
     missingEpisode ? `${missingEpisode} 个未包含第 ${options.episode} 集` : ''
   ].filter(Boolean);
   const counted = unavailable + noVideo + mismatch + missingEpisode;
   const diagnostic = reasons.length > 1 && details.length
     ? `本次核对 ${reasons.length} 个分享：${details.join('，')}。${counted < reasons.length ? explanation : ''}`
     : explanation;
+  if (mismatch > 0 && mismatch === reasons.length) return { resources: [], message: `找到相关分享，暂时无法确认里面是${label}的正片。` };
   return { resources: [], message: `未找到${label}的可用视频。${diagnostic}` };
 }

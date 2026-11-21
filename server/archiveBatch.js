@@ -1,12 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { archiveError, mergeArchiveMetadata, requireArchiveCapacity, supportedArchive } from './archivePolicy.js';
-import { seasonNumber, shareVideoCandidates, validateSourceCandidate } from './libraryPolicy.js';
+import { archiveError, mergeArchiveMetadata, requireArchiveCapacity } from './archivePolicy.js';
+import { matchingShareFiles } from './libraryPolicy.js';
 import { hasConflictingOfficialEditions, searchTitleKey } from './searchTitles.js';
 import { fileSourceColor, leastCompatibleColor, sourceColor, sourceColorRank } from './sourceColor.js';
 
-const ancillary = /预告|花絮|片头|片尾|主题曲|幕后|宣传片/i;
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const titleKey = (input, user) => `${user.username}\n${input.category}\n${searchTitleKey(input.title)}`;
 const sourceFingerprint = card => card ? digest([card.quarkFid, card.quarkShareUrl || '', card.quarkPasscode || '',
@@ -36,7 +35,8 @@ function chooseOfficialWork(progress, input) {
   return [...works].sort((a, b) => b.latestEpisode - a.latestEpisode || String(a.platform).localeCompare(String(b.platform)))[0];
 }
 
-const compareBatchFiles = (a, b) => sourceColorRank(a.colorFormat) - sourceColorRank(b.colorFormat) || a.bytes - b.bytes;
+const compareBatchFiles = (a, b) => sourceColorRank(a.colorFormat) - sourceColorRank(b.colorFormat)
+  || Number(a.kind === 'archive') - Number(b.kind === 'archive') || a.bytes - b.bytes;
 
 /** Cover the most missing episodes, then prefer a compatible release and save space. */
 export function selectArchiveBatch(groups, missingEpisodes) {
@@ -45,7 +45,7 @@ export function selectArchiveBatch(groups, missingEpisodes) {
     const candidates = groups.map(group => {
       const items = group.items.filter(item => missing.has(item.episode));
       const colorFormat = leastCompatibleColor(items.map(item => item.colorFormat ?? sourceColor(group.quality)));
-      return { group, items, colorFormat, bytes: items.reduce((sum, item) => sum + item.bytes, 0) };
+      return { group, items, colorFormat, kind: items[0]?.kind, bytes: items.reduce((sum, item) => sum + item.bytes, 0) };
     }).filter(candidate => candidate.items.length)
       .sort((a, b) => b.items.length - a.items.length || compareBatchFiles(a, b) || a.group.key.localeCompare(b.group.key));
     if (!candidates.length) break;
@@ -146,38 +146,25 @@ export class ArchiveBatchService {
     }));
 
     const workTitleAliases = await aliases;
-    const groups = new Map(), wantedSeason = seasonNumber(input.title);
+    const groups = new Map();
     for (const [index, detail] of details.entries()) {
       if (!detail) continue;
       const row = orderedRows[index], folders = new Map(detail.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
       const color = entry => fileSourceColor(entry, folders, row.note || detail.title);
-      for (const entry of detail.entries) {
-        if (!entry.isArchive || !supportedArchive(entry.name) || !Number.isInteger(entry.episodeNumber)
-          || entry.episodeNumber < 1 || entry.episodeNumber > official.latestEpisode || !Number.isFinite(entry.size) || entry.size <= 0) continue;
-        const folderNames = (entry.ancestorFids || []).map(fid => folders.get(fid) || '').filter(Boolean);
-        const fullName = [...folderNames, entry.name].join('/'), foundSeason = seasonNumber(fullName);
-        if (ancillary.test(fullName) || (wantedSeason && foundSeason && wantedSeason !== foundSeason) || (!wantedSeason && foundSeason > 1)) continue;
-        const key = `${row.url}\n${entry.parentFid || '0'}\narchive`;
+      const files = matchingShareFiles({ title: input.title, category: 'tv', year: editionYear }, detail, { ...row, workTitleAliases });
+      for (const entry of files) {
+        if (!Number.isInteger(entry.episodeNumber) || entry.episodeNumber < 1 || entry.episodeNumber > official.latestEpisode
+          || !Number.isFinite(entry.size) || entry.size <= 0) continue;
+        const kind = entry.isArchive ? 'archive' : 'video';
+        const key = `${row.url}\n${entry.parentFid || '0'}\n${kind}`;
         if (!groups.has(key)) groups.set(key, { key, quality: folders.get(entry.parentFid) || '', episodes: new Map() });
         const group = groups.get(key), previous = group.episodes.get(entry.episodeNumber);
-        const candidate = { kind: 'archive', shareUrl: row.url, archiveFid: entry.fid, episode: entry.episodeNumber,
+        const candidate = { kind, shareUrl: row.url, shareTitle: detail.title, fileCheck: entry.identityTag,
+          ...(entry.isArchive ? { archiveFid: entry.fid } : { fileFid: entry.fid }), episode: entry.episodeNumber,
           bytes: entry.size, quality: group.quality, colorFormat: color(entry) };
-        if (!previous || (compareBatchFiles(candidate, previous) || candidate.archiveFid.localeCompare(previous.archiveFid)) < 0) group.episodes.set(entry.episodeNumber, candidate);
-      }
-      const videos = shareVideoCandidates(detail.entries);
-      if (!validateSourceCandidate({ card: { title: input.title, category: 'tv', year: editionYear },
-        shareTitle: detail.title, episodes: videos, localEpisodes: videos,
-        publication: { source: row.source, workTitle: row.work_title, category: row.category, year: row.year, workTitleAliases } })) continue;
-      for (const video of videos) {
-        const entry = video.entry;
-        if (!Number.isInteger(video.episodeNumber) || video.episodeNumber < 1 || video.episodeNumber > official.latestEpisode
-          || !Number.isFinite(video.size) || video.size <= 0) continue;
-        const key = `${row.url}\n${entry.parentFid || '0'}\nvideo`;
-        if (!groups.has(key)) groups.set(key, { key, quality: folders.get(entry.parentFid) || '', episodes: new Map() });
-        const group = groups.get(key), previous = group.episodes.get(video.episodeNumber);
-        const candidate = { kind: 'video', shareUrl: row.url, fileFid: entry.fid, shareTitle: detail.title,
-          episode: video.episodeNumber, bytes: video.size, quality: group.quality, colorFormat: color(entry) };
-        if (!previous || (compareBatchFiles(candidate, previous) || candidate.fileFid.localeCompare(previous.fileFid)) < 0) group.episodes.set(video.episodeNumber, candidate);
+        if (!previous || (compareBatchFiles(candidate, previous) || entry.fid.localeCompare(previous.fileFid || previous.archiveFid)) < 0) {
+          group.episodes.set(entry.episodeNumber, candidate);
+        }
       }
     }
     const existingEpisodes = [...new Set(library.episodes.map(item => item.episodeNumber).filter(number => number > 0 && number <= official.latestEpisode))].sort((a, b) => a - b);
@@ -328,14 +315,14 @@ export class ArchiveBatchService {
           if (!source) throw archiveError('本轮未确认该集的来源与作品版本，补集已停止。', 'ARCHIVE_WORK_MISMATCH', 409);
           const saved = await this.gateway.importShare({ title: job.input.title, category: 'tv', shareUrl: item.shareUrl,
             passcode: source.password || '', appendToFid: job.targetFid, quarkSelectionFids: [item.fileFid], quarkRequiredEpisodes: [item.episode],
-            quarkVerifiedShareTitle: item.shareTitle }, user);
+            quarkFileChecks: item.fileCheck ? [item.fileCheck] : undefined, quarkVerifiedShareTitle: item.shareTitle }, user);
           media = saved.item;
           const repository = this.userContext(user).mediaRepository;
           const original = repository.all().find(card => card.quarkFid === media.quarkFid);
           repository.save(mergeArchiveMetadata(media, job.input, original));
         } else {
           const child = await this.archiveImport.start({ ...job.input, shareUrl: item.shareUrl, archiveFid: item.archiveFid,
-            episode: item.episode, quarkFid: job.targetFid }, user);
+            episode: item.episode, fileCheck: item.fileCheck, quarkFid: job.targetFid }, user);
           const active = this.archiveImport.active.get(child.id);
           if (active) await active;
           const result = await this.archiveImport.get(child.id, user);
