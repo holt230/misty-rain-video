@@ -4,7 +4,7 @@ import type { ResourceItem } from '../types/search';
 import type { QuarkShareDetails } from './quarkStreamService';
 import { isNonVideoResource } from './resourceFiltering';
 import { compareResourceColors, matchResource, resourceEpisode } from './resourceMatching';
-import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { isExactWorkTitle, workFormat } from '../../server/searchTitles.js';
 import { matchingShareFiles } from '../../server/libraryPolicy.js';
 
 export type PlaybackWork = Pick<CatalogItem, 'title' | 'category'> & { year?: string };
@@ -57,13 +57,14 @@ export function matchesCatalogTitle(item: PlaybackWork, title: string, requireYe
   return pattern.test(title) || normalize(title) === normalize(item.title);
 }
 export function automaticCatalogCandidates(item: PlaybackWork, resources: ResourceItem[]) {
+  const format = workFormat(item.title, item.category);
   return resources.filter(resource => /^https:\/\/pan\.quark\.cn\/s\/[a-zA-Z0-9]+(?:[/?#]|$)/.test(resource.url)
     && (resource.workTitle ? isExactWorkTitle(item.title, resource.workTitle) && (!item.year || item.year === resource.year)
-      && (!resource.category || resource.category === item.category) : matchesCatalogTitle(item, resource.title))
-    && matchResource(item.title, resource.title, item.category).matches
-    && !matchResource(item.title, resource.title, item.category).conflict
+      && (!resource.category || workFormat(item.title, resource.category) === format) : matchesCatalogTitle(item, resource.title))
+    && matchResource(item.title, resource.title, format).matches
+    && !matchResource(item.title, resource.title, format).conflict
     && !(item.category === 'anime' && /短剧|真人/.test(resource.title)))
-    .sort((a, b) => (item.category === 'movie' ? 0
+    .sort((a, b) => (format === 'movie' ? 0
       : (b.verification?.latestEpisode ?? b.latestEpisode ?? resourceEpisode(b.title))
         - (a.verification?.latestEpisode ?? a.latestEpisode ?? resourceEpisode(a.title)))
       || compareResourceColors(a, b));

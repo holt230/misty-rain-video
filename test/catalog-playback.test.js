@@ -9,6 +9,15 @@ const resource = n => ({ title: '测试剧 2026 全1集', url: 'https://pan.quar
 const details = { title: '测试剧', videoCount: 1, entries: [{ fid: 'e1', name: 'S01E01.mp4', isVideo: true, episodeNumber: 1 }] };
 const defaults = { officialLatest: 1, searching: () => false, cancelled: () => false, progress() {} };
 
+test('动画卡片自动查找可使用同名电影片源，正片没有集数也只选择该文件', async () => {
+  const title='测试动画剧场版 星海之战';
+  const resource={title:'测试动画·星海之战 (2026) 4K',workTitle:'测试动画·星海之战',category:'movie',year:'2026',url:'https://pan.quark.cn/s/feature'};
+  const result=await prepareCatalogPlayback({title,year:'2026',category:'anime'},{...defaults,resources:()=>[resource],
+    inspect:async()=>({title,entries:[{fid:'feature',name:'2026.2160p.mkv',isVideo:true,episodeNumber:0}],videoCount:1}),
+    save:async(row,ids)=>{assert.deepEqual(ids,['feature']);assert.deepEqual(row.verification.requiredEpisodes,[]);return true;}});
+  assert.equal(result.status,'saved');
+});
+
 test('checks beyond the first three candidates, skips unavailable and ambiguous shares, and saves only verified content', async () => {
   let inspected = 0, saves = 0;
   const result = await prepareCatalogPlayback(work, {

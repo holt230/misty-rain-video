@@ -40,6 +40,14 @@ test('解压只跳过与已核对压缩包同名的外层目录，正片与集�
  }
 });
 const forum=(title,url)=>({data:[{type:'discussions',id:'188',attributes:{title,createdAt:'2024-11-04T03:25:10Z'},relationships:{firstPost:{data:{id:'1'}}}}],included:[{type:'posts',id:'1',attributes:{contentHtml:'<p><a href="'+url+'">分享链接</a></p>'}}]});
+test('发行论坛可识别没有分类标签的同名剧场版，排除连载和花絮',()=>{
+ const title='斗破苍穹剧场版 双帝之战';
+ const row=name=>forum(name,'https://pan.quark.cn/s/current');
+ const post=row('斗破苍穹剧场版 双帝之战\u200b(2026) 4K 夸克网盘下载');
+ assert.equal(parseForumResources(post,title,'movie')[0].work_title,title);
+ assert.deepEqual(parseForumResources(post,'斗破苍穹','all'),[]);
+ assert.deepEqual(parseForumResources(row(`${title}(2026) 4K 花絮`),title,'movie'),[]);
+});
 test('restored forum source accepts exact anime publication and real share domain, rejects stage films, novels and impostor URLs',()=>{
  const rows=parseForumResources(forum('【动漫】仙逆 (2023) 4K 夸克网盘下载','https://pan.quark.cn/s/current'),'仙逆','anime');
  assert.equal(rows.length,1);assert.equal(rows[0].work_title,'仙逆');assert.equal(rows[0].year,'2023');

@@ -1,5 +1,5 @@
 import type { ResourceItem, SearchCategory, SearchResult } from '../types/search';
-import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { isExactWorkTitle, workFormat } from '../../server/searchTitles.js';
 import { apiUrl } from './appUrl';
 import { authFetch } from './authService';
 import { parseLibraryInput } from './libraryFeedback';
@@ -55,7 +55,7 @@ export class SilentSearchEngine {
         const item = this.parseSingleItem(raw);
         if (!item || isNonVideoResource(item.title, keyword)
           || !(item.workTitle ? isExactWorkTitle(keyword, item.workTitle) : matchesResourceTitle(keyword, item.title))
-          || (category !== 'all' && item.category && item.category !== category) || seen.has(item.url)) continue;
+          || (category !== 'all' && item.category && workFormat(keyword, item.category) !== workFormat(keyword, category)) || seen.has(item.url)) continue;
         seen.add(item.url); items.push(item);
       }
       if (data.partial && !items.length) return this.failed('部分搜索来源请求失败，本次没有取得匹配结果，请重试');
