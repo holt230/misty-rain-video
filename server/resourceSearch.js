@@ -3,6 +3,7 @@ import { CatalogResourceSearch } from './catalogResourceSearch.js';
 import { configuredSearchChannels, configuredSearchUrls } from './searchConfig.js';
 import { ChannelResourceSearch } from './channelResourceSearch.js';
 import { PublicFeedResourceSearch } from './publicFeedResourceSearch.js';
+import { workFormat } from './searchTitles.js';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESULTS = 500;
@@ -87,6 +88,7 @@ export class ResourceSearchService {
   }
 
   async run(keyword, category) {
+    category = workFormat(keyword, category);
     if (this.useCatalog) {
       const names = ['erxiaopan', 'public_guoman4K', 'quark4k', ...this.channels];
       const sources = [];

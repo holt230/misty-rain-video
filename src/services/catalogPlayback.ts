@@ -3,6 +3,7 @@ import type { QuarkShareDetails } from './quarkStreamService';
 import { automaticCatalogCandidates, matchedShareDetails, fileSelection, type PlaybackWork } from './catalogMatching';
 import { resourceCompleteness } from './resourceCompleteness';
 import { resourceEpisode } from './resourceMatching';
+import { workFormat } from '../../server/searchTitles.js';
 
 interface AutomaticPlaybackOptions {
   resources: () => ResourceItem[];
@@ -17,6 +18,7 @@ interface AutomaticPlaybackOptions {
   wait?: () => Promise<void>;
 }
 export async function prepareCatalogPlayback(item: PlaybackWork, options: AutomaticPlaybackOptions) {
+  const format = workFormat(item.title, item.category);
   const now = options.now || Date.now;
   const wait = options.wait || (() => new Promise<void>(resolve => setTimeout(resolve, 250)));
   const deadline = now() + 30_000;
@@ -43,7 +45,7 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
       continue;
     }
     if (resource.verification) {
-      if (resource.verification.complete === false && item.category !== 'anime') {
+      if (resource.verification.complete === false && format !== 'anime') {
         lastSourceError = resource.verification.notice || '只找到部分剧集，可查看实际集数后手动保存。';
         continue;
       }
@@ -76,13 +78,13 @@ export async function prepareCatalogPlayback(item: PlaybackWork, options: Automa
     details = matchedShareDetails(item, details, resource, item.category === 'anime');
     if (!details.videoCount) continue;
     const target = item.category === 'tv' ? options.officialLatest || 0 : resource.latestEpisode || resourceEpisode(resource.title);
-    const coverage = resourceCompleteness(details, item.category, target, resource.title);
-    if (!coverage.complete && !(item.category === 'anime' && coverage.available > 0)) {
+    const coverage = resourceCompleteness(details, format, target, resource.title);
+    if (!coverage.complete && !(format === 'anime' && coverage.available > 0)) {
       if (!bestPartial || coverage.available > bestPartial.available) bestPartial = coverage;
       options.progress(`当前来源实际可识别 ${coverage.available} 集，缺 ${coverage.missing.length} 集，继续核对其他来源…`);
       continue;
     }
-    options.progress(item.category === 'movie' ? '已核对正片文件，正在加入片库…' : `已核对 ${coverage.available} 集视频，正在保存…`);
+    options.progress(format === 'movie' ? '已核对正片文件，正在加入片库…' : `已核对 ${coverage.available} 集视频，正在保存…`);
     const saved = await options.save({ ...resource, verification: { summary: '已核对视频文件', episodeCount: coverage.available,
       latestEpisode: coverage.actualLatest, shareTitle: details.title, requiredEpisodes: coverage.episodes,
       ...fileSelection(details, coverage.selectedFids) } }, coverage.selectedFids);

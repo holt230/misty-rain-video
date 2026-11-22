@@ -11,6 +11,20 @@ const file = n => ({fid:'e'+n,name:`第${n}集.mp4`,isVideo:true,episodeNumber:n
 const details = nums => ({title:'斗破苍穹年番',videoCount:nums.length,entries:nums.map(file)});
 const options = extra => ({title:'斗破苍穹',category:'anime',signal:new AbortController().signal,progress(){},...extra});
 
+test('同一动画剧场版按正片核对：完整同音目录和真实片长支持无片名的文件',async()=>{
+ const title='斗破苍穹剧场版 双帝之战', category='anime', year='2026';
+ const root='D 豆粕藏穷剧场版 双底只占';
+ const video={fid:'movie',name:'2026.2160p.WEB-DL.H.265.DDP2.0.mkv',isVideo:true,episodeNumber:0,duration:8142,size:7264892325,ancestorFids:['root'],identityTag:'proof'};
+ const source={...resource,title,workTitle:'斗破苍穹·双帝之战',year,category:'movie',source:'quark4k',latestEpisode:0};
+ const check=(name=root,row=source,files=[video])=>verifySearchResults([row],options({title,category,year,inspect:async()=>({title:name,videoCount:files.length,entries:[{fid:'root',name,isDirectory:true},...files]})}));
+ const [result]=(await check()).resources;
+ assert.equal(result.category,'anime');assert.equal(result.verification.complete,true);
+ assert.deepEqual(result.verification.selectedFids,['movie']);assert.deepEqual(result.verification.requiredEpisodes,[]);
+ for(const bad of [await check('剧.场(1).版'),await check('D 豆粕藏穷剧场版 另一部'),await check(root,{...source,workTitle:'斗破苍穹年番'}),
+  await check(root,{...source,source:'unknown'}),await check(root,{...source,runtimeMinutes:100}),await check(root,source,[{...video,duration:180}]),
+  await check(root,source,[{...video,name:video.name.replace('2026','2025')}]),await check(root,source,[video,{...video,fid:'other'}])]) assert.equal(bad.resources.length,0);
+});
+
 test('只更新目录而没有更新分享标题，不会丢失已核对的压缩包或纳入其他目录', async () => {
  const title='多喜一家人', year='2026', category='tv';
  const root='D 多洗宜家仁 更新至11集', current='D 多洗宜家仁 更新至13集';

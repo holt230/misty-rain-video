@@ -5,7 +5,7 @@ import { SilentSearchEngine } from '../services/silentSearchEngine';
 import { QuarkStreamService } from '../services/quarkStreamService';
 import { verifySearchResults } from '../services/verifySearchResults';
 import { searchIntent } from '../services/searchIntent';
-import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { isExactWorkTitle, workFormat } from '../../server/searchTitles.js';
 import { chooseOfficialProgress, readOfficialProgress } from '../services/officialProgress';
 
 export function useQuarkTransfer() {
@@ -53,9 +53,10 @@ export function useQuarkTransfer() {
     searchPending.value = true;
     searchError.value = ''; searchNotice.value = ''; quarkResources.value = [];
     try {
-      const [result, official] = await Promise.all([engine.search(intent.title, category), readOfficialProgress(intent.title, category, verification.signal)]);
+      const format = workFormat(intent.title, category);
+      const [result, official] = await Promise.all([engine.search(intent.title, category), readOfficialProgress(intent.title, format, verification.signal)]);
       if (sequence !== searchSequence || !isOpen.value) return;
-      officialProgress.value = chooseOfficialProgress(official, intent.title, category, result.quarkItems, currentMedia.value?.year);
+      officialProgress.value = chooseOfficialProgress(official, intent.title, format, result.quarkItems, currentMedia.value?.year);
       officialCheckedAt.value = official.checkedAt;
       officialNotice.value = officialProgress.value ? '' : official.message || '官方有多个作品版本，暂未确认对应的更新进度。';
       if (result.success) {

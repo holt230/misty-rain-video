@@ -5,6 +5,7 @@ import { matchedShareDetails, fileSelection } from './catalogMatching';
 import { episodeRangeLabel, resourceCompleteness } from './resourceCompleteness';
 import { matchResource, resourceEpisode } from './resourceMatching';
 import { fileSourceColor, leastCompatibleColor, sourceColorRank } from '../../server/sourceColor.js';
+import { workFormat } from '../../server/searchTitles.js';
 
 interface Options {
   title: string;
@@ -51,6 +52,7 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
         const category: CategoryType | undefined = options.category === 'all'
           ? resource.category || matchResource(options.title, resource.title).inferred : options.category;
         if (!category) { reasons.push('无法确认作品类型。'); return; }
+        const format = workFormat(options.title, category);
         const details = matchedShareDetails({ title: options.title, category, year: options.year || resource.year }, raw, resource, true);
         const folders = new Map(details.entries.filter(entry => entry.isDirectory).map(entry => [entry.fid, entry.name]));
         const color = (file: QuarkShareDetails['entries'][number]) => fileSourceColor(file, folders, resource.title);
@@ -92,14 +94,14 @@ export async function verifySearchResults(resources: ResourceItem[], options: Op
             complete: !issue?.partialIssue, ...(issue?.partialIssue ? { notice: '这一期仅找到部分分段。' } : {}) } });
           return;
         }
-        const target = category === 'tv' ? options.officialLatest || 0 : options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
-        const coverage = resourceCompleteness(details, category, target, resource.title);
+        const target = format === 'tv' ? options.officialLatest || 0 : options.officialLatest || resource.latestEpisode || resourceEpisode(resource.title);
+        const coverage = resourceCompleteness(details, format, target, resource.title);
         if (!coverage.available) {
           reasons.push('视频文件未标明可识别的集数，暂时无法确认剧集范围。'); return;
         }
         const unit = category === 'variety' ? '期' : '集';
         accepted.push({ ...resource, category, colorFormat: coverage.colorFormat, batchEligible: category === 'tv', verification: {
-          summary: category === 'movie' ? '已核对可用正片文件' : `已核对${episodeRangeLabel(coverage.episodes, unit)}，共 ${coverage.available} ${unit}`,
+          summary: format === 'movie' ? '已核对可用正片文件' : `已核对${episodeRangeLabel(coverage.episodes, unit)}，共 ${coverage.available} ${unit}`,
           episodeCount: coverage.available, latestEpisode: coverage.actualLatest,
           ...fileSelection(details, coverage.selectedFids),
           requiredEpisodes: coverage.episodes,

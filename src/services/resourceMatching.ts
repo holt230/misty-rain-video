@@ -2,7 +2,7 @@ import type { CategoryType } from '../types/media';
 import type { ResourceItem } from '../types/search';
 import { isNonVideoResource } from './resourceFiltering';
 import { resourceHeading, resourceTitleMatch } from './resourceTitles';
-import { isExactWorkTitle } from '../../server/searchTitles.js';
+import { isExactWorkTitle, isTheatricalTitle, workFormat } from '../../server/searchTitles.js';
 import { sourceColor, sourceColorRank } from '../../server/sourceColor.js';
 
 export function matchResource(keyword: string, title: string, category?: CategoryType) {
@@ -20,7 +20,7 @@ export function matchResource(keyword: string, title: string, category?: Categor
     : live ? 'tv' : anime ? 'anime' : /电影|院线|movie|film/i.test(description) || sequelMovie ? 'movie'
       : episodic ? 'tv' : undefined;
   // Bare episode counts cannot distinguish animation from TV; explicit live-action labels can.
-  const animatedMovie = category === 'movie' && anime && /剧场版|动画电影/.test(description);
+  const animatedMovie = category === 'movie' && anime && (isTheatricalTitle(keyword) || isTheatricalTitle(description));
   const conflict = Boolean(category && inferred && inferred !== category && !(category === 'anime' && inferred === 'tv' && !live) && !animatedMovie);
   const special = /特别篇|剧场版|番外|外传|电影版|\b(?:ova|oad)\b/i.test(tail);
   const subtitle = tail.match(/^[\s\p{P}\p{S}]*([\p{Script=Han}]{2,})/u)?.[1] || '';
@@ -46,7 +46,7 @@ export function rankResourceCandidates(resources: ResourceItem[], keyword: strin
     const match = matchResource(keyword, resource.title, category);
     if (resource.workTitle) {
       match.matches = isExactWorkTitle(keyword, resource.workTitle);
-      match.conflict = Boolean(category && resource.category && resource.category !== category);
+      match.conflict = Boolean(category && resource.category && workFormat(keyword, resource.category) !== workFormat(keyword, category));
       match.otherVersion = match.conflict;
     }
     return { resource, match, episode: resource.verification?.latestEpisode ?? resource.latestEpisode ?? resourceEpisode(resource.title), date: Date.parse(resource.datetime) || 0 };

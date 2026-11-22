@@ -1,5 +1,8 @@
 export const searchTitleKey = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}\p{Cf}]+/gu, '');
 
+export const isTheatricalTitle = title => /剧场版|动画电影/u.test(title);
+export const workFormat = (title, category) => (category === 'anime' || category === 'all') && isTheatricalTitle(title) ? 'movie' : category;
+
 const romanNumerals = ['', 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx'];
 // Limit numeral conversion to a sequel marker after Han text, away from Latin words and years.
 const sequelMarker = /(?<=\p{Script=Han})[\s\p{P}]*([1-9]|1\d|20|[ivx]{1,5})(?=[\s\p{P}]*(?:(?![集话期季部])\p{Script=Han}|$))/iu;
@@ -25,6 +28,11 @@ export function sameWorkEdition(left, right) {
 export function workTitleKeys(title) {
   const text = String(title || '').normalize('NFKC');
   const key = searchTitleKey(text);
+  const feature = text.match(/^(.{2,}?)\s*(?:剧场版|动画电影)(.+)$/u);
+  // Only drop the format label when the work still has its own distinctive subtitle.
+  if (feature && [...searchTitleKey(feature[2])].length >= 2 && /\p{Script=Han}{2}/u.test(searchTitleKey(feature[2]))) {
+    return [key, searchTitleKey(feature[1] + feature[2])];
+  }
   const season = seasonQuery(title);
   if (season) return [...new Set([key, ...[`${season.base}第${season.number}季`, `${season.base}第${season.han}季`, `${season.base}${season.number}`].map(searchTitleKey)])];
   const number = text.match(sequelMarker)?.[1].toLowerCase();
