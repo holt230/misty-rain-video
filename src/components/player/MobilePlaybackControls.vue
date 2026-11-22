@@ -2,10 +2,10 @@
 import type Hls from 'hls.js';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, SlidersHorizontal, Expand, Shrink, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
+import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, MessageSquareText, SlidersHorizontal, Expand, Shrink, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; loading?: boolean; fullscreen?: boolean; nativeVideoFullscreen?: boolean; desktop?: boolean; title?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
-const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'web-fullscreen'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; loading?: boolean; desktop?: boolean; danmakuEnabled?: boolean; title?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
+const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'danmaku'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
 const visible = ref(true);
 const paused = ref(true);
 const muted = ref(false);
@@ -244,10 +244,6 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
       event.preventDefault();
       emit('fullscreen');
     }
-    if (props.desktop && !props.fullscreen && (event.key === 'w' || event.key === 'W')) {
-      event.preventDefault();
-      emit('web-fullscreen');
-    }
     if (event.key === 'm' || event.key === 'M') toggleMute();
   };
   const stage = video.closest('.video-stage') || video;
@@ -322,6 +318,7 @@ onBeforeUnmount(() => {
       <button v-if="expanded" type="button" class="back-control" aria-label="返回播放页面" @click="emit('back')"><ArrowLeft /></button>
       <span v-if="expanded" class="playing-title">{{ title }}</span>
       <span v-else class="desktop-shortcuts">空格 播放/暂停 · ← → 快退/快进</span>
+      <button v-if="expanded && danmakuEnabled !== undefined" type="button" role="switch" aria-label="弹幕" :aria-checked="danmakuEnabled" @click="emit('danmaku')"><MessageSquareText /><span>弹幕</span></button>
       <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
       <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
     </div>
@@ -342,22 +339,12 @@ onBeforeUnmount(() => {
       <select aria-label="播放倍速" :value="speed" @change="changeSpeed"><option v-for="rate in rates" :key="rate" :value="rate">{{ rate }}×</option></select>
       <button
         type="button"
-        :aria-label="fullscreen ? '退出系统全屏' : nativeVideoFullscreen ? '系统视频全屏' : '全屏播放'"
-        :title="fullscreen ? '退出系统全屏 (F)' : nativeVideoFullscreen ? '系统视频全屏，使用系统播放控件' : '全屏播放 (F)'"
+        :aria-label="expanded ? '退出全屏' : '全屏播放'"
+        :title="expanded ? '退出全屏 (F)' : '全屏播放 (F)'"
         @click="emit('fullscreen')"
       >
-        <Shrink v-if="fullscreen" />
+        <Shrink v-if="expanded" />
         <Expand v-else />
-      </button>
-      <button
-        v-if="desktop && !fullscreen"
-        type="button"
-        :aria-label="expanded ? '退出网页全屏 (W)' : '网页全屏 (W)'"
-        :title="expanded ? '退出网页全屏 (W)' : '网页全屏 (W)'"
-        @click="emit('web-fullscreen')"
-      >
-        <Minimize v-if="expanded" />
-        <Maximize v-else />
       </button>
       </div>
     </div>
@@ -381,6 +368,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 
 .control-tools { position: absolute; inset: var(--control-top) var(--control-right) auto var(--control-left); display: flex; align-items: center; justify-content: end; gap: 8px; }
 .control-tools button { display: inline-flex; justify-content: center; align-items: center; gap: 5px; width: auto; min-width: 44px; flex-basis: auto; padding: 8px 12px; border-radius: 14px; background: rgb(0 0 0 / .32); font-size: 12px; }
+.control-tools button[aria-checked='true'] { background: rgb(255 255 255 / .25); }
 .control-tools svg { width: 18px; height: 18px; }
 .control-tools .back-control { width: 44px; flex: 0 0 44px; padding: 10px; border-radius: 50%; }
 .playing-title { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; text-shadow: 0 1px 4px #000; }

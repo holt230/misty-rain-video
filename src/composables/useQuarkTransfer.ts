@@ -69,11 +69,11 @@ export function useQuarkTransfer() {
         });
         if (sequence !== searchSequence || !isOpen.value) return;
         quarkResources.value = checked.resources;
-        searchNotice.value = checked.message || (checked.resources.length ? result.message || '' : '');
+        searchNotice.value = checked.message || (checked.resources.length && result.partial ? '已显示核对通过的资源，部分来源暂时无法访问。' : '');
         searchError.value = checked.error || ''; searchNeedsAuth.value = Boolean(checked.needsAuth);
         if (!checked.resources.length && result.partial && !checked.error) {
           searchNotice.value = '';
-          searchError.value = '片源查询未完成：部分来源无法访问，已访问的分享中未核实到可用视频。请重新搜索；持续失败时需要管理员检查搜索来源。';
+          searchError.value = '片源查询未完成：部分来源暂时无法访问，请稍后重试。';
         }
       } else searchError.value = result.message || '搜索失败，请重试';
     } catch { if (sequence === searchSequence && isOpen.value) searchError.value = '搜索失败，请重试'; }

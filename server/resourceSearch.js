@@ -68,7 +68,7 @@ export class ResourceSearchService {
     this.inFlight = new Map();
     this.catalogSearch = catalogSearch || new CatalogResourceSearch({ fetchImpl, timeoutMs });
     this.channelSearch = channelSearch || new ChannelResourceSearch({ fetchImpl, timeoutMs: Math.min(timeoutMs, 5000) });
-    this.publicFeedSearch = publicFeedSearch || new PublicFeedResourceSearch({ fetchImpl, timeoutMs });
+    this.publicFeedSearch = publicFeedSearch || new PublicFeedResourceSearch({ fetchImpl, timeoutMs: Math.min(timeoutMs, 3500) });
     this.forumSearch = forumSearch || new ForumResourceSearch({ fetchImpl, timeoutMs });
     this.channels = configuredSearchChannels(channels.join(','));
   }

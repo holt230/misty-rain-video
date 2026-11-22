@@ -1,4 +1,4 @@
-// Inspect small byte ranges of a progressive MP4. Only the redundant track's box type
+// Inspect small byte ranges of a progressive MP4. Only the excluded tracks' box types
 // is changed in transit; all sample data, chunk offsets and HTTP byte positions stay valid.
 const blockSize = 8192;
 const maxReads = 24;
@@ -132,18 +132,21 @@ export async function inspectMp4Stereo(fetchRange, signal) {
       const handler = await field(one(media, 'hdlr'), 8, 4);
       if (handler.toString('ascii') !== 'soun') continue;
       const info = await field(one(entries, 'tkhd'), 0, 48);
-      requireLayout(info[0] <= 1 && (info.readUIntBE(1, 3) & 3) === 3 && tracks.length < 2);
+      const flags = info.readUIntBE(1, 3);
+      requireLayout(info[0] <= 1 && (!(flags & 1) || (flags & 3) === 3) && tracks.length < 8);
       const mdhd = one(media, 'mdhd');
       const version = (await field(mdhd, 0, 1))[0];
       requireLayout(version <= 1);
       const language = (await field(mdhd, version ? 32 : 20, 2)).readUInt16BE();
       requireLayout(!media.some(b => b.type === 'elng'));
-      tracks.push({ offset: track.start + 4, group: info.readUInt16BE(info[0] ? 46 : 34), language, media });
+      tracks.push({ offset: track.start + 4, group: info.readUInt16BE(info[0] ? 46 : 34), language, media, enabled: Boolean(flags & 1) });
     }
-    if (tracks.length !== 2) return null;
-    const [first, second] = tracks;
+    // The provider can include disabled alternates; only the active pair can establish a duplicate.
+    const active = tracks.filter(track => track.enabled);
+    if (active.length !== 2) return null;
+    const [first, second] = active;
     if (!first.group || !second.group || first.group === second.group || first.language !== second.language) return null;
-    for (const track of tracks) {
+    for (const track of active) {
       const minf = await contents(one(track.media, 'minf'));
       const samples = one(await contents(one(minf, 'stbl')), 'stsd');
       requireLayout((await field(samples, 4, 4)).readUInt32BE() === 1);
@@ -155,10 +158,10 @@ export async function inspectMp4Stereo(fetchRange, signal) {
       const esds = one(extension, 'esds');
       track.channels = aacChannels(await field(esds, 0, esds.end - esds.data));
     }
-    const surround = tracks.find(t => t.channels === 6);
-    const stereo = tracks.find(t => t.channels === 2);
+    const surround = active.find(t => t.channels === 6);
+    const stereo = active.find(t => t.channels === 2);
     if (!surround || !stereo) return null;
-    return { offset: surround.offset, size, revision };
+    return { offsets: tracks.filter(track => track !== stereo).map(track => track.offset), size, revision };
   } catch {
     return null;
   }
@@ -174,17 +177,18 @@ export function stereoResponse(upstream, plan) {
   let cursor = range.start;
   const body = upstream.body?.pipeThrough(new TransformStream({
     transform(bytes, controller) {
-      const from = Math.max(cursor, plan.offset), to = Math.min(cursor + bytes.length, plan.offset + 4);
-      if (from < to) {
-        const output = new Uint8Array(bytes);
+      let output;
+      for (const offset of plan.offsets) {
+        const from = Math.max(cursor, offset), to = Math.min(cursor + bytes.length, offset + 4);
+        if (from >= to) continue;
+        output ||= new Uint8Array(bytes);
         for (let pos = from; pos < to; pos++) {
-          requireLayout(bytes[pos - cursor] === trackType[pos - plan.offset]);
-          output[pos - cursor] = unusedType[pos - plan.offset];
+          requireLayout(bytes[pos - cursor] === trackType[pos - offset]);
+          output[pos - cursor] = unusedType[pos - offset];
         }
-        bytes = output;
       }
       cursor += bytes.length;
-      controller.enqueue(bytes);
+      controller.enqueue(output || bytes);
     }
   }));
   const headers = new Headers(upstream.headers);

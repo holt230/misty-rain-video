@@ -7,6 +7,8 @@ import { displayComments } from '../../services/danmakuDisplay';
 
 const props = defineProps<{ video: HTMLVideoElement; input: DanmakuInput }>();
 const enabled = ref(localStorage.getItem('misty_rain_danmaku_enabled') === 'true');
+const toggle = () => { enabled.value = !enabled.value; };
+defineExpose({ enabled, toggle });
 const expanded = ref(false);
 const opacity = ref(Math.max(.3, Math.min(1, Number(localStorage.getItem('misty_rain_danmaku_opacity')) || .75)));
 const density = ref<'low' | 'normal'>(localStorage.getItem('misty_rain_danmaku_density') === 'normal' ? 'normal' : 'low');
@@ -235,7 +237,7 @@ onBeforeUnmount(() => {
   </Teleport>
   <div class="danmaku-controls">
     <div class="danmaku-row">
-      <button class="danmaku-toggle" type="button" role="switch" aria-label="弹幕" :aria-checked="enabled" @click="enabled = !enabled"><span aria-hidden="true">弹</span>弹幕{{ enabled ? '开' : '关' }}</button>
+      <button class="danmaku-toggle" type="button" role="switch" aria-label="弹幕" :aria-checked="enabled" @click="toggle"><span aria-hidden="true">弹</span>弹幕{{ enabled ? '开' : '关' }}</button>
       <p role="status">{{ status }}</p>
       <button v-if="enabled && recovery && !matching && !loading && !nativeFullscreen" type="button" class="danmaku-recovery" @click="recovery === 'choose' ? openChooser() : refresh()">{{ recovery === 'choose' ? '选一下片名' : '重试' }}</button>
       <button v-if="enabled" type="button" class="danmaku-settings-toggle" aria-label="弹幕设置" :aria-expanded="expanded" @click="toggleSettings"><SlidersHorizontal aria-hidden="true" /></button>
