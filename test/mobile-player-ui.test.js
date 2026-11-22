@@ -44,9 +44,9 @@ function video() {
 function mount() {
   document.body.innerHTML = '<div class="video-stage"><div id="mount"></div></div>';
   const media = video(); media.tabIndex = 0; document.querySelector('.video-stage').appendChild(media);
-  const props = reactive({ video: markRaw(media), expanded: false, fullscreen: false });
+  const props = reactive({ video: markRaw(media), expanded: false, danmakuEnabled: false });
   let toggles = 0;
-  const app = createApp({ render: () => h(Controls, { ...props, onFullscreen: () => { toggles++; props.fullscreen = !props.fullscreen; props.expanded = props.fullscreen; } }) });
+  const app = createApp({ render: () => h(Controls, { ...props, onFullscreen: () => { toggles++; props.expanded = !props.expanded; }, onDanmaku: () => { props.danmakuEnabled = !props.danmakuEnabled; } }) });
   app.mount('#mount');
   return { app, props, media, get toggles() { return toggles; } };
 }
@@ -76,8 +76,10 @@ test('mobile controls play, pause, seek without time updates overriding a drag, 
     range.dispatchEvent(event('change')); await nextTick(); assert.equal(view.media.currentTime, 65);
     range.value = '80'; range.dispatchEvent(event('input')); await nextTick();
     range.dispatchEvent(event('pointercancel')); await nextTick(); assert.equal(range.value, '65');
-    button('全屏播放').click(); await nextTick(); assert.ok(button('退出系统全屏'));
-    button('退出系统全屏').click(); await nextTick(); assert.equal(view.toggles, 2);
+    button('全屏播放').click(); await nextTick(); assert.ok(button('退出全屏'));
+    button('弹幕').click(); await nextTick(); assert.equal(button('弹幕').getAttribute('aria-checked'), 'true');
+    button('退出全屏').click(); await nextTick(); assert.equal(view.toggles, 2);
+    assert.equal(button('弹幕'), null); assert.equal(view.props.danmakuEnabled, true);
     assert.ok(button('全屏播放'));
   } finally { view.app.unmount(); }
 });
@@ -181,6 +183,7 @@ test('真实旋转进入横屏，竖屏网页全屏不交换尺寸，退出和�
     assert.equal(layout.immersive.value, false);
     layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, true);
     assert.deepEqual(layout.immersiveStyle.value, { '--player-width': '402px', '--player-height': '874px', '--player-top': '0px', '--player-left': '0px', '--player-inset-top': '0px', '--player-inset-right': '0px', '--player-inset-bottom': '0px', '--player-inset-left': '0px' });
+    layout.toggleWebFullscreen(); assert.equal(layout.immersive.value, false);
     resize(874, 402); assert.equal(layout.immersive.value, true);
     layout.toggleWebFullscreen(); resize(874, 380); assert.equal(layout.immersive.value, false);
     resize(402, 874); resize(874, 402); assert.equal(layout.immersive.value, true);

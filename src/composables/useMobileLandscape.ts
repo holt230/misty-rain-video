@@ -39,7 +39,7 @@ export function useMobileLandscape(mobile: boolean, isOpen: () => boolean, isFul
     }
   }
   function toggleWebFullscreen() {
-    if (immersive.value) { explicit.value = false; dismissed.value = true; }
+    if (immersive.value) { explicit.value = false; dismissed.value = landscape.value; }
     else { sync(); explicit.value = true; }
   }
   function resetLandscape() { explicit.value = false; dismissed.value = false; }

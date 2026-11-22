@@ -53,7 +53,7 @@ const inspect = bytes => inspectMp4Stereo(r => rangeResponse(bytes, r), AbortSig
 test('only same-language AAC stereo + surround tracks that are both on in different groups qualify', async () => {
   const surround = audio(6), stereo = audio(2);
   const bytes = movie(surround, stereo), plan = await inspect(bytes);
-  assert.equal(plan.offset, bytes.indexOf(surround) + 4);
+  assert.deepEqual(plan.offsets, [bytes.indexOf(surround) + 4]);
   for (const sample of [movie(stereo), movie(surround), movie(stereo, stereo),
     movie(stereo, audio(6, { group: 2 })), movie(stereo, audio(6, { enabled: false })),
     movie(stereo, audio(6, { language: 1 })), movie(stereo, surround, audio(1)),
@@ -63,11 +63,14 @@ test('only same-language AAC stereo + surround tracks that are both on in differ
   assert.equal(await inspectMp4Stereo(() => new Response(bytes), AbortSignal.timeout(100)), null);
 });
 
-test('partial and split ranges hide precisely the extra track and preserve size, seek offsets, and video payload', async () => {
-  const bytes = movie(audio(2), audio(6)), plan = await inspect(bytes);
+test('a surround/stereo pair with disabled alternates keeps only the active stereo, without changing range offsets', async () => {
+  const surround = audio(6, { group: 1 });
+  const inactive = [audio(2, { group: 2, enabled: false }), audio(2, { group: 3, enabled: false })];
+  const bytes = movie(surround, ...inactive, audio(2, { group: 4 })), plan = await inspect(bytes);
+  assert.deepEqual(plan.offsets, [surround, ...inactive].map(track => bytes.indexOf(track) + 4));
   const expected = Buffer.from(bytes);
-  expected.write('free', plan.offset);
-  const splits = [0, plan.offset + 1, plan.offset + 3, bytes.length];
+  for (const offset of plan.offsets) expected.write('free', offset);
+  const splits = [0, ...plan.offsets.flatMap(offset => [offset + 1, offset + 3]), bytes.length];
   const pieces = [];
   for (let i = 1; i < splits.length; i++) {
     const start = splits[i - 1], end = splits[i] - 1;

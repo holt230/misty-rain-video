@@ -63,6 +63,7 @@ interface SoundEffectOption {
 const toast = useToast();
 const videoRef = ref<HTMLVideoElement | null>(null);
 const playerWindowRef = ref<HTMLElement | null>(null);
+const danmakuControls = ref<InstanceType<typeof DanmakuControls> | null>(null);
 const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
@@ -187,9 +188,24 @@ let episodeCompletionHandled = false;
 const videoInstanceKey = ref(0);
 const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px), (max-height: 600px) and (pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-const { fullscreen, nativeVideoFullscreen, notice: fullscreenNotice, toggleFullscreen, exitFullscreen } =
-  usePlayerFullscreen(() => playerWindowRef.value, () => videoRef.value, () => props.isOpen, isMobilePlaybackDevice);
+const { fullscreen, notice: fullscreenNotice, toggleFullscreen, exitFullscreen } =
+  usePlayerFullscreen(() => playerWindowRef.value, () => videoRef.value, () => props.isOpen);
 const { immersive, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen, () => fullscreen.value);
+let fullscreenRequestPending = false;
+const toggleImmersivePlayback = async () => {
+  if (fullscreenRequestPending) return;
+  if (fullscreen.value) { await exitFullscreen(); return; }
+  if (isMobilePlaybackDevice || immersive.value || !document.fullscreenEnabled || !playerWindowRef.value?.requestFullscreen) {
+    toggleWebFullscreen();
+    return;
+  }
+  fullscreenRequestPending = true;
+  try { await toggleFullscreen(); } finally { fullscreenRequestPending = false; }
+  if (!fullscreen.value && props.isOpen && !immersive.value) {
+    fullscreenNotice.value = '';
+    toggleWebFullscreen();
+  }
+};
 usePlaybackChrome(() => props.isOpen && immersive.value);
 
 const soundEffectOptions: SoundEffectOption[] = [
@@ -648,7 +664,10 @@ const attachSource = async (
     const controller = stereoProbe;
     if (shouldPlay && !playbackHasStarted.value) playbackStarting.value = true;
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(stereoCheckTimeoutMs)]);
-    source = await (warmedStereo || checkPlaybackStereo(source, signal, session.value?.sessionId, currentEpisode.value?.fid));
+    const warmed = await warmedStereo;
+    if (attachSequence !== sourceAttachSequence || !props.isOpen) return;
+    // A failed preflight must not lock the next episode to its original audio.
+    source = warmed?.singleStereo ? warmed : await checkPlaybackStereo(source, signal, session.value?.sessionId, currentEpisode.value?.fid);
     if (attachSequence !== sourceAttachSequence || !props.isOpen) return;
   }
   stereoStream.value = source.singleStereo ? source : null;
@@ -1512,9 +1531,9 @@ defineExpose({ retry, dismissLayer });
 
             <MobilePlaybackControls
               v-if="videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :loading="playbackStarting" :hls="hlsRef" :username="username" :expanded="immersive" :fullscreen="fullscreen" :native-video-fullscreen="nativeVideoFullscreen" :desktop="!isMobilePlaybackDevice"
+              :video="videoRef" :loading="playbackStarting" :hls="hlsRef" :username="username" :expanded="immersive" :desktop="!isMobilePlaybackDevice" :danmaku-enabled="danmakuControls?.enabled"
               :title="`${media.title}${currentEpisode ? ' · ' + currentEpisode.episodeTitle : ''}`" :picture-fit="pictureFit"
-              @fullscreen="toggleFullscreen" @web-fullscreen="toggleWebFullscreen" @back="back" @picture-fit="pictureFit = pictureFit === 'contain' ? 'cover' : 'contain'"
+              @fullscreen="toggleImmersivePlayback" @danmaku="danmakuControls?.toggle()" @back="back" @picture-fit="pictureFit = pictureFit === 'contain' ? 'cover' : 'contain'"
               @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
             />
             <p v-if="fullscreenNotice" class="fullscreen-notice" role="status">{{ fullscreenNotice }}</p>
@@ -1584,6 +1603,7 @@ defineExpose({ retry, dismissLayer });
           <div v-if="phase === 'ready'" class="playback-actions">
             <DanmakuControls
               v-if="videoRef && currentEpisode && media"
+              ref="danmakuControls"
               :video="videoRef"
               :input="{ mediaKey: media.id, title: media.title, category: media.category, episodeNumber: currentEpisode.episodeNumber, episodeTitle: currentEpisode.episodeTitle }"
             />

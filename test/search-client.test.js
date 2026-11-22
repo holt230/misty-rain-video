@@ -86,6 +86,14 @@ test('来源只返回一个非视频分享且标记部分失败时，显示查�
  view.closeTransferModal();
 });
 
+test('一个来源超时仍展示已核对的剧集，并提示另有来源暂不可用',async t=>{
+ mockFetch(t,async url=>String(url).includes('share-details')?shareResponse('斗破苍穹年番',2):response([{...row('斗破苍穹年番'),work_title:'斗破苍穹年番',category:'anime'}],{partial:true,message:'查询未完成'}));
+ const view=useQuarkTransfer();await view.openTransferModal({id:'search-partial-ok',title:'斗破苍穹',category:'anime'});
+ assert.deepEqual(view.quarkResources.value[0].verification.requiredEpisodes,[1,2]);
+ assert.equal(view.searchError.value,'');assert.match(view.searchNotice.value,/已显示核对通过的资源/);
+ view.closeTransferModal();
+});
+
 test('真实作品元数据219集贯穿客户端，不依赖合并标题猜测，类型传给服务端',async t=>{
  mockFetch(t,async url=>{assert.equal(new URL(url,'http://localhost').searchParams.get('category'),'anime');return response([{...row('斗破苍穹年番'),work_title:'斗破苍穹年番',category:'anime',update_text:'更新至第219集',latest_episode:219,year:'2022'}]);});
  const result=await new SilentSearchEngine().search('斗破苍穹','anime');assert.equal(result.total,1);assert.equal(result.items[0].latestEpisode,219);assert.equal(result.items[0].updateText,'更新至第219集');assert.equal(result.items[0].category,'anime');
