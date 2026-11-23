@@ -3,6 +3,13 @@ export const searchTitleKey = value => String(value || '').normalize('NFKC').toL
 export const isTheatricalTitle = title => /剧场版|动画电影/u.test(title);
 export const workFormat = (title, category) => (category === 'anime' || category === 'all') && isTheatricalTitle(title) ? 'movie' : category;
 
+// Verified title variants of this edition; the franchise name alone never matches.
+const tangmen = {
+  title: '斗罗大陆II绝世唐门', year: '2023', lookup: '绝世唐门',
+  aliases: ['斗罗大陆II绝世唐门', '斗罗大陆2绝世唐门', '斗罗大陆绝世唐门', '绝世唐门', '斗罗大陆2 斗罗大陆之绝世唐门'].map(searchTitleKey)
+};
+export const knownAnimeEdition = (title, category) => ['all', 'anime'].includes(category) && tangmen.aliases.includes(searchTitleKey(title)) ? tangmen : undefined;
+
 const romanNumerals = ['', 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx'];
 // Limit numeral conversion to a sequel marker after Han text, away from Latin words and years.
 const sequelMarker = /(?<=\p{Script=Han})[\s\p{P}]*([1-9]|1\d|20|[ivx]{1,5})(?=[\s\p{P}]*(?:(?![集话期季部])\p{Script=Han}|$))/iu;
@@ -28,6 +35,8 @@ export function sameWorkEdition(left, right) {
 export function workTitleKeys(title) {
   const text = String(title || '').normalize('NFKC');
   const key = searchTitleKey(text);
+  const edition = knownAnimeEdition(text, 'anime');
+  if (edition) return [...new Set([key, ...edition.aliases])];
   const feature = text.match(/^(.{2,}?)\s*(?:剧场版|动画电影)(.+)$/u);
   // Only drop the format label when the work still has its own distinctive subtitle.
   if (feature && [...searchTitleKey(feature[2])].length >= 2 && /\p{Script=Han}{2}/u.test(searchTitleKey(feature[2]))) {
@@ -52,6 +61,7 @@ export function isExactWorkTitle(keyword, title) {
   const wanted = searchTitleKey(keyword);
   const actual = searchTitleKey(title);
   if (!wanted || !actual) return false;
+  if (knownAnimeEdition(keyword, 'anime')) return sameWorkEdition(keyword, title);
   return sameWorkEdition(keyword, title) || workTitleKeys(keyword).some(key => actual.startsWith(key)
     && /^(?:年番|第[\d一二三四五六七八九十百]+季|s\d+|国语版|粤语版|日语版|英语版)+$/i.test(actual.slice(key.length)));
 }

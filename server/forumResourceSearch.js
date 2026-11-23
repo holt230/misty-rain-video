@@ -1,13 +1,13 @@
 import { parse } from 'parse5';
 import { readWebResponseText } from './http.js';
-import { isExactWorkTitle, isTheatricalTitle } from './searchTitles.js';
+import { isExactWorkTitle, isTheatricalTitle, knownAnimeEdition } from './searchTitles.js';
 
 const ORIGIN = 'https://quark4k.com';
 const fail = (message, code = 'RESOURCE_SEARCH_INVALID_RESPONSE') => Object.assign(new Error(message), { code, statusCode: 503 });
 const text = node => node?.nodeName === '#text' ? node.value : (node?.childNodes || []).map(text).join('');
 const workName = value => String(value || '').normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/^(?:【(?:国漫|动漫|动画|日漫|动画电影|电影|电视剧|剧集|综艺)】\s*)+/, '')
-  .split(/\s*[\[(](?:19|20)\d{2}[\])]/)[0].replace(/\s+(?:4K|1080P|2160P|蓝光|高清|夸克).*$/i, '').trim();
-const categoryOf = title => /【(?:动画电影|电影)】/.test(title) ? 'movie' : /【(?:国漫|动漫|动画|日漫)】/.test(title) ? 'anime' : /【(?:电视剧|剧集)】/.test(title) ? 'tv' : /【综艺】/.test(title) ? 'variety' : undefined;
+  .split(/\s*[\[(](?:19|20)\d{2}[\])]/)[0].replace(/^动漫\s*《(.+)》$/u, '$1').replace(/\s+(?:4K|1080P|2160P|蓝光|高清|夸克).*$/i, '').trim();
+const categoryOf = title => /【(?:动画电影|电影)】/.test(title) ? 'movie' : /【(?:国漫|动漫|动画|日漫)】|^动漫\s*《/.test(title) ? 'anime' : /【(?:电视剧|剧集)】/.test(title) ? 'tv' : /【综艺】/.test(title) ? 'variety' : undefined;
 
 export function parseForumResources(payload, keyword, category = 'all') {
   if (!Array.isArray(payload?.data) || (payload.data.length > 0 && !Array.isArray(payload?.included))) throw fail('公开资源论坛响应异常');
@@ -33,7 +33,9 @@ export function parseForumResources(payload, keyword, category = 'all') {
             ? url.pathname.match(/^\/s\/([a-zA-Z0-9]+)\/?$/)?.[1] : '';
           if (shareId) {
             const shareUrl = 'https://pan.quark.cn/s/' + shareId;
-            const candidate = { url: shareUrl, note: title, work_title: work, category: kind, year,
+            // This verified forum post labels the title by its release post, not the original broadcast year.
+            const edition = row.id === '204' && year === '2024' && knownAnimeEdition(work, kind);
+            const candidate = { url: shareUrl, note: title, work_title: edition ? edition.title : work, category: kind, year: edition ? edition.year : year,
               password: url.searchParams.get('pwd') || body.match(/(?:提取码|访问码)\s*[:：]?\s*([a-zA-Z0-9]{4})/)?.[1] || '',
               datetime: row.attributes?.createdAt || '', source: 'quark4k', source_url: ORIGIN + '/d/' + row.id };
             const previous = found.get(shareUrl);
@@ -57,7 +59,8 @@ export class ForumResourceSearch {
       return await Promise.race([
         new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(fail('公开资源论坛查询超时', 'RESOURCE_SEARCH_TIMEOUT')); }, this.timeoutMs); }),
         (async () => {
-          const params = new URLSearchParams({ 'filter[q]': keyword, 'page[limit]': '30', include: 'mostRelevantPost,firstPost' });
+          const lookup = knownAnimeEdition(keyword, category)?.lookup || keyword;
+          const params = new URLSearchParams({ 'filter[q]': lookup, 'page[limit]': '30', include: 'mostRelevantPost,firstPost' });
           const response = await this.fetchImpl(ORIGIN + '/api/discussions?' + params, { signal: controller.signal, redirect: 'error',
             headers: { Accept: 'application/json', 'User-Agent': 'MistyRainVideo/1.0', Referer: ORIGIN + '/' } });
           if (!response.ok) throw fail('公开资源论坛返回 HTTP ' + response.status, 'RESOURCE_SEARCH_HTTP_ERROR');

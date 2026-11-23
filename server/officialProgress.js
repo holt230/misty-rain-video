@@ -1,5 +1,5 @@
 import { TencentCatalog, parseTencentEpisodes } from './danmaku/tencentCatalog.js';
-import { isExactWorkTitle } from './searchTitles.js';
+import { isExactWorkTitle, knownAnimeEdition } from './searchTitles.js';
 import { readWebResponseText } from './http.js';
 import { discoverOfficialPlatforms, officialPlatformUrl, OfficialPlatformCatalog } from './officialPlatforms.js';
 
@@ -83,6 +83,7 @@ export async function confirmOfficialLatest(catalog, work) {
 export class OfficialProgressService {
   constructor({ fetchImpl = globalThis.fetch, timeoutMs = 3500 } = {}) { this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; }
   async lookup(keyword, { category = 'all', signal, known = [] } = {}) {
+    keyword = knownAnimeEdition(keyword, category)?.title || keyword;
     const controller = new AbortController();
     const cancel = () => controller.abort();
     signal?.addEventListener('abort', cancel, { once: true });
