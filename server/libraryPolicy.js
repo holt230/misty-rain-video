@@ -35,7 +35,9 @@ export const isAncillaryVideoPath = value => String(value || '').split('/').some
   /(?:^|[\s._\-【\[(（])(?:预告片?|花絮|幕后花絮|宣传片|广告|推广|片头|片尾|资源说明)(?=[\s._\-】\])）\d]|$)/.test(part));
 
 const cleanTitle = value => searchTitleKey(value);
-const releaseTags = /^(?:(?:19|20)\d{2}|[248]k|(?:360|480|576|720|1080|1440|2160)p|(?:8|10|12)bit|(?:24|25|30|48|50|60|120)(?:fps|帧率?)|hq|uhd|fhd|hdr(?:10plus|10|vivid)?|sdr|dv|dolbyvision|杜比视界|杜比全景声|atmos|ddp?(?:20|[257]1)?|dtshdma|dts(?:[257]1)?|aac|truehd|flac|ac3|eac3|h26[45]|x26[45]|hevc|avc|av1|webdl|webrip|bluray|bdrip|remux|web|正片|高清|超清|蓝光|原盘|中字|中文字幕|国语|粤语|双语|简繁|无水印|全集|完结|更新至?\d+集?|全\d+集|\d+集全?|(?:高|低)码率?)*$/i;
+const animeReleaseMonth = /((?:19|20)\d{2})[.-](?:0?[1-9]|1[0-2])$/u;
+const isReadingTitle = value => /^(?=[\p{Script=Han}\d]{2,24}$)\p{Script=Han}+(?:[1-9]\p{Script=Han}+)?$/u.test(value);
+const releaseTags = /^(?:(?:19|20)\d{2}|[248]k|(?:360|480|576|720|1080|1440|2160)p|(?:8|10|12)bit|(?:24|25|30|48|50|60|120)(?:fps|帧率?)|hq|uhd|fhd|hdr(?:10plus|10|vivid)?|sdr|dv|dolbyvision|杜比视界|杜比全景声|atmos|ddp?(?:20|[257]1)?|dtshdma|dts(?:[257]1)?|aac|truehd|flac|ac3|eac3|h26[45]|x26[45]|hevc|avc|av1|webdl|webrip|bluray|bdrip|remux|web|正片|高清|超清|臻彩|蓝光|原盘|中字|中文字幕|国语|粤语|双语|简繁|无水印|全集|完结|更新至?\d+集?|全\d+集|\d+集全?|(?:高|低)码率?)*$/i;
 const titleMatches = (title, value) => {
   const expected = cleanTitle(title), actual = cleanTitle(value);
   return expected.length >= 2 && actual.startsWith(expected) && releaseTags.test(actual.slice(expected.length));
@@ -62,18 +64,18 @@ const directoryKey = value => String(value || '').normalize('NFKC').trim().toLow
 
 // Strip only a complete release suffix. A numeric update label can legitimately differ
 // between the share header and its newer directory listing.
-function readingMatches(title, directory, year, allowRomanized, seasonScoped = false) {
+function readingMatches(title, directory, year, allowRomanized, seasonScoped = false, datedDirectory = false) {
   const titleKey = cleanTitle(title);
-  if (!/^[\p{Script=Han}]{2,24}$/u.test(titleKey)) return false;
+  if (!isReadingTitle(titleKey)) return false;
   const marked = /^(?:[A-Z]\s+|【[A-Z]】)/i.test(directory);
   const label = cleanTitle(directory.replace(/^(?:[A-Z]\s+|【[A-Z]】)\s*/i, ''));
   const dated = years(directory).includes(year);
-  if (!marked && !dated) return false;
+  if (!marked && !dated && !datedDirectory) return false;
   const expected = pinyin(titleKey, { type: 'array', toneType: 'none' });
   if (allowRomanized && dated && label === expected.join('') + year) return true;
   const chars = [...label], length = [...titleKey].length;
   const text = chars.slice(0, length).join('');
-  if (chars.length < length || !/^[\p{Script=Han}]+$/u.test(text) || !releaseTags.test(chars.slice(length).join(''))) return false;
+  if (chars.length < length || !isReadingTitle(text) || !releaseTags.test(chars.slice(length).join(''))) return false;
   const readings = polyphonic(text, { type: 'array', toneType: 'none' });
   const differences = expected.flatMap((syllable, i) => readings[i]?.includes(syllable) ? [] : [i]);
   if (!differences.length) return true;
@@ -98,11 +100,21 @@ export function matchingShareFiles(work, details, publication = {}, { allowUnspe
     && ['erxiaopan', 'quark4k'].includes(publication.source));
   const titles = [work.title, postedTitle, ...(trusted ? publication.workTitleAliases || [] : [])].filter(Boolean).flatMap(workTitleKeys);
   const named = text => titles.some(title => titleMatches(title, text) || titleMatches(title, text.replace(seasonMarker, '')));
+  const postedReadings = work.category === 'anime' ? workTitleKeys(postedTitle) : [postedTitle];
+  const releaseDirectoryTitles = new Map();
+  const datedDirectoryTitle = name => {
+    if (!trusted || work.category !== 'anime' || !animeReleaseMonth.test(name)) return name;
+    if (releaseDirectoryTitles.has(name)) return releaseDirectoryTitles.get(name);
+    const bare = name.replace(animeReleaseMonth, '').trim();
+    const title = named(bare) || postedReadings.some(title => readingMatches(title, bare, year, false, false, true)) ? bare : name;
+    releaseDirectoryTitles.set(name, title);
+    return title;
+  };
   const conflict = text => supplemental.test(text.replace(work.title, ''))
     || /特别篇|番外|外传/.test(text.replace(work.title, ''))
     || (!theatrical && isTheatricalTitle(text.replace(work.title, '')))
     || (year && years(text).some(y => y !== year && !work.title.includes(y)));
-  if (conflict(share)) return [];
+  if (conflict(datedDirectoryTitle(share))) return [];
   const wanted = seasonsIn(work.title)[0] ?? seasonsIn(postedTitle)[0];
   const rootSeasons = seasonsIn(share);
   const season = wanted ?? (allowUnspecifiedSeason && work.category !== 'tv' ? rootSeasons[0] : 1);
@@ -114,13 +126,14 @@ export function matchingShareFiles(work, details, publication = {}, { allowUnspe
   const evidence = new Map();
   function directoryEvidence(name) {
     if (evidence.has(name)) return evidence.get(name);
+    const datedTitle = datedDirectoryTitle(name);
     const prefixed = name.replace(/^(?:[a-z]\s+|【[a-z]】)\s*/i, '');
     const prefix = name.match(/^[A-Z]\s+([\p{Script=Han}]{2,})$/u)?.[1];
     const publicPrefix = publication.source === 'public_guoman4K' && prefix && work.title.startsWith(prefix)
       && prefix.length >= Math.ceil(work.title.length / 2) && titleMatches(work.title, (publication.title || '').replace(/^(?:【[^】]+】\s*)+/u, ''));
     let match = '';
-    if (named(name) || (postedTitle && named(prefixed)) || publicPrefix || (knownAlias && knownAlias === directoryKey(name))) match = 'title';
-    else if (trusted && [postedTitle, knownAlias, ...(theatrical ? [work.title] : [])].filter(Boolean).some(title => readingMatches(title, name, year, work.category !== 'movie'))) {
+    if (datedTitle !== name || named(name) || (postedTitle && named(prefixed)) || publicPrefix || (knownAlias && knownAlias === directoryKey(name))) match = 'title';
+    else if (trusted && [...postedReadings, knownAlias, ...(theatrical ? [work.title] : [])].filter(Boolean).some(title => readingMatches(title, name, year, work.category !== 'movie'))) {
       match = work.category !== 'movie' ? 'title' : theatrical && isTheatricalTitle(name) ? 'feature-reading' : 'verify-runtime';
     } else if (trusted && seasonTitle && (titleMatches(seasonTitle.base, prefixed) || readingMatches(seasonTitle.base, name, year, false, true))) {
       match = 'verify-season';
@@ -156,7 +169,7 @@ export function matchingShareFiles(work, details, publication = {}, { allowUnspe
     if (archive ? (!['anime', 'tv'].includes(work.category) || !postedTitle || !/\.(zip|rar|7z)$/i.test(entry.name)) : !entry.isVideo) return false;
     const stem = entry.name.normalize('NFKC').replace(/\.[a-z0-9]{2,5}$/i, '');
     const parents = entry.pathNames || (entry.ancestorFids || []).map(id => folders.get(id));
-    if (parents.some(part => !part) || conflict(stem) || parents.some(conflict)) return false;
+    if (parents.some(part => !part) || conflict(stem) || parents.some(part => conflict(datedDirectoryTitle(part)))) return false;
     const fileSeasons = [...rootSeasons, ...parents.flatMap(seasonsIn), ...seasonsIn(stem), ...(entry.seasonNumber ? [entry.seasonNumber] : [])];
     if (wrongSeason(fileSeasons)) return false;
     let context = rootMatch;

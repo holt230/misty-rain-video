@@ -11,6 +11,29 @@ const file = n => ({fid:'e'+n,name:`第${n}集.mp4`,isVideo:true,episodeNumber:n
 const details = nums => ({title:'斗破苍穹年番',videoCount:nums.length,entries:nums.map(file)});
 const options = extra => ({title:'斗破苍穹',category:'anime',signal:new AbortController().signal,progress(){},...extra});
 
+test('仙逆真实目录：连载月份和臻彩标记不丢正片，错年、错季、ISO 和花絮仍不通过',async()=>{
+ const source={...resource,title:'仙逆',workTitle:'仙逆',year:'2023',category:'anime',source:'erxiaopan',latestEpisode:168};
+ const video={...file(168),name:'E168.mkv',ancestorFids:['root']};
+ const zip={fid:'z168',name:'168.zip',isArchive:true,archiveFormat:'zip',episodeNumber:168,ancestorFids:['root']};
+ const check=(root,child,entries,row=source)=>verifySearchResults([row],options({title:'仙逆',year:'2023',category:'anime',episode:168,
+  inspect:async()=>({title:root,videoCount:entries.filter(e=>e.isVideo).length,entries:[{fid:'root',name:child,isDirectory:true},...entries]})}));
+ const usable=await check('仙尼2026-7','仙尼2026-7',[video,{...zip,fid:'iso',name:'E168.iso',archiveFormat:'iso'}]);
+ assert.deepEqual(usable.resources[0].verification.selectedFids,['e168']);assert.equal(usable.resources[0].archivePreparation,undefined);
+ const packed=await check('X 嫌你 4K 臻彩 更新至154集','X 嫌你 4K 臻彩 更新至168集',[zip],{...source,source:'quark4k'});
+ assert.equal(packed.resources[0].archivePreparation.archiveFid,'z168');assert.equal(packed.resources[0].verification,undefined);
+ for(const bad of [await check('不相关2026-7','不相关2026-7',[video]),await check('仙尼2026','仙尼2026',[video]),await check('仙尼2026-7','仙尼2026-7',[{...video,name:'E168 2026.mkv'}]),await check('仙尼2026-7','仙尼2026-7',[{...video,name:'E168 预告.mkv'}]),await check('仙尼2026-7','仙尼2026-7',[video],{...source,source:'unknown'})])assert.deepEqual(bad.resources,[]);
+});
+
+test('绝世唐门整段编号目录支持实际180集待解压，作品和续作编号必须匹配',async()=>{
+ const root='D 豆罗搭路2绝食汤们 4K臻彩 更新至180集';
+ const row={...resource,title:'斗罗大陆II绝世唐门',workTitle:'斗罗大陆II绝世唐门',year:'2023',category:'anime',source:'quark4k',latestEpisode:180};
+ const check=(title,dir)=>verifySearchResults([row],options({title,year:'2023',category:'anime',episode:180,inspect:async()=>({title:dir,videoCount:0,entries:[
+  {fid:'root',name:dir,isDirectory:true},{fid:'z180',name:'180.zip',isArchive:true,archiveFormat:'zip',episodeNumber:180,ancestorFids:['root']}]})}));
+ assert.equal((await check('斗罗大陆绝世唐门',root)).resources[0].archivePreparation.episode,180);
+ assert.deepEqual((await check('斗罗大陆绝世唐门',root.replace('2','3'))).resources,[]);
+ assert.deepEqual((await check('斗罗大陆3绝世唐门',root)).resources,[]);
+});
+
 test('同一动画剧场版按正片核对：完整同音目录和真实片长支持无片名的文件',async()=>{
  const title='斗破苍穹剧场版 双帝之战', category='anime', year='2026';
  const root='D 豆粕藏穷剧场版 双底只占';

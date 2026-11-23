@@ -40,6 +40,15 @@ test('解压只跳过与已核对压缩包同名的外层目录，正片与集�
  }
 });
 const forum=(title,url)=>({data:[{type:'discussions',id:'188',attributes:{title,createdAt:'2024-11-04T03:25:10Z'},relationships:{firstPost:{data:{id:'1'}}}}],included:[{type:'posts',id:'1',attributes:{contentHtml:'<p><a href="'+url+'">分享链接</a></p>'}}]});
+test('绝世唐门可按验证过的别名识别论坛帖子，年份修正只作用于已核实帖子',()=>{
+ const p=forum('动漫《斗罗大陆2 斗罗大陆之绝世唐门》 (2024) 4K 夸克网盘下载','https://pan.quark.cn/s/current');
+ p.data[0].id='204';
+ for(const q of ['斗罗大陆绝世唐门','斗罗大陆2绝世唐门','斗罗大陆Ⅱ绝世唐门','绝世唐门']){
+  const [r]=parseForumResources(p,q,'anime');assert.equal(r.work_title,'斗罗大陆II绝世唐门');assert.equal(r.year,'2023');
+ }
+ for(const q of ['斗罗大陆','斗罗大陆3绝世唐门','斗罗大陆剧场版 剑道尘心'])assert.deepEqual(parseForumResources(p,q,'anime'),[]);
+ p.data[0].id='205';assert.equal(parseForumResources(p,'绝世唐门','anime')[0].year,'2024');
+});
 test('发行论坛可识别没有分类标签的同名剧场版，排除连载和花絮',()=>{
  const title='斗破苍穹剧场版 双帝之战';
  const row=name=>forum(name,'https://pan.quark.cn/s/current');
