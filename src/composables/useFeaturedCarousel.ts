@@ -68,17 +68,20 @@ export function useFeaturedCarousel(items: () => string[], active: () => boolean
     },
     release: (event?: PointerEvent) => {
       touching.value = false;
+      let swiped = false;
       if (startX !== null && startY !== null && event && typeof event.clientX === 'number') {
         const deltaX = event.clientX - startX;
         const deltaY = event.clientY - startY;
         const elapsed = Date.now() - startTime;
         if (Math.abs(deltaX) >= 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2 && elapsed < 800) {
+          swiped = true;
           if (deltaX < 0) select(index.value + 1);
           else select(index.value - 1);
         }
       }
       startX = null;
       startY = null;
+      return swiped;
     }
   };
 }

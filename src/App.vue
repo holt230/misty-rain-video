@@ -93,6 +93,9 @@ const {
 
 const searchPageRef = ref<InstanceType<typeof SearchPage> | null>(null);
 const { feeds: catalogFeeds, browse: catalogBrowse, items: catalogItems, loading: catalogLoading, platform: catalogPlatform, selectPlatform: selectCatalogPlatform, refresh: refreshCatalog, refreshChannel: refreshCatalogChannel, loadMore: loadMoreCatalog } = useCatalog(authenticated);
+const cinemaBackdrops = computed(() => new Map(catalogItems.value.flatMap(item =>
+  item.backdrop && item.backdrop !== item.poster ? [[item.catalogId, item.backdrop] as const] : []
+)));
 const catalogDetail = ref<CatalogItem | null>(null);
 const detailCopy = computed(() => catalogDetail.value && findCatalogMedia(catalogDetail.value, enrichedMediaList.value));
 const playLabel = (fid?: string) => {
@@ -558,21 +561,10 @@ const handleSaveCard = async (media: MediaItem, targetCat?: CategoryType, bestRe
   }
 };
 
-// 移除片单
-const handleDeleteCard = (media: MediaItem) => {
-  deletingMedia.value = media;
-  setMobileHistoryLayer('delete');
-};
-
 const openMediaActions = (media: MediaItem) => {
   if (isSavingTransfer.value) { toast.show('正在添加影片，请稍候', '↻'); return; }
   actionMedia.value = media;
   setMobileHistoryLayer('actions');
-};
-
-const openCategoryPicker = (media: MediaItem) => {
-  categoryMedia.value = media;
-  setMobileHistoryLayer('category');
 };
 
 const closeDeleteDialog = () => {
@@ -692,6 +684,7 @@ const navigateMobileTab = async (tab: MobileDockTab) => {
   window.scrollTo({ top: pageScroll.get(tab) || 0 });
 };
 const focusMobileSearch = async () => { await navigateMobileTab('search'); searchPageRef.value?.focus(); };
+const navigateFromDock = (tab: MobileDockTab) => tab === 'search' ? focusMobileSearch() : navigateMobileTab(tab);
 const submitHeaderSearch = async (keyword: string) => {
   if (isSavingTransfer.value) return;
   await navigateMobileTab('search');
@@ -702,13 +695,15 @@ const showHistory = async () => {
   accountPageRef.value?.showHistory();
 };
 const handleAccountSection = (section: string) => {
-  if (handlingPopState) return;
-  if (section === 'overview') {
-    if (currentHistoryLayer() === 'account-detail') window.history.back();
-  } else {
-    setMobileHistoryLayer('account-detail');
-    window.history.replaceState({ ...window.history.state, mistyRainAccountSection: section }, '', window.location.href);
-  }
+  if (handlingPopState || section === 'overview') return;
+  const current = window.history.state;
+  if (currentHistoryLayer() === 'account-detail' && current?.mistyRainAccountSection === section) return;
+  window.history.pushState({
+    ...current, mistyRainLayer: 'account-detail', mistyRainPage: 'account', mistyRainAccountSection: section
+  }, '', window.location.href);
+};
+const leaveAccountSection = () => {
+  requestLayerClose('account-detail', () => accountPageRef.value?.restoreSection('overview'));
 };
 
 watch([isAnalyzing, searchPending, quarkResources], async () => {
@@ -764,13 +759,13 @@ const showSavedLibrary = () => {
   <div class="liquid-spatial-canvas" aria-hidden="true"></div>
   <LoginScreen v-if="checking || !authenticated" :checking="checking" :submitting="loggingIn" :error-message="errorMessage" @login="login" />
   <template v-else-if="user">
-    <div :inert="!!catalogDetail || isEmbedPlayerOpen || (isTransferOpen && !inlineFind) || !!deletingMedia || !!categoryMedia || !!actionMedia">
-      <DesktopSidebar :active-page="mobileTab" :user="user" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
+    <div class="cinema-shell" :data-page="mobileTab" :inert="!!catalogDetail || isEmbedPlayerOpen || (isTransferOpen && !inlineFind) || !!deletingMedia || !!categoryMedia || !!actionMedia">
+      <DesktopSidebar :active-page="mobileTab" :user="user" :disabled="isSavingTransfer" @navigate="navigateFromDock" />
       <TopNavigation :active-page="mobileTab" :disabled="isSavingTransfer" @home="navigateMobileTab('home')" @search="focusMobileSearch" @submit="submitHeaderSearch" @history="showHistory" />
-      <HomePage v-show="mobileTab === 'home'" :active="mobileTab === 'home' && !catalogDetail && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia" :feeds="catalogFeeds" :platform="catalogPlatform" @platform="selectCatalogPlatform" :browse="catalogBrowse" :loading="catalogLoading" :library="enrichedMediaList" :history="history" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" @refresh-channel="refreshCatalogChannel" @load-more="loadMoreCatalog" />
-      <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :busy="isSavingTransfer" :play-label="playLabel" :show-results="inlineFind && isTransferOpen" :searching="inlineFind && searchPending" :error="failedResourceId === 'direct' ? saveError : null" @criteria-change="clearInlineFind" @search="handleSearchMedia" @select="openCatalogDetail" @play="playSearchLibraryMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
+      <HomePage v-show="mobileTab === 'home'" :active="mobileTab === 'home' && !catalogDetail && !isEmbedPlayerOpen && !isTransferOpen && !deletingMedia && !categoryMedia && !actionMedia" :feeds="catalogFeeds" :platform="catalogPlatform" @platform="selectCatalogPlatform" :browse="catalogBrowse" :loading="catalogLoading" :library="enrichedMediaList" :history="history" :backdrops="cinemaBackdrops" @select="openCatalogDetail" @play="handleSelectMedia" @continue="continuePlayback" @search="focusMobileSearch" @history="showHistory" @refresh="refreshCatalog" @refresh-channel="refreshCatalogChannel" @load-more="loadMoreCatalog" />
+      <SearchPage v-show="mobileTab === 'search'" ref="searchPageRef" :username="user.username" :library="allMediaList" :catalog="catalogItems" :backdrops="cinemaBackdrops" :busy="isSavingTransfer" :play-label="playLabel" :show-results="inlineFind && isTransferOpen" :searching="inlineFind && searchPending" :error="failedResourceId === 'direct' ? saveError : null" @criteria-change="clearInlineFind" @search="handleSearchMedia" @select="openCatalogDetail" @play="playSearchLibraryMedia" @save="handleSaveCard" @auth="openPlaybackAuth" @clear-error="saveError = null" />
       <main v-show="mobileTab === 'library'" class="page-container library-page">
-        <header class="library-intro"><div class="library-title"><h1>我的片库</h1><p>{{ allMediaList.length }} 部影片，随时开场</p></div><div class="library-actions"><button type="button" class="check-updates-button" :class="{ checking: isCheckingUpdates }" :disabled="isCheckingUpdates || isApplyingUpdates" aria-label="检查片库更新" @click="checkLibraryUpdates(true, true)"><RefreshCw /><span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span></button><button type="button" class="add-library-button" @click="focusMobileSearch"><Plus />添加</button></div></header>
+        <header class="library-intro"><div class="library-title"><h1 class="cinema-page-title">我的片库</h1><p>{{ allMediaList.length }} 部影片</p></div><div class="library-actions"><button type="button" class="check-updates-button" :class="{ checking: isCheckingUpdates }" :disabled="isCheckingUpdates || isApplyingUpdates" aria-label="检查片库更新" @click="checkLibraryUpdates(true, true)"><RefreshCw aria-hidden="true" /><span v-if="currentCategoryUpdateCount" class="update-count-dot">{{ currentCategoryUpdateCount }}</span></button><button type="button" class="add-library-button" @click="focusMobileSearch"><Plus aria-hidden="true" />添加</button></div></header>
         <details v-if="attentionJobs.length" class="archive-batches"><summary>保存记录（{{ attentionJobs.length }}）</summary>
           <div v-for="job in attentionJobs" :key="job.id" class="archive-batch-status" role="status">
             <div><strong>{{ job.title }} · {{ job.status === 'running' ? '正在补集' : job.status === 'success' ? '已补齐' : '补集未完成' }}</strong><p>{{ job.message }}</p><small>已完成 {{ job.completedEpisodes.length }} / {{ job.total }} 集<span v-if="job.cleanupPendingCount"> · 部分临时文件未清理，可能占用网盘空间</span></small></div>
@@ -790,10 +785,10 @@ const showSavedLibrary = () => {
         <button v-if="availableUpdateMedia.length" type="button" class="apply-updates-button" :disabled="isApplyingUpdates || isCheckingUpdates" @click="applyLibraryUpdates(availableUpdateMedia)">{{ isApplyingUpdates ? '正在补充新剧集…' : availableUpdateMedia.length + ' 部影片发现新剧集，立即补集' }}</button>
         <div v-if="loadError" class="inline-feedback library-load-error" role="alert"><strong>暂时无法读取片库</strong><p>{{ loadError }}</p><button type="button" :disabled="isLoading" @click="refreshList()">重新加载</button></div>
         <div v-if="!isLoading && mediaList.length && !visibleLibrary.length" class="catalog-empty"><p>当前分类下没有符合条件的影片。</p><button type="button" class="cinema-button secondary" @click="libraryFilter = 'all'">查看全部影片</button></div>
-        <MediaGrid v-else-if="!loadError || allMediaList.length || isLoading" :media-list="visibleLibrary" :loading="isLoading" :current-category="currentCategory" :current-category-name="categoryNames[currentCategory]" @select-media="handleSelectMedia" @delete-card="handleDeleteCard" @re-search="handleReSearch" @edit-category="openCategoryPicker" @open-actions="openMediaActions" @start-search="focusMobileSearch" />
+        <MediaGrid v-else-if="!loadError || allMediaList.length || isLoading" :media-list="visibleLibrary" :history="history" :backdrops="cinemaBackdrops" :loading="isLoading" :current-category="currentCategory" :current-category-name="categoryNames[currentCategory]" @select-media="handleSelectMedia" @open-actions="openMediaActions" @start-search="focusMobileSearch" />
       </main>
-      <AccountPage v-if="mobileTab === 'account'" ref="accountPageRef" @section-change="handleAccountSection" :user="user" :history="history" :history-error="historyError" :loading-history="loadingHistory" :deleting-history-id="deletingHistoryId" @retry-history="refreshHistory()" @auth-updated="handlePlaybackAuthUpdated" @play-history="continuePlayback" @delete-history="removeHistory" @logout="handleLogout" />
-      <MobileTabBar :active-tab="mobileTab" :disabled="isSavingTransfer" @navigate="navigateMobileTab" />
+      <AccountPage v-if="mobileTab === 'account'" ref="accountPageRef" :user="user" :history="history" :backdrops="cinemaBackdrops" :library-count="allMediaList.length" :history-error="historyError" :loading-history="loadingHistory" :deleting-history-id="deletingHistoryId" @section-change="handleAccountSection" @back="leaveAccountSection" @library="navigateMobileTab('library')" @retry-history="refreshHistory()" @auth-updated="handlePlaybackAuthUpdated" @play-history="continuePlayback" @delete-history="removeHistory" @logout="handleLogout" />
+      <MobileTabBar :active-tab="mobileTab" :disabled="isSavingTransfer" @navigate="navigateFromDock" />
     </div>
     <CatalogDetail v-if="catalogDetail && !isEmbedPlayerOpen && !isTransferOpen" :item="catalogDetail" @resolved="resolveCatalogItem" :in-library="!!detailCopy" :play-label="playLabel(detailCopy?.quarkFid)" :owned-episodes="detailPlayable?.localEpisodeNumbers" @episode="detailPlayable && playSearchLibraryMedia(detailPlayable, $event)" :unversioned-library="!!unversionedCatalogMedia" @close="closeCatalogDetail" @play="startCatalogPlayback()" @sources="startCatalogPlayback(false)" />
     <QuarkEmbedPlayerModal ref="playerPageRef" v-if="isEmbedPlayerOpen" :is-open="isEmbedPlayerOpen" :media="embedPlayingMedia" :username="user.username" :history-entry="selectedHistoryEntry" :requested-episode="requestedLibraryEpisode" @close="closeEmbedPlayer" @re-search="handleReSearch" @open-auth-settings="openPlaybackAuth" @history-updated="receivePlaybackHistory" />
@@ -809,21 +804,21 @@ const showSavedLibrary = () => {
 
 <style scoped>
 .page-container { position: relative; z-index: 1; }
-.archive-batches { margin: 0 0 18px; }
-.archive-batches > summary { width: fit-content; padding: 12px 0; color: var(--text-secondary); cursor: pointer; }
+.archive-batches { margin: 0 0 8px; }
+.archive-batches > summary { width: fit-content; min-height: 44px; padding: 11px 0; color: var(--text-secondary); cursor: pointer; font-size: 13px; }
 .archive-batches > .archive-batch-status + .archive-batch-status { margin-top: 10px; }
-.archive-batch-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 16px; background: var(--surface-1); }
+.archive-batch-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-radius: var(--cinema-radius-control); background: var(--surface-1); }
 .archive-batch-status strong { color: var(--text-primary); font-size: .88rem; }.archive-batch-status p { margin: 4px 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }.archive-batch-status small { color: var(--text-tertiary); }
 .archive-batch-status button { flex-shrink: 0; min-height: 40px; padding: 0 14px; border: 1px solid var(--divider); border-radius: 20px; color: var(--text-primary); background: var(--glass-bg); }
-.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-.library-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; min-width: 0; }
-.library-title h1 { font-size: 2rem; font-weight: 650; letter-spacing: -.035em; line-height: 1.3; }
-.library-title p { color: var(--text-tertiary); font-size: .75rem; }
+.library-intro { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.library-title { display: grid; gap: 5px; min-width: 0; }
+.library-title p { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: .75rem; }
+.library-title p::before { content: ''; width: 13px; height: 1px; background: var(--liquid-accent); }
 .library-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.add-library-button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 0; border-radius: 22px; color: var(--text-primary); background: var(--glass-bg-active); font-size: .8rem; font-weight: 550; transition: background .2s; }
-.add-library-button:hover { background: rgb(255 255 255 / .16); }
+.add-library-button { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 5px; padding: 0 13px; border: 0; border-radius: var(--cinema-radius-control); color: var(--liquid-accent); background: var(--cinema-field); font-size: .8rem; font-weight: 650; transition: background .2s; }
+.add-library-button:hover { background: var(--cinema-field-focus); }
 .add-library-button svg { width: 17px; height: 17px; stroke-width: 2; }
-.category-toolbar { display: flex; margin-bottom: 28px; border-bottom: 1px solid rgb(255 255 255 / .07); }
+.category-toolbar { display: flex; border-bottom: 1px solid var(--divider); }
 .check-updates-button { position: relative; display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 50%; color: var(--text-tertiary); background: transparent; transition: background .2s, color .2s; }
 .check-updates-button:hover { color: var(--text-primary); background: var(--glass-bg); }
 .check-updates-button svg { width: 18px; height: 18px; }
@@ -834,11 +829,9 @@ const showSavedLibrary = () => {
 @keyframes update-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
   .library-intro { margin-bottom: 16px; }
-  .library-title { display: grid; gap: 2px; }
-  .library-title h1 { font-size: 1.65rem; }
+  .library-title h1 { font-size: clamp(27px, 8.2vw, 36px); }
   .library-title p { font-size: .69rem; }
   .library-actions { gap: 4px; }
   .add-library-button { padding: 0 12px; }
-  .category-toolbar { margin-bottom: 22px; }
 }
 </style>

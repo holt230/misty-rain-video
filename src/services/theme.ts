@@ -17,7 +17,7 @@ const updateBrowserChrome = () => {
   const immersive = playbackChromeOwners.size > 0;
   document.documentElement.classList.toggle('immersive-playback', immersive);
   document.documentElement.style.colorScheme = immersive ? 'dark' : currentTheme.value;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', immersive ? '#000000' : currentTheme.value === 'light' ? '#f4f6fa' : '#0b0b0d');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', immersive ? '#000000' : currentTheme.value === 'light' ? '#e8edf0' : '#252c30');
 };
 /** Keep iOS browser chrome and its safe-area canvas dark until the last player exits. */
 export const acquirePlaybackChrome = () => {

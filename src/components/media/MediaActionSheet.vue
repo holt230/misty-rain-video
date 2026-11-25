@@ -36,7 +36,7 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
       aria-labelledby="media-action-title"
       @click.self="emit('cancel')"
     >
-      <section class="action-sheet glass-rim">
+      <section class="action-sheet">
         <div class="drag-handle" aria-hidden="true"></div>
 
         <header class="media-summary">
@@ -107,20 +107,20 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
 
 <style scoped>
 .action-backdrop { position: fixed; inset: 0; z-index: 1700; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.action-sheet { width: min(440px, 100%); padding: 24px; border-radius: 30px; }
+.action-sheet { width: min(440px, 100%); padding: 22px; border-radius: var(--cinema-radius-panel); }
 .drag-handle { display: none; }
-.media-summary { display: flex; align-items: center; gap: 13px; margin-bottom: 22px; }
+.media-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .summary-poster { width: 48px; height: 66px; flex-shrink: 0; object-fit: cover; border: 1px solid var(--divider); border-radius: 12px; box-shadow: var(--glass-shadow-sm); }
 .summary-copy { min-width: 0; flex: 1; }
 .summary-copy span { color: var(--text-tertiary); font-size: .74rem; }
-.summary-copy h2 { margin-top: 4px; color: var(--text-primary); font-size: 1.12rem; font-weight: 700; overflow-wrap: anywhere; line-height: 1.45; }
+.summary-copy h2 { margin-top: 4px; color: var(--text-primary); font: 700 1.3rem/1.3 var(--cinema-serif); overflow-wrap: anywhere; }
 .close-button { display: grid; width: 44px; height: 44px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .close-button svg { width: 19px; height: 19px; }
 .update-feedback { margin: 0 0 18px; padding: 14px; border-radius: 12px; background: var(--glass-bg); }
 .update-feedback strong { color: var(--text-primary); font-size: .84rem; font-weight: 600; }
 .update-feedback p { margin-top: 5px; color: var(--text-secondary); font-size: .78rem; line-height: 1.65; overflow-wrap: anywhere; }
-.action-list { border: 0; border-radius: 14px; overflow: hidden; }
-.action-item { display: flex; width: 100%; min-height: 76px; align-items: center; gap: 13px; padding: 12px 15px; border: 0; border-bottom: 1px solid rgb(90 116 159 / .10); color: var(--text-primary); background: transparent; text-align: left; }
+.action-list { border: 0; border-radius: var(--cinema-radius-control); overflow: hidden; background: transparent !important; }
+.action-item { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--divider); color: var(--text-primary); background: transparent; text-align: left; }
 .action-item:last-child { border-bottom: 0; }
 .action-icon { display: grid; width: 30px; height: 40px; place-items: center; flex-shrink: 0; color: var(--text-secondary); }
 .action-icon svg { width: 21px; height: 21px; }
@@ -135,6 +135,5 @@ useDialog(dialogRef, () => props.open, () => emit('cancel'));
   .action-backdrop { align-items: flex-end; padding: 0; }
   .action-sheet { width: 100%; border-radius: 28px 28px 0 0; padding: 12px 20px calc(20px + var(--safe-area-bottom)); }
   .drag-handle { display: block; width: 36px; height: 5px; margin: 0 auto 20px; border-radius: 10px; }
-  .action-item { min-height: 70px; }
 }
 </style>
