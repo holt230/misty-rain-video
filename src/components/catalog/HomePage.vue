@@ -137,7 +137,7 @@ onBeforeUnmount(() => { navigation++; });
   </main>
 </template>
 <style scoped>
-.channel-nav { position: sticky; z-index: 25; top: calc(var(--cinema-header-height) + var(--safe-area-top)); }
+.channel-nav { position: sticky; z-index: 25; top: var(--cinema-header-offset); }
 .feature-carousel { margin-top: 9px; }
 .feature-open { position: absolute; inset: 0; z-index: 1; border: 0; border-radius: inherit; background: transparent; }
 .feature-open:focus-visible { outline-offset: -4px; }
