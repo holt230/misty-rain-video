@@ -37,7 +37,7 @@ jobs:
         run: |
           app="$RUNNER_TEMP/misty-build/Build/Products/Release-iphoneos/MistyRain.app"
           test -f "$app/MistyRain"
-          lipo -verify_arch arm64 "$app/MistyRain"
+          lipo "$app/MistyRain" -verify_arch arm64
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = cn.linlunji.mistyrain.pilot
           mkdir -p "$RUNNER_TEMP/misty-package/Payload" "$RUNNER_TEMP/misty-delivery"
           ditto "$app" "$RUNNER_TEMP/misty-package/Payload/MistyRain.app"
