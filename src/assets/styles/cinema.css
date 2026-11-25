@@ -217,6 +217,8 @@
   .resume-card:hover { background: var(--glass-bg-hover); }
 }
 @media (max-width: 1023px) {
+  /* The home header reserves the safe area itself; the other tabs hide it. */
+  .cinema-shell:not([data-page='home']) { padding-top: var(--safe-area-top); }
   .cinema-header:not([data-page='home']) { display: none; }
   .cinema-header .cinema-brand { justify-content: center; width: 38px; min-height: 44px; flex-shrink: 0; border-radius: 10px; }
   .cinema-header .cinema-brand > span, .cinema-header .header-history { display: none; }
