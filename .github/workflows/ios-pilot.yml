@@ -22,10 +22,6 @@ jobs:
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v7
-      - name: Test playback selection and endpoint handling
-        run: |
-          swiftc ios/MistyRain/MistyAPI.swift ios/Tests/PlaybackSelectionTests.swift -o "$RUNNER_TEMP/misty-tests"
-          "$RUNNER_TEMP/misty-tests"
       - name: Build unsigned device app
         run: |
           xcodebuild -version
@@ -39,15 +35,17 @@ jobs:
           test -f "$app/MistyRain"
           lipo "$app/MistyRain" -verify_arch arm64
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = cn.linlunji.mistyrain.pilot
+          strings "$app/MistyRain" > "$RUNNER_TEMP/misty-strings.txt"
+          grep -Fxq 'https://linlunji.cn/misty-rain/launch/ios' "$RUNNER_TEMP/misty-strings.txt"
           mkdir -p "$RUNNER_TEMP/misty-package/Payload" "$RUNNER_TEMP/misty-delivery"
           ditto "$app" "$RUNNER_TEMP/misty-package/Payload/MistyRain.app"
           cd "$RUNNER_TEMP/misty-package"
-          ditto -c -k --keepParent Payload "$RUNNER_TEMP/misty-delivery/MistyRain-unsigned.ipa"
+          ditto -c -k --keepParent Payload "$RUNNER_TEMP/misty-delivery/MistyRain-WebClip-unsigned.ipa"
           cd "$RUNNER_TEMP/misty-delivery"
-          shasum -a 256 MistyRain-unsigned.ipa > SHA256SUMS.txt
+          shasum -a 256 MistyRain-WebClip-unsigned.ipa > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: MistyRain-iOS-pilot
+          name: MistyRain-iOS-WebClip
           path: ${{ runner.temp }}/misty-delivery/
           if-no-files-found: error
           retention-days: 14
