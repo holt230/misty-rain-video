@@ -1,12 +1,12 @@
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 CODE_SIGN_STYLE = Automatic
-CURRENT_PROJECT_VERSION = 2
+CURRENT_PROJECT_VERSION = 3
 GENERATE_INFOPLIST_FILE = YES
-INFOPLIST_KEY_CFBundleDisplayName = 烟雨影视
+INFOPLIST_KEY_CFBundleDisplayName = 烟雨同版
 INFOPLIST_KEY_UILaunchScreen_Generation = YES
 INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
-MARKETING_VERSION = 0.2.0
-PRODUCT_BUNDLE_IDENTIFIER = cn.linlunji.mistyrain.pilot
+MARKETING_VERSION = 0.3.0
+PRODUCT_BUNDLE_IDENTIFIER = cn.linlunji.mistyrain.webclip
 PRODUCT_NAME = MistyRain
 SUPPORTED_PLATFORMS = iphoneos iphonesimulator
 TARGETED_DEVICE_FAMILY = 1

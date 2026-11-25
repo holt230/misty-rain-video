@@ -34,18 +34,53 @@ jobs:
           app="$RUNNER_TEMP/misty-build/Build/Products/Release-iphoneos/MistyRain.app"
           test -f "$app/MistyRain"
           lipo "$app/MistyRain" -verify_arch arm64
-          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = cn.linlunji.mistyrain.pilot
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = cn.linlunji.mistyrain.webclip
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$app/Info.plist")" = 烟雨同版
+          version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")"
+          ipa="MistyRain-WebClip-v${version}-unsigned.ipa"
           strings "$app/MistyRain" > "$RUNNER_TEMP/misty-strings.txt"
           grep -Fxq 'https://linlunji.cn/misty-rain/launch/ios' "$RUNNER_TEMP/misty-strings.txt"
           mkdir -p "$RUNNER_TEMP/misty-package/Payload" "$RUNNER_TEMP/misty-delivery"
           ditto "$app" "$RUNNER_TEMP/misty-package/Payload/MistyRain.app"
           cd "$RUNNER_TEMP/misty-package"
-          ditto -c -k --keepParent Payload "$RUNNER_TEMP/misty-delivery/MistyRain-WebClip-unsigned.ipa"
+          ditto -c -k --keepParent Payload "$RUNNER_TEMP/misty-delivery/$ipa"
           cd "$RUNNER_TEMP/misty-delivery"
-          shasum -a 256 MistyRain-WebClip-unsigned.ipa > SHA256SUMS.txt
+          shasum -a 256 "$ipa" > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: MistyRain-iOS-WebClip
           path: ${{ runner.temp }}/misty-delivery/
+          if-no-files-found: error
+          retention-days: 14
+  ios-launch:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Launch the production UI in an iPhone simulator
+        run: |
+          device="$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["devices"]
+          phones = [(runtime, item) for runtime, devices in runtimes.items() if ".iOS-" in runtime for item in devices if item["name"].startswith("iPhone")]
+          phones.sort(key=lambda pair: (pair[1]["name"] == "iPhone 16 Pro", tuple(map(int, pair[0].split(".iOS-")[-1].split("-")))), reverse=True)
+          if not phones:
+              sys.exit("No available iPhone simulator")
+          print(phones[0][1]["udid"])
+          ')"
+          xcrun simctl boot "$device"
+          xcodebuild -project ios/MistyRain.xcodeproj -scheme MistyRain \
+            -configuration Release -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/misty-simulator" CODE_SIGNING_ALLOWED=NO build
+          xcrun simctl bootstatus "$device" -b
+          app="$RUNNER_TEMP/misty-simulator/Build/Products/Release-iphonesimulator/MistyRain.app"
+          xcrun simctl install "$device" "$app"
+          xcrun simctl launch "$device" cn.linlunji.mistyrain.webclip
+          sleep 18
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/MistyRain-WebClip-launch.png"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MistyRain-iOS-WebClip-launch
+          path: ${{ runner.temp }}/MistyRain-WebClip-launch.png
           if-no-files-found: error
           retention-days: 14
