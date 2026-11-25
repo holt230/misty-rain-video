@@ -1,0 +1,53 @@
+name: iOS 样机 IPA
+
+on:
+  push:
+    branches:
+      - codex/ios-native-pilot
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-pilot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test playback selection and endpoint handling
+        run: |
+          swiftc ios/MistyRain/MistyAPI.swift ios/Tests/PlaybackSelectionTests.swift -o "$RUNNER_TEMP/misty-tests"
+          "$RUNNER_TEMP/misty-tests"
+      - name: Build unsigned device app
+        run: |
+          xcodebuild -version
+          xcodebuild -project ios/MistyRain.xcodeproj -scheme MistyRain \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/misty-build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Package for local re-signing
+        run: |
+          app="$RUNNER_TEMP/misty-build/Build/Products/Release-iphoneos/MistyRain.app"
+          test -f "$app/MistyRain"
+          lipo -verify_arch arm64 "$app/MistyRain"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = cn.linlunji.mistyrain.pilot
+          mkdir -p "$RUNNER_TEMP/misty-package/Payload" "$RUNNER_TEMP/misty-delivery"
+          ditto "$app" "$RUNNER_TEMP/misty-package/Payload/MistyRain.app"
+          cd "$RUNNER_TEMP/misty-package"
+          ditto -c -k --keepParent Payload "$RUNNER_TEMP/misty-delivery/MistyRain-unsigned.ipa"
+          cd "$RUNNER_TEMP/misty-delivery"
+          shasum -a 256 MistyRain-unsigned.ipa > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MistyRain-iOS-pilot
+          path: ${{ runner.temp }}/misty-delivery/
+          if-no-files-found: error
+          retention-days: 14
