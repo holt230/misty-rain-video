@@ -100,7 +100,7 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
   <section ref="root" class="catalog-detail screen-dialog" role="dialog" aria-modal="true" aria-labelledby="catalog-detail-title" @click.self="emit('close')" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">
     <div class="detail-window">
     <header class="screen-header"><button type="button" class="icon-control detail-back" aria-label="返回浏览" @click="emit('close')"><ArrowLeft /></button><span>影片详情</span><button type="button" class="icon-control detail-close" aria-label="关闭影片详情" @click="emit('close')"><X /></button></header>
-    <div class="detail-stage">
+    <div class="detail-stage" :class="{ 'with-backdrop': item.backdrop && item.backdrop !== item.poster }">
       <MediaPoster :src="item.backdrop || item.poster" alt="" class="detail-backdrop" />
       <div class="detail-stage-shade"></div>
       <div class="detail-overview">
@@ -161,6 +161,7 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
 </template>
 <style scoped>
 .detail-title-copy { min-width: 0; }
+.detail-overview h1 { font-family: var(--cinema-serif); letter-spacing: .025em; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .detail-overview .detail-availability { margin-top: 8px; color: var(--text-primary); }
 .detail-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
@@ -181,10 +182,15 @@ useDialog(root, () => true, () => { if (selectedPerson.value) void closePerson()
 .detail-extras { grid-column: 1 / -1; width: 100%; max-width: 948px; min-width: 0; padding: 0 24px calc(32px + var(--safe-area-bottom)); margin-inline: auto; }
 .detail-facts { display: grid; gap: 12px; margin: 24px 0; }
 @media (max-width: 767px) {
-  .detail-stage { padding: 24px 20px 16px; }
+  .detail-stage { padding: 24px var(--page-right) 16px var(--page-left); }
+  .detail-stage.with-backdrop { display: flex; align-items: end; min-height: clamp(200px, 55vw, 310px); }
+  .detail-stage.with-backdrop .detail-backdrop { opacity: .92; object-position: center 39%; }
+  .detail-stage.with-backdrop .detail-stage-shade { background: linear-gradient(0deg, var(--liquid-canvas) 5%, color-mix(in srgb, var(--liquid-canvas) 92%, transparent) 30%, transparent 82%); }
+  .detail-stage.with-backdrop .detail-poster { display: none; }
+  .detail-stage.with-backdrop .detail-overview { width: 100%; margin: 0; }
   .detail-overview { align-items: center; gap: 14px; }
   .detail-poster { width: 92px; box-shadow: none; }
-  .detail-overview h1 { margin: 0 0 8px; letter-spacing: 0; }
+  .detail-overview h1 { margin: 0 0 8px; font-size: clamp(24px, 7.6vw, 34px); line-height: 1.2; }
   .detail-body { padding-bottom: 0; }
   .detail-extras .detail-synopsis { padding: 16px 0 12px; margin: 0; border: 0; border-radius: 0; background: transparent; }
 }

@@ -131,7 +131,7 @@ const submit = () => {
 
 <style scoped>
 .login-theme-switch { position: absolute; top: calc(20px + var(--safe-area-top)); right: calc(20px + var(--safe-area-right)); z-index: 2; }
-.login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) 24px calc(30px + var(--safe-area-bottom)); overflow-y: auto; scroll-behavior: smooth; }
+.login-shell { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: var(--app-viewport-height); padding: calc(30px + var(--safe-area-top)) var(--page-right) calc(30px + var(--safe-area-bottom)) var(--page-left); overflow-y: auto; background: linear-gradient(180deg, var(--cinema-sky), var(--liquid-canvas) 60%); }
 .login-card { position: relative; width: min(420px, 100%); padding: 40px 24px 26px; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
 .brand-mark { width: 54px; height: 54px; flex-shrink: 0; }
@@ -141,10 +141,10 @@ const submit = () => {
 .brand-copy small { color: var(--text-tertiary); font-size: .56rem; font-weight: 650; letter-spacing: .18em; }
 .login-heading { margin: 60px 0 32px; }
 .login-heading > span { color: var(--liquid-accent); font-size: .76rem; font-weight: 600; }
-.login-heading h1 { margin: 8px 0 14px; color: var(--text-primary); font-size: 2.65rem; font-weight: 650; letter-spacing: -.04em; line-height: 1.15; }
+.login-heading h1 { margin: 8px 0 14px; color: var(--text-primary); font: 700 clamp(30px, 9vw, 43px)/1.16 var(--cinema-serif); letter-spacing: .04em; }
 .login-heading p { color: var(--text-secondary); font-size: .87rem; line-height: 1.7; }
-.credential-group { padding: 0 16px; border: 1px solid var(--divider); border-radius: 14px; background: var(--surface-1); }
-.input-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 74px; align-content: center; gap: 3px; padding: 10px 0; border-bottom: 1px solid rgb(100 122 161 / .12); transition: border-color .2s; }
+.credential-group { padding: 0 15px; border-radius: var(--cinema-radius-control); background: var(--surface-1); }
+.input-shell { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 70px; align-content: center; gap: 3px; padding: 10px 0; border-bottom: 1px solid var(--divider); transition: border-color .2s; }
 .input-shell:last-child { border-bottom: 0; }
 .field-name { grid-column: 1; font-size: .73rem; color: var(--text-tertiary); transition: color .2s; }
 .input-shell input { width: 100%; min-width: 0; min-height: 30px; grid-column: 1; grid-row: 2; padding: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; font-size: 17px; }

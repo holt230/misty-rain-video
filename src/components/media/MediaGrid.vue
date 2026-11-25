@@ -1,27 +1,41 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Film, Search } from '@lucide/vue';
-import type { MediaItem, CategoryType } from '../../types/media';
+import type { MediaItem, CategoryType, PlaybackHistoryEntry } from '../../types/media';
+import { cinemaBackdrop, type CinemaBackdrops } from '../../services/cinemaPresentation';
 import MediaCard from './MediaCard.vue';
 
-defineProps<{
+const props = defineProps<{
   mediaList: MediaItem[];
   currentCategoryName: string;
   currentCategory: CategoryType;
   loading?: boolean;
+  history: PlaybackHistoryEntry[];
+  backdrops?: CinemaBackdrops;
 }>();
 
 const emit = defineEmits<{
   (e: 'select-media', media: MediaItem): void;
-  (e: 'delete-card', media: MediaItem): void;
-  (e: 're-search', media: MediaItem): void;
-  (e: 'edit-category', media: MediaItem): void;
   (e: 'open-actions', media: MediaItem): void;
   (e: 'start-search'): void;
 }>();
+
+const historyByMedia = computed(() => {
+  const index = new Map<string, PlaybackHistoryEntry>();
+  for (const entry of props.history) {
+    const keys = [entry.media.id, entry.media.quarkFid && 'fid:' + entry.media.quarkFid];
+    for (const key of keys) if (key && !index.has(key)) index.set(key, entry);
+  }
+  return index;
+});
+const resumeFor = (media: MediaItem) => {
+  const entry = (media.quarkFid && historyByMedia.value.get('fid:' + media.quarkFid)) || historyByMedia.value.get(media.id);
+  return entry && !entry.completed && entry.position > 0 ? entry : undefined;
+};
 </script>
 
 <template>
-  <div v-if="loading" class="media-grid media-grid-loading" aria-busy="true" aria-label="正在读取片库">
+  <div v-if="loading" class="media-grid cinema-still-grid media-grid-loading" aria-busy="true" aria-label="正在读取片库">
     <div v-for="index in 6" :key="index" class="media-skeleton" aria-hidden="true">
       <span class="media-skeleton-poster"></span>
       <span class="media-skeleton-title"></span>
@@ -29,15 +43,14 @@ const emit = defineEmits<{
     </div>
   </div>
 
-  <div v-else-if="mediaList.length > 0" class="media-grid">
+  <div v-else-if="mediaList.length > 0" class="media-grid cinema-still-grid">
     <MediaCard
       v-for="media in mediaList"
       :key="media.id"
       :media="media"
+      :backdrop="cinemaBackdrop(media, backdrops)"
+      :resume="resumeFor(media)"
       @click-card="emit('select-media', media)"
-      @delete-card="emit('delete-card', media)"
-      @re-search="emit('re-search', media)"
-      @edit-category="emit('edit-category', media)"
       @open-actions="emit('open-actions', media)"
     />
   </div>
@@ -67,10 +80,9 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 32px 24px; }
 .media-skeleton { display: grid; gap: 10px; min-width: 0; }
 .media-skeleton-poster, .media-skeleton-title, .media-skeleton-subtitle { display: block; background: linear-gradient(100deg, rgb(255 255 255 / .035), rgb(255 255 255 / .085), rgb(255 255 255 / .035)); background-size: 200% 100%; animation: shimmer 1.6s ease-in-out infinite; border-radius: 20px; }
-.media-skeleton-poster { width: 100%; aspect-ratio: 2 / 3; border: 1px solid var(--divider); }
+.media-skeleton-poster { width: 100%; aspect-ratio: 16 / 9; border-radius: var(--cinema-radius-poster); }
 .media-skeleton-title { width: 65%; height: 14px; }
 .media-skeleton-subtitle { width: 30%; height: 10px; }
 .empty-state-card { display: flex; min-height: 350px; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 34px 20px; text-align: center; }
@@ -90,5 +102,5 @@ const emit = defineEmits<{
 .empty-action svg { width: 18px; height: 18px; }
 .empty-hint { display: block; margin-top: 13px; color: var(--text-tertiary); font-size: .71rem; }
 @keyframes shimmer { to { background-position: -200% 0; } }
-@media (max-width: 640px) { .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 23px 16px; } .empty-state-card { padding: 24px 0; gap: 12px; } .empty-title { font-size: 1.3rem; } }
+@media (max-width: 640px) { .empty-state-card { padding: 24px 0; gap: 12px; } .empty-title { font-size: 1.3rem; } }
 </style>

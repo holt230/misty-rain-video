@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { ChevronLeft, ChevronRight, Clock3, Download, LogOut, Palette, ShieldCheck, Trash2 } from '@lucide/vue';
-import MediaPoster from '../common/MediaPoster.vue';
+import { ChevronLeft, ChevronRight, Download, LibraryBig, LogOut, Palette, Settings, ShieldCheck, Trash2, UserRound } from '@lucide/vue';
+import CinemaStill from '../common/CinemaStill.vue';
+import { cinemaBackdrop, cinemaWatchProgress, type CinemaBackdrops } from '../../services/cinemaPresentation';
 import type { AppUser } from '../../services/authService';
 import { apiUrl } from '../../services/appUrl';
 import { QuarkStreamService } from '../../services/quarkStreamService';
@@ -12,7 +13,7 @@ import TvPlaybackAuth from './TvPlaybackAuth.vue';
 import ThemeSwitch from '../common/ThemeSwitch.vue';
 import LibraryMaintenanceStatus from './LibraryMaintenanceStatus.vue';
 
-const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; historyError?: string; loadingHistory?: boolean; deletingHistoryId?: string }>();
+const props = defineProps<{ user: AppUser; history: PlaybackHistoryEntry[]; libraryCount: number; backdrops?: CinemaBackdrops; historyError?: string; loadingHistory?: boolean; deletingHistoryId?: string }>();
 const emit = defineEmits<{
   (e: 'logout'): void;
   (e: 'auth-updated'): void;
@@ -20,6 +21,8 @@ const emit = defineEmits<{
   (e: 'delete-history', id: string): void;
   (e: 'retry-history'): void;
   (e: 'section-change', section: string): void;
+  (e: 'back'): void;
+  (e: 'library'): void;
 }>();
 
 const toast = useToast();
@@ -35,20 +38,23 @@ const tvTokenExchangeOrigin = ref('');
 const isSaving = ref(false);
 const showCredentialForm = ref(false);
 const historyExpanded = ref(false);
-const titles = { overview: '我的', account: '账户', history: '观看历史', playback: '播放与网盘', appearance: '外观设置', device: '桌面安装' };
+const titles = { overview: '我的', settings: '设置', account: '账户', history: '观看历史', playback: '播放与网盘', appearance: '外观设置', device: '桌面安装' };
 const section = ref<keyof typeof titles>('overview');
 const accountRole = computed(() => props.user.role === 'admin' ? '管理员账户' : '片库账户');
 const profileEntry = ref<HTMLButtonElement | null>(null);
 const pageTitle = ref<HTMLHeadingElement | null>(null);
+const settingsEntry = ref<HTMLButtonElement | null>(null);
 const advancedOpen = ref(false);
 watch(section, (value, previous) => {
   emit('section-change', value);
-  if (value === 'account') nextTick(() => pageTitle.value?.focus());
-  if (previous === 'account' && value === 'overview') nextTick(() => profileEntry.value?.focus());
+  if (value !== 'overview') void nextTick(() => pageTitle.value?.focus({ preventScroll: true }));
+  else if (previous === 'account') void nextTick(() => profileEntry.value?.focus({ preventScroll: true }));
+  else if (previous === 'settings') void nextTick(() => settingsEntry.value?.focus({ preventScroll: true }));
 });
 const restoreSection = (value: string) => { section.value = Object.prototype.hasOwnProperty.call(titles, value) ? value as keyof typeof titles : 'overview'; };
 const showHistory = () => { section.value = 'history'; historyExpanded.value = true; window.scrollTo({ top: 0 }); };
-const back = () => { section.value = 'overview'; };
+const openSection = (value: Exclude<keyof typeof titles, 'overview'>) => { section.value = value; window.scrollTo({ top: 0 }); };
+const back = () => emit('back');
 let touchStartX = 0;
 let touchStartY = 0;
 let touchStartTime = 0;
@@ -85,11 +91,24 @@ const visibleHistory = computed(() => {
   const continuingIds = new Set(continueHistory.value.map(entry => entry.id));
   return props.history.filter(entry => !continuingIds.has(entry.id)).slice(0, 3);
 });
-const historyProgress = (entry: PlaybackHistoryEntry) => Math.max(2, Math.min(100, entry.position / entry.duration * 100));
+const recentHistory = computed(() => {
+  const seen = new Set<string>();
+  const items: PlaybackHistoryEntry[] = [];
+  for (const entry of props.history) {
+    const key = entry.media.quarkFid || entry.media.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(entry);
+    if (items.length === 5) break;
+  }
+  return items;
+});
 const formatHistoryMeta = (entry: PlaybackHistoryEntry) => {
-  const episode = entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : entry.episodeTitle;
-  const minutes = Math.max(1, Math.floor(entry.position / 60));
-  return `${episode || '影片'} · ${entry.completed ? '已看完' : `看到 ${minutes} 分钟`}`;
+  const episode = entry.media.category === 'movie' ? '正片' : entry.episodeNumber > 0
+    ? '第 ' + entry.episodeNumber + (entry.media.category === 'variety' ? ' 期' : ' 集') : entry.episodeTitle || '影片';
+  if (entry.completed) return episode + ' · 已看完';
+  const progress = cinemaWatchProgress(entry);
+  return progress === undefined ? episode : episode + ' · 已看 ' + Math.round(progress) + '%';
 };
 
 const refreshStatus = async () => {
@@ -155,58 +174,48 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 <template>
   <main class="account-page" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">
     <div class="account-content">
-    <header class="page-heading">
-      <button v-if="section !== 'overview'" type="button" class="back-button" aria-label="返回我的" @click="back">
-        <ChevronLeft aria-hidden="true" />
+    <header v-if="section === 'overview'" class="account-intro">
+      <h1 class="account-title">我的</h1>
+      <button ref="profileEntry" type="button" class="profile-entry" aria-label="查看账户" @click="openSection('account')">
+        <UserAvatar class="profile-avatar" :username="user.username" aria-hidden="true" />
+        <span class="profile-copy"><small>{{ user.username }}</small><strong aria-hidden="true">我的</strong></span>
       </button>
-      <h1 ref="pageTitle" tabindex="-1">{{ titles[section] }}</h1>
+      <button ref="settingsEntry" class="settings-entry" type="button" @click="openSection('settings')"><Settings aria-hidden="true" />设置</button>
+    </header>
+    <header v-else class="page-heading">
+      <button type="button" class="back-button" aria-label="返回" @click="back"><ChevronLeft aria-hidden="true" /></button>
+      <h1 ref="pageTitle" class="cinema-page-title" tabindex="-1">{{ titles[section] }}</h1>
     </header>
 
-    <button v-if="section === 'overview'" ref="profileEntry" type="button" class="profile-row profile-entry" @click="section = 'account'">
-      <UserAvatar class="profile-avatar" :username="user.username" aria-hidden="true" />
-      <span class="profile-copy">
-        <strong>{{ user.username }}</strong>
-        <small>{{ accountRole }}</small>
-      </span>
-      <span class="profile-link">账户<ChevronRight class="chevron" aria-hidden="true" /></span>
-    </button>
-
-    <nav v-if="section === 'overview'" class="account-menu" aria-label="个人中心功能">
-      <button type="button" @click="showHistory"><span class="account-menu-icon" aria-hidden="true"><Clock3 /></span><span class="account-menu-copy"><strong>观看历史</strong><small>找回每一段观影时光</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
-      <button type="button" @click="section = 'playback'"><span class="account-menu-icon" aria-hidden="true"><ShieldCheck /></span><span class="account-menu-copy"><strong>播放与网盘</strong><small>查看网盘连接</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
-      <button type="button" @click="section = 'appearance'"><span class="account-menu-icon" aria-hidden="true"><Palette /></span><span class="account-menu-copy"><strong>外观设置</strong><small>切换你喜欢的主题</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
-      <button type="button" @click="section = 'device'"><span class="account-menu-icon" aria-hidden="true"><Download /></span><span class="account-menu-copy"><strong>安装到桌面</strong><small>随时回来，接着看</small></span><ChevronRight class="account-menu-arrow" aria-hidden="true" /></button>
-    </nav>
-
-    <section v-if="section === 'overview' && continueHistory.length" class="continue-history-section" aria-labelledby="continue-history-title">
-      <div class="section-title-row compact">
-        <h2 id="continue-history-title">继续观看</h2>
+    <section v-if="section === 'overview'" class="recent-history" aria-labelledby="recent-history-title">
+      <div class="section-title-row">
+        <h2 id="recent-history-title">观看历史</h2>
+        <button type="button" class="text-link" aria-label="查看全部观看历史" @click="showHistory">全部<ChevronRight aria-hidden="true" /></button>
       </div>
-      <div class="continue-history-scroll">
-        <button
-          v-for="entry in continueHistory"
-          :key="entry.id"
-          type="button"
-          class="continue-history-card"
-          @click="emit('play-history', entry)"
-        >
-<MediaPoster :src="entry.media.poster" :alt="`${entry.media.title}封面`" loading="lazy" decoding="async" />
-          <span class="continue-history-shade" aria-hidden="true"></span>
-          <span class="continue-history-copy">
-            <strong>{{ entry.media.title }}</strong>
-            <small>{{ entry.episodeNumber > 0 ? `第 ${entry.episodeNumber} 集` : (entry.episodeTitle || '继续播放') }}</small>
-          </span>
-          <span class="continue-history-progress" aria-hidden="true"><i :style="{ width: `${historyProgress(entry)}%` }"></i></span>
+      <div v-if="recentHistory.length" class="recent-history-rail" :class="{ 'has-more': recentHistory.length > 2 }">
+        <button v-for="entry in recentHistory" :key="entry.id" type="button" class="recent-history-card" @click="emit('play-history', entry)">
+          <CinemaStill :poster="entry.media.poster" :backdrop="cinemaBackdrop(entry.media, backdrops)" :progress="cinemaWatchProgress(entry)" />
+          <strong :title="entry.media.title">{{ entry.media.title }}</strong>
+          <small>{{ formatHistoryMeta(entry) }}</small>
         </button>
       </div>
+      <p v-else class="history-empty">{{ loadingHistory ? '正在读取观看记录…' : historyError ? '暂时无法读取观看历史' : '看过的影片会出现在这里。' }}</p>
     </section>
+
+    <nav v-if="section === 'overview'" class="account-menu account-library" aria-label="片库入口">
+      <button type="button" @click="emit('library')"><LibraryBig aria-hidden="true" /><strong>我的片库</strong><small>{{ libraryCount }} 部</small><ChevronRight aria-hidden="true" /></button>
+    </nav>
+
+    <nav v-if="section === 'settings'" class="account-menu" aria-label="设置分类">
+      <button type="button" @click="openSection('playback')"><ShieldCheck aria-hidden="true" /><strong>播放与网盘</strong><ChevronRight aria-hidden="true" /></button>
+      <button type="button" @click="openSection('appearance')"><Palette aria-hidden="true" /><strong>外观设置</strong><ChevronRight aria-hidden="true" /></button>
+      <button type="button" class="settings-install" @click="openSection('device')"><Download aria-hidden="true" /><strong>安装到桌面</strong><ChevronRight aria-hidden="true" /></button>
+      <button type="button" @click="openSection('account')"><UserRound aria-hidden="true" /><strong>账户</strong><ChevronRight aria-hidden="true" /></button>
+    </nav>
 
     <section v-if="section === 'history'" class="settings-section history-section" aria-labelledby="history-title">
       <div class="section-title-row compact">
-        <div>
-          <span>观看记录</span>
-          <h2 id="history-title">播放历史</h2>
-        </div>
+        <h2 id="history-title" class="account-title">播放历史</h2>
         <small v-if="!historyError && !loadingHistory" class="history-count">{{ history.length }} 条</small>
       </div>
 
@@ -215,7 +224,7 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
       <div v-if="history.length" class="history-list">
         <article v-for="entry in visibleHistory" :key="entry.id" class="history-row">
           <button type="button" class="history-main" @click="emit('play-history', entry)">
-<MediaPoster :src="entry.media.poster" :alt="`${entry.media.title}封面`" loading="lazy" decoding="async" />
+<CinemaStill :poster="entry.media.poster" :backdrop="cinemaBackdrop(entry.media, backdrops)" :progress="cinemaWatchProgress(entry)" />
             <span class="history-copy">
               <strong>{{ entry.media.title }}</strong>
               <small>{{ formatHistoryMeta(entry) }}</small>
@@ -371,50 +380,55 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 <style scoped>
 .advanced-account { margin-top: 16px; }
 .advanced-account > summary { padding: 12px 0; color: var(--text-secondary); cursor: pointer; }
-.account-content { display: flex; flex-direction: column; gap: 24px; max-width: 1080px; min-width: 0; margin-inline: auto; }
+.account-content { display: flex; flex-direction: column; gap: 22px; max-width: 760px; min-width: 0; margin-inline: auto; }
+.account-intro { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 64px; }
+.account-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .page-heading { display: flex; align-items: center; gap: 4px; }
-.back-button { display: grid; width: 44px; height: 44px; margin-inline-start: -10px; flex-shrink: 0; place-items: center; border: 0; border-radius: 50%; color: var(--text-primary); background: transparent; }
-.back-button svg { width: 22px; height: 22px; }
-.page-heading h1 { font-size: 1.9rem; line-height: 1.3; font-weight: 780; letter-spacing: -.03em; }
+.back-button { display: grid; width: 44px; height: 44px; margin-inline-start: -9px; flex-shrink: 0; place-items: center; border: 0; border-radius: 50%; color: var(--text-primary); background: transparent; }
+.back-button svg { width: 20px; height: 20px; }
+.page-heading h1 { font-size: 1.55rem; }
 .page-heading h1:focus { outline: none; }
-.profile-avatar { width: 64px; height: 64px; flex-shrink: 0; border: 1px solid var(--divider); border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
-.profile-row { display: flex; align-items: center; gap: 16px; }
-.profile-entry { min-height: 64px; padding: 20px 24px; border: 0; border-radius: 16px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
-.profile-entry:active { background: var(--surface-2); }
-.profile-copy { display: grid; flex: 1; min-width: 0; gap: 4px; }
-.profile-copy strong { overflow-wrap: anywhere; font-size: 1.2rem; font-weight: 750; letter-spacing: -.03em; }
-.profile-copy small, .profile-link { color: var(--text-secondary); font-size: .8rem; }
-.profile-link { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; }
-.profile-link svg { width: 16px; height: 16px; }
-.account-session { display: grid; gap: 20px; width: min(100%, 460px); padding: 20px; border-radius: 16px; background: var(--surface-1); }
-.account-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.account-menu button { position: relative; display: flex; flex-direction: column; align-items: start; gap: 16px; min-width: 0; min-height: 142px; padding: 24px; border: 0; border-radius: var(--cinema-radius-card); color: var(--text-primary); background: var(--surface-1); text-align: left; transition: border-color .2s, background .2s; }
-.account-menu-icon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 14px; background: var(--liquid-accent-subtle); color: var(--liquid-accent); }
-.account-menu-icon svg { width: 22px; height: 22px; }
-.account-menu-copy { display: grid; gap: 6px; min-width: 0; }
-.account-menu-copy strong { font-size: 15px; font-weight: 650; }
-.account-menu-copy small { font-size: 12px; line-height: 1.7; color: var(--text-tertiary); }
-.account-menu-arrow { position: absolute; top: 26px; right: 18px; width: 18px; height: 18px; color: var(--text-tertiary); }
-.settings-section { padding: 28px; border: 0; border-radius: var(--cinema-radius-panel); background: var(--surface-1); }
-.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
+.profile-avatar { width: 56px; height: 56px; flex-shrink: 0; border-radius: 50%; color: var(--liquid-accent); background: var(--surface-2); }
+.profile-row, .profile-entry { display: flex; align-items: center; gap: 12px; }
+.profile-entry { min-width: 0; min-height: 60px; padding: 0; border: 0; border-radius: var(--cinema-radius-control); color: var(--text-primary); background: transparent; text-align: left; }
+.profile-copy { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.profile-copy strong { overflow-wrap: anywhere; font-size: 1.1rem; font-weight: 700; }
+.profile-copy small { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: .76rem; }
+.profile-entry .profile-copy strong { font: 700 clamp(28px, 8vw, 38px)/1.13 var(--cinema-serif); letter-spacing: .045em; }
+.profile-entry .profile-copy small { color: var(--liquid-accent); letter-spacing: .05em; }
+.settings-entry { display: flex; flex-shrink: 0; align-items: center; gap: 5px; min-height: 44px; padding: 0 8px; border: 0; border-radius: var(--cinema-radius-control); color: var(--text-secondary); background: transparent; font-size: 13px; }
+.settings-entry svg { width: 17px; height: 17px; color: var(--liquid-accent); }
+.account-session { display: grid; gap: 16px; max-width: 460px; }
+.account-menu { display: grid; }
+.account-menu button { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 2px 0; border: 0; border-bottom: 1px solid var(--divider); color: var(--text-primary); background: transparent; text-align: left; }
+.account-menu button:last-child { border-bottom: 0; }
+.account-menu button > svg:first-child { width: 20px; height: 20px; color: var(--liquid-accent); }
+.account-menu button > svg:last-child { width: 15px; height: 15px; color: var(--text-tertiary); }
+.account-menu strong { flex: 1; min-width: 0; font-size: 14px; font-weight: 640; }
+.account-menu small { color: var(--text-tertiary); font-size: 12px; }
+.account-library { border-top: 1px solid var(--divider); padding-top: 6px; }
+.settings-section { min-width: 0; padding: 0; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .section-title-row > div > span { color: var(--text-tertiary); font-size: .71rem; }
-.section-title-row h2 { margin-top: 2px; color: var(--text-primary); font-size: 1.08rem; font-weight: 700; letter-spacing: -.025em; }
+.section-title-row h2 { color: var(--text-primary); font-size: 1.12rem; font-weight: 700; }
 .history-count { color: var(--text-tertiary); font-size: .73rem; }
-.continue-history-section { min-width: 0; }
-.continue-history-scroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 12px; scroll-snap-type: x proximity; }
-.continue-history-card { position: relative; width: 220px; height: 148px; flex: 0 0 220px; overflow: hidden; border: 1px solid var(--divider); border-radius: var(--cinema-radius-card); text-align: left; background: #253b5a; scroll-snap-align: start; }
-.continue-history-card img { width: 100%; height: 100%; object-fit: cover; object-position: center 28%; }
-.continue-history-shade { position: absolute; inset: 0; background: linear-gradient(180deg, transparent, rgb(8 21 44 / .88)); }
-.continue-history-copy { position: absolute; right: 13px; bottom: 17px; left: 13px; display: grid; gap: 2px; color: #fff; }
-.continue-history-copy strong { overflow: hidden; font-size: .84rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.continue-history-copy small { color: #dde6f6; font-size: .7rem; }
-.continue-history-progress { position: absolute; right: 13px; bottom: 9px; left: 13px; height: 3px; overflow: hidden; border-radius: 4px; background: var(--glass-bg); }
-.continue-history-progress i { display: block; height: 100%; background: var(--liquid-accent); }
+.recent-history { min-width: 0; }
+.recent-history .section-title-row { margin-bottom: 6px; }
+.recent-history-rail { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 12px) / 3); gap: 6px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 2px; margin-inline: -2px; }
+.recent-history-rail::-webkit-scrollbar { display: none; }
+.recent-history-card { display: grid; align-content: start; gap: 5px; min-width: 0; border: 0; border-radius: var(--cinema-radius-poster); background: transparent; color: var(--text-primary); text-align: left; scroll-snap-align: start; }
+.recent-history-card:focus-visible { outline-offset: -2px; }
+.recent-history-card strong, .recent-history-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-history-card strong { font-size: 14px; font-weight: 650; }
+.recent-history-card small { color: var(--text-secondary); font-size: 11px; }
+@media (hover: hover) and (pointer: fine) {
+  .settings-entry:hover, .account-menu button:hover { background: var(--glass-bg-hover); }
+}
 .history-list { display: grid; }
-.history-row { display: flex; align-items: center; gap: 8px; border-top: 1px solid rgb(78 105 150 / .09); }
+.history-row { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--divider); }
 .history-row:first-child { border: 0; }
 .history-main { display: flex; align-items: center; min-width: 0; flex: 1; gap: 13px; padding: 12px 0; border: 0; color: var(--text-primary); background: transparent; text-align: left; }
-.history-main img { width: 42px; height: 56px; flex-shrink: 0; object-fit: cover; border-radius: 10px; }
+.history-main .cinema-still { width: clamp(76px, 22vw, 108px); }
 .history-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
 .history-copy strong { overflow: hidden; font-size: .87rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .history-copy small { color: var(--text-tertiary); font-size: .72rem; }
@@ -437,7 +451,7 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 .reconfigure-button svg { width: 17px; height: 17px; }
 .credential-form { display: grid; gap: 10px; margin-top: 18px; }
 .credential-form label { color: var(--text-secondary); font-size: .8rem; }
-.credential-form textarea { width: 100%; min-height: 120px; padding: 13px; border: 1px solid rgb(95 120 166 / .2); border-radius: 17px; color: var(--text-primary); background: var(--glass-bg); font-size: 16px; resize: vertical; }
+.credential-form textarea { width: 100%; min-height: 120px; padding: 13px; border: 1px solid var(--divider); border-radius: var(--cinema-radius-control); color: var(--text-primary); background: var(--glass-bg); font-size: 16px; resize: vertical; }
 .credential-hint, .managed-hint { color: var(--text-tertiary); font-size: .73rem; line-height: 1.65; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 3px; }
 .save-credential { color: var(--accent-ink); background: var(--liquid-accent); }
@@ -454,40 +468,18 @@ defineExpose({ focusAuth, refreshStatus, showHistory, restoreSection });
 .logout-button svg { width: 20px; height: 20px; }
 .logout-button:focus-visible { outline-offset: -2px; }
 .logout-button:active { background: var(--danger-surface); }
-:global(html.ios-standalone .app-section) { display: none; }
+:global(html.ios-standalone .app-section), :global(html.ios-standalone .settings-install) { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (min-width: 1024px) {
-  .account-menu { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
 @media (min-width: 768px) {
-  .theme-section { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+  .theme-section { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
   .theme-section .section-title-row { margin: 0; }
-  .theme-section :deep(.theme-switch) { width: min(480px, 65%); }
+  .theme-section :deep(.theme-switch) { width: min(440px, 65%); }
 }
-@media (min-width: 1024px) and (max-width: 1279px) { .account-menu { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
-  .profile-row { gap: 14px; }
-  .profile-entry { padding: 4px 0; background: transparent; }
-  .profile-avatar { width: 52px; height: 52px; border: 0; box-shadow: none; }
-  .profile-copy strong { font-size: 1.16rem; }
-  .account-menu-copy small { display: none; }
-  .account-menu { grid-template-columns: 1fr; gap: 0; }
-  .account-menu button { flex-direction: row; align-items: center; gap: 12px; min-height: 52px; padding: 0 2px; border-radius: 0; background: transparent; }
-  .account-menu button::after { position: absolute; inset: auto 0 0 38px; height: 1px; background: var(--divider); content: ''; }
-  .account-menu button:last-child::after { content: none; }
-  .account-menu button:active { background: var(--surface-1); }
-  .account-menu-icon { width: 24px; height: 24px; background: transparent; }
-  .account-menu-icon svg { width: 20px; height: 20px; }
-  .account-menu-copy strong { font-weight: 550; }
-  .account-menu-arrow { position: static; width: 16px; height: 16px; flex-shrink: 0; margin-inline-start: auto; }
-  .continue-history-section .section-title-row { margin-bottom: 12px; }
-  .continue-history-scroll { padding: 2px 2px 6px; scrollbar-width: none; }
-  .continue-history-card { width: 180px; height: 120px; flex-basis: 180px; border: 0; border-radius: var(--cinema-radius-control); }
-  .continue-history-card:focus-visible { outline-offset: -3px; }
-}
-@media (max-width: 640px) {
-  .page-heading h1 { font-size: 1.75rem; }
-  .settings-section { padding: 22px; }
+  .account-content { gap: 19px; }
+  .profile-avatar { width: 53px; height: 53px; }
+  .recent-history-rail { grid-auto-columns: calc((100% - 10px) / 2); gap: 10px; }
+  .recent-history-rail.has-more { grid-auto-columns: 46%; }
   .history-main { gap: 10px; }
   .history-main .chevron { display: none; }
 }
