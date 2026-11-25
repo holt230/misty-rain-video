@@ -98,7 +98,8 @@
 .text-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
 .text-link svg, .more-films svg { width: 16px; height: 16px; }
 .catalog-grid, .cinema-still-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 19px 14px; }
-.catalog-card { display: grid; align-content: start; gap: 4px; min-width: 0; padding: 0; border: 0; border-radius: var(--cinema-radius-poster); background: transparent; color: var(--text-primary); text-align: left; }
+/* Keep intrinsic image dimensions from widening the card’s grid track. */
+.catalog-card { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 4px; min-width: 0; padding: 0; border: 0; border-radius: var(--cinema-radius-poster); background: transparent; color: var(--text-primary); text-align: left; }
 .catalog-card strong { margin-top: 3px; font-size: 14px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
 .saved-label { position: absolute; top: 6px; left: 7px; padding: 2px 5px; color: #fff7e9; background: rgb(7 7 6 / .68); border-radius: 4px; font-size: 10px; }
 .more-films { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; min-height: 46px; margin-top: 24px; color: var(--liquid-accent); background: transparent; border: 0; border-radius: var(--cinema-radius-control); font-size: 12px; }
