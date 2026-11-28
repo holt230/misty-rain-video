@@ -12,6 +12,7 @@ export interface OfficialWorkProgress {
   completed: boolean;
   platform: string;
   sourceUrl: string;
+  episodeTitles?: Record<number, string>;
 }
 
 export interface OfficialProgress {

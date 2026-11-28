@@ -25,7 +25,8 @@ import { usePlayerFullscreen, type NativeFullscreenVideo } from '../../composabl
 import { usePlaybackChrome } from '../../composables/usePlaybackChrome';
 import { PlaybackHistoryService } from '../../services/playbackHistoryService';
 import { playbackCoverage } from '../../services/playbackCoverage';
-import { chooseOfficialProgress, readOfficialProgress } from '../../services/officialProgress';
+import { chooseOfficialProgress, confirmedEpisodeTitles, readOfficialProgress } from '../../services/officialProgress';
+import { seasonQuery } from '../../../server/searchTitles.js';
 import type { OfficialWorkProgress } from '../../types/search';
 import { libraryPlaybackSelection } from '../../services/libraryPlaybackSelection';
 
@@ -68,15 +69,17 @@ const hlsRef = shallowRef<Hls | null>(null);
 const phase = ref<PlayerPhase>('idle');
 const session = ref<QuarkPlaybackSession | null>(null);
 const officialWork = ref<OfficialWorkProgress>();
+const episodeTitles = ref<Record<number, string>>({});
 let coverageController: AbortController | undefined;
-watch([() => props.isOpen, () => props.media?.quarkFid, () => props.media?.title], async ([open]) => {
-  coverageController?.abort(); officialWork.value = undefined;
+watch([() => props.isOpen, () => props.media?.quarkFid, () => props.media?.title, () => props.media?.year, () => props.media?.category], async ([open]) => {
+  coverageController?.abort(); officialWork.value = undefined; episodeTitles.value = {};
   const media = props.media;
   if (!open || !media || media.category !== 'tv') return;
   const controller = new AbortController(); coverageController = controller;
-  const data = await readOfficialProgress(media.title, media.category, controller.signal);
+  const data = await readOfficialProgress(media.title, media.category, controller.signal, true);
   if (controller.signal.aborted) return;
   officialWork.value = chooseOfficialProgress(data, media.title, media.category, [], media.year);
+  episodeTitles.value = confirmedEpisodeTitles(data, officialWork.value, media.title);
 }, { immediate: true });
 onBeforeUnmount(() => coverageController?.abort());
 const playback = ref<PreparedPlayback | null>(null);
@@ -107,6 +110,7 @@ const statusMessage = ref('');
 const playbackStarting = ref(false);
 const videoAspectRatio = ref(16 / 9);
 const pictureFit = ref<'contain' | 'cover'>('contain');
+const brightness = ref(1);
 const prolongedBuffering = ref(false);
 const interruptionPosition = ref(0);
 let playbackWatchdog: number | null = null;
@@ -190,7 +194,8 @@ const isMobilePlaybackDevice = typeof window !== 'undefined'
   && (window.matchMedia('(max-width: 820px), (max-height: 600px) and (pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 const { fullscreen, notice: fullscreenNotice, toggleFullscreen, exitFullscreen } =
   usePlayerFullscreen(() => playerWindowRef.value, () => videoRef.value, () => props.isOpen);
-const { immersive, immersiveStyle, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen, () => fullscreen.value);
+const { immersive, immersiveStyle, landscape, toggleWebFullscreen, resetLandscape } = useMobileLandscape(isMobilePlaybackDevice, () => props.isOpen, () => fullscreen.value);
+watch(() => props.isOpen, open => { if (!open) brightness.value = 1; });
 let fullscreenRequestPending = false;
 const toggleImmersivePlayback = async () => {
   if (fullscreenRequestPending) return;
@@ -308,8 +313,10 @@ const libraryCoverage = computed(() => playbackCoverage(episodes.value, props.me
 const episodeStatus = computed(() => {
   const episode = currentEpisode.value;
   if (!episode) return episodes.value.length ? `片库 ${libraryCoverage.value.count} 集` : '';
-  const currentLabel = episode.episodeNumber > 0 ? `第 ${episode.episodeNumber} 集` : episode.episodeTitle;
-  return currentLabel;
+  const season = episode.seasonNumber || 0;
+  const matchesSeason = !season || season === (seasonQuery(props.media?.title || '')?.number || 1);
+  const title = matchesSeason ? episodeTitles.value[episode.episodeNumber] : '';
+  return title ? `${episode.episodeTitle} · ${title}` : episode.episodeTitle;
 });
 const loadingTitle = computed(() => phase.value === 'resolving'
   ? '正在载入片库'
@@ -1475,7 +1482,7 @@ defineExpose({ retry, dismissLayer });
           <button class="icon-button player-back-button" type="button" aria-label="返回上一页" @click="back"><ArrowLeft /></button>
           <div class="title-copy">
             <h2>{{ media.title }}</h2>
-            <p v-if="episodeStatus">{{ episodeStatus }}</p>
+            <p v-if="episodeStatus" :title="episodeStatus">{{ episodeStatus }}</p>
           </div>
         </div>
 
@@ -1495,7 +1502,7 @@ defineExpose({ retry, dismissLayer });
               :key="videoInstanceKey"
               ref="videoRef"
               class="video-element"
-              :style="{ objectFit: pictureFit }"
+              :style="{ objectFit: pictureFit, filter: brightness === 1 ? undefined : `brightness(${brightness})` }"
               :controls="false"
               tabindex="0"
               aria-label="视频画面，可使用空格暂停，方向键调整进度"
@@ -1532,9 +1539,10 @@ defineExpose({ retry, dismissLayer });
             <MobilePlaybackControls
               v-if="videoRef && phase === 'ready' && !manualPlayRequired"
               :video="videoRef" :loading="playbackStarting" :hls="hlsRef" :username="username" :expanded="immersive" :desktop="!isMobilePlaybackDevice" :danmaku-enabled="danmakuControls?.enabled"
-              :title="`${media.title}${currentEpisode ? ' · ' + currentEpisode.episodeTitle : ''}`" :picture-fit="pictureFit"
+              :title="media.title" :episode-title="currentEpisode ? episodeStatus : undefined" :picture-fit="pictureFit" :landscape="landscape" :brightness="brightness"
               @fullscreen="toggleImmersivePlayback" @danmaku="danmakuControls?.toggle()" @back="back" @picture-fit="pictureFit = pictureFit === 'contain' ? 'cover' : 'contain'"
               @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
+              @brightness="brightness = $event"
             />
             <p v-if="fullscreenNotice" class="fullscreen-notice" role="status">{{ fullscreenNotice }}</p>
             <button v-if="immersive && (phase !== 'ready' || manualPlayRequired)" class="stage-back-button icon-button" type="button" aria-label="返回播放页面" @click="back"><ArrowLeft /></button>
@@ -1884,7 +1892,7 @@ defineExpose({ retry, dismissLayer });
 .player-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; flex: 1; }
 .player-layout.single-column { grid-template-columns: minmax(0, 1fr); }
 .video-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
-/* Only the stage owns dark tokens. Playback pixels are never blurred or tinted. */
+/* Only the stage owns dark tokens. Any brightness adjustment applies to video only. */
 .video-stage { --text-primary: #f6f8ff; --text-secondary: #d0daea; --text-tertiary: #b7c4d9; --liquid-accent: #b6ceff; --liquid-accent-strong: #91b3f7; position: relative; display: grid; width: 100%; min-height: 0; aspect-ratio: var(--video-ratio, 16 / 9); flex: 0 0 auto; place-items: center; overflow: hidden; border: var(--glass-border); border-radius: 12px; color: var(--text-primary); background: #000; color-scheme: dark; }
 .fullscreen-notice { position: absolute; z-index: 10; top: calc(60px + var(--player-inset-top, 0px)); left: max(16px, var(--player-inset-left, 0px)); right: max(16px, var(--player-inset-right, 0px)); margin: 0 auto; width: fit-content; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 10px; color: #fff; background: rgb(0 0 0 / .85); font-size: 12px; text-align: center; }
 .stage-back-button { position: absolute; z-index: 11; top: calc(8px + var(--player-inset-top, 0px)); left: calc(16px + var(--player-inset-left, 0px)); color: #fff; background: rgb(0 0 0 / .35); }

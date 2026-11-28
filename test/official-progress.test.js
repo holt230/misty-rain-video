@@ -6,7 +6,7 @@ import { OfficialProgressService, parseOfficialProgress, confirmOfficialLatest }
 const doupo=JSON.parse(fs.readFileSync('test/fixtures/official-progress/doupo.json','utf8'));
 const xianni=JSON.parse(fs.readFileSync('test/fixtures/official-progress/xianni.json','utf8'));
 const compiled=await build({entryPoints:['src/services/officialProgress.ts'],bundle:true,write:false,format:'esm',define:{'import.meta.env.BASE_URL':'"/"'},logLevel:'silent'});
-const {chooseOfficialProgress,readOfficialProgress}=await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+const {chooseOfficialProgress,confirmedEpisodeTitles,readOfficialProgress}=await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
 test('真实腾讯目录：斗破为219正片而非230目录条目，仙逆168为预告只取167',()=>{
  const finished=parseOfficialProgress(doupo,'斗破苍穹','anime');
@@ -58,4 +58,26 @@ test('客户端官方接口挂起也受限，取消后返回未知且不阻塞�
  const pending=readOfficialProgress('斗破苍穹','anime',controller.signal);
  controller.abort();const result=await pending;
  assert.equal(upstreamSignal.aborted,true);assert.equal(result.status,'unavailable');assert.deepEqual(result.works,[]);
+});
+
+test('播放页按腾讯已确认正片编号读取副标题，预告及错误版本不能提供名字', async () => {
+ const id='mzc002006266llu', title='多喜一家人', vid='abcde123456';
+ const search={ret:0,data:{normalList:{itemList:[{doc:{id,dataType:2},videoInfo:{title,typeName:'电视剧',year:2026,
+   imgTag:{tag:{text:'全2集'}},episodeSites:[{enName:'qq',episodeInfoList:[{id:vid,title:'2',url:`https://v.qq.com/x/cover/${id}/${vid}.html`}]}]}}]}}};
+ const full={ret:0,data:{module_list_datas:[{module_datas:[{item_data_lists:{item_datas:[
+   {item_params:{cid:id,title:'01',vid:'uvwxyz12345',play_title:title+' 第01集',video_subtitle:'家里来了新消息'}},
+   {item_params:{cid:id,title:'02',vid,play_title:title+' 第02集',video_subtitle:''}},
+   {item_params:{cid:id,title:'02',vid:'klmno123456',is_trailer:'1',video_subtitle:'不该显示的标题'}}
+ ]}}]}]}};
+ const calls=[];
+ const service=new OfficialProgressService({fetchImpl:async url=>{
+   const details=url.includes('/GetPageData');calls.push(details);return Response.json(details?full:search);
+ }});
+ const normal=await service.lookup(title,{category:'tv'});
+ assert.deepEqual(calls,[false]);assert.equal(normal.works[0].episodeTitles,undefined);
+ const enriched=await service.lookup(title,{category:'tv',includeEpisodeTitles:true});
+ assert.deepEqual(enriched.works[0].episodeTitles,{1:'家里来了新消息'});
+ const different={...enriched.works[0],year:'2015',episodeTitles:{2:'旧版标题'}};
+ assert.deepEqual(confirmedEpisodeTitles({works:[...enriched.works,different]},enriched.works[0],title),{1:'家里来了新消息'});
+ assert.deepEqual(confirmedEpisodeTitles(enriched,enriched.works[0],title+' 第二季'),{});
 });

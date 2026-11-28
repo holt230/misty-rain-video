@@ -2,10 +2,10 @@
 import type Hls from 'hls.js';
 import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitlePreference, subtitlePreferenceKey, subtitleEvents, type SubtitleTrackOption } from '../../services/subtitleTracks';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, MessageSquareText, SlidersHorizontal, Expand, Shrink, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX } from '@lucide/vue';
+import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, MessageSquareText, SlidersHorizontal, Expand, Shrink, Pause, Play, RotateCcw, RotateCw, Sun, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; loading?: boolean; desktop?: boolean; danmakuEnabled?: boolean; title?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
-const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'danmaku'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void }>();
+const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; landscape?: boolean; brightness?: number; loading?: boolean; desktop?: boolean; danmakuEnabled?: boolean; title?: string; episodeTitle?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
+const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'danmaku'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void; (e: 'brightness', value: number): void }>();
 const visible = ref(true);
 const paused = ref(true);
 const muted = ref(false);
@@ -30,6 +30,10 @@ const subtitle = ref('off');
 const speed = ref(1);
 const locked = ref(false);
 const boosted = ref(false);
+type GestureKind = 'brightness' | 'volume';
+const swipeEnabled = computed(() => props.expanded && props.landscape && !props.desktop && !locked.value && !props.loading);
+const swipeFeedback = ref<{ kind: GestureKind; level?: number }>();
+const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
 const rateKey = () => 'misty_playback_speed:' + (props.username || 'guest');
 function changeSpeed(event: Event) {
@@ -44,7 +48,9 @@ function changeSpeed(event: Event) {
 watch(locked, value => emit('lock-change', value));
 let timer: ReturnType<typeof setTimeout> | undefined;
 let seekNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+let swipeTimer: ReturnType<typeof setTimeout> | undefined;
 let release = () => {};
+const clearSwipeFeedback = () => { clearTimeout(swipeTimer); swipeFeedback.value = undefined; };
 const clock = (value: number) => {
   const seconds = Math.max(0, Math.floor(value || 0));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -137,19 +143,24 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   let initialRate = 1;
   let suppressTap = false;
   let touchTapPending = false;
+  let pointerId: number | undefined;
+  let swipe: { kind: GestureKind; initial: number; distance: number } | undefined;
+  let volumeReadOnly = false;
   let previousTouchTap: { at: number; x: number; y: number } | undefined;
   let origin = { x: 0, y: 0 };
   const endPress = () => {
     clearTimeout(pressTimer);
     if (boosted.value) { video.playbackRate = initialRate; boosted.value = false; suppressTap = true; }
   };
-  const cancelPress = () => { endPress(); touchTapPending = false; previousTouchTap = undefined; };
+  const cancelPress = () => { endPress(); touchTapPending = false; previousTouchTap = undefined; swipe = undefined; clearSwipeFeedback(); };
   const startPress = (event: PointerEvent) => {
     if (event.pointerType === 'mouse') { video.focus({ preventScroll: true }); reveal(); return; }
     if (event.cancelable) event.preventDefault();
-    endPress(); touchTapPending = false;
+    if (event.isPrimary === false) { cancelPress(); return; }
+    endPress(); touchTapPending = false; swipe = undefined; clearSwipeFeedback();
     suppressTap = false;
     touchTapPending = true;
+    pointerId = event.pointerId;
     origin = { x: event.clientX, y: event.clientY };
     if (locked.value || video.paused || (event.button !== undefined && event.button !== 0)) return;
     pressTimer = setTimeout(() => {
@@ -161,8 +172,38 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     }, 450);
   };
   const movePress = (event: PointerEvent) => {
-    if (event.pointerType === 'mouse') reveal();
-    if (Math.abs(event.clientX - origin.x) + Math.abs(event.clientY - origin.y) > 12) cancelPress();
+    if (event.pointerType === 'mouse') { reveal(); return; }
+    if (event.pointerId !== pointerId || (!touchTapPending && !swipe)) return;
+    const dx = Math.abs(event.clientX - origin.x);
+    const dy = origin.y - event.clientY;
+    if (!swipe) {
+      const distance = Math.abs(dy);
+      if (distance < 14 && dx < 14) return;
+      if (!swipeEnabled.value || boosted.value || distance < dx * 1.3) { cancelPress(); return; }
+      const frame = video.getBoundingClientRect();
+      if (!frame.width || !frame.height) { cancelPress(); return; }
+      const kind = origin.x < frame.left + frame.width / 2 ? 'brightness' : 'volume';
+      const initial = kind === 'brightness' ? props.brightness ?? 1 : video.muted ? 0 : video.volume;
+      swipe = { kind, initial, distance: clamp(frame.height * .72, 170, 360) };
+      endPress(); touchTapPending = false; previousTouchTap = undefined;
+    }
+    if (event.cancelable) event.preventDefault();
+    const delta = dy / swipe.distance;
+    if (swipe.kind === 'brightness') {
+      const level = Math.round(clamp(swipe.initial + delta * 1.25, .25, 1.5) * 100) / 100;
+      emit('brightness', level);
+      swipeFeedback.value = { kind: 'brightness', level };
+    } else {
+      const level = Math.round(clamp(swipe.initial + delta) * 100) / 100;
+      // Some mobile WebKit builds ignore or reject assignment. Keep the direct
+      // media pipeline intact and show the system control as the next action.
+      if (!volumeReadOnly) {
+        try { video.volume = level; volumeReadOnly = Math.abs(video.volume - level) > .01; }
+        catch { volumeReadOnly = true; }
+      }
+      if (!volumeReadOnly) video.muted = level === 0;
+      swipeFeedback.value = volumeReadOnly ? { kind: 'volume' } : { kind: 'volume', level: video.volume };
+    }
   };
   const tap = () => {
     if (locked.value) { reveal(); return; }
@@ -170,7 +211,14 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (visible.value && !video.paused) visible.value = false; else reveal();
   };
   const finishPress = (event: PointerEvent) => {
-    const tapped = touchTapPending && event.pointerType !== 'mouse';
+    if (event.pointerType === 'mouse' || event.pointerId !== pointerId) return;
+    if (swipe) {
+      swipe = undefined;
+      clearTimeout(swipeTimer);
+      swipeTimer = setTimeout(clearSwipeFeedback, 1300);
+      return;
+    }
+    const tapped = touchTapPending;
     const held = boosted.value;
     endPress(); touchTapPending = false;
     // touchstart is cancelled below, so touch taps need their own control toggle.
@@ -187,6 +235,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
       tap();
     }
   };
+  const leavePress = () => { if (touchTapPending || swipe || boosted.value) cancelPress(); };
   const preventNativeTouch = (event: TouchEvent) => {
     if (event.cancelable) event.preventDefault();
     if (event.touches.length !== 1) cancelPress();
@@ -196,6 +245,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (!pointerType || pointerType === 'mouse') tap();
   };
   const stopLockWatch = watch(locked, cancelPress);
+  const stopSwipeWatch = watch(swipeEnabled, value => { if (!value) cancelPress(); });
   const doubleTap = (event: Event) => {
     if (locked.value) return;
     event.preventDefault();
@@ -259,7 +309,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   video.addEventListener('pointermove', movePress);
   video.addEventListener('pointerup', finishPress);
   video.addEventListener('pointercancel', cancelPress);
-  video.addEventListener('pointerleave', cancelPress);
+  video.addEventListener('pointerleave', leavePress);
   video.addEventListener('touchstart', preventNativeTouch, { passive: false });
   video.addEventListener('touchcancel', cancelPress);
   video.addEventListener('dblclick', doubleTap);
@@ -280,13 +330,13 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     events.forEach(event => video.removeEventListener(event, sync));
     ['play', 'pause', 'ended'].forEach(event => video.removeEventListener(event, playback));
     ['addtrack', 'removetrack', 'change'].forEach(event => video.textTracks.removeEventListener(event, syncTracks));
-    cancelPress(); stopLockWatch();
+    cancelPress(); stopLockWatch(); stopSwipeWatch();
     video.removeEventListener('click', click);
     video.removeEventListener('pointerdown', startPress);
     video.removeEventListener('pointermove', movePress);
     video.removeEventListener('pointerup', finishPress);
     video.removeEventListener('pointercancel', cancelPress);
-    video.removeEventListener('pointerleave', cancelPress);
+    video.removeEventListener('pointerleave', leavePress);
     video.removeEventListener('touchstart', preventNativeTouch);
     video.removeEventListener('touchcancel', cancelPress);
     video.removeEventListener('dblclick', doubleTap);
@@ -309,6 +359,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <div v-if="swipeFeedback" class="gesture-feedback" :class="swipeFeedback.kind" role="status">
+    <Sun v-if="swipeFeedback.kind === 'brightness'" aria-hidden="true" /><Volume2 v-else aria-hidden="true" />
+    <template v-if="swipeFeedback.level !== undefined">
+      <span>{{ swipeFeedback.kind === 'brightness' ? '亮度' : '音量' }} {{ Math.round(swipeFeedback.level * 100) }}%</span>
+      <i :style="{ '--level': `${(swipeFeedback.kind === 'brightness' ? (swipeFeedback.level - .25) / 1.25 : swipeFeedback.level) * 100}%` }" aria-hidden="true" />
+    </template>
+    <span v-else>请用音量键调节</span>
+  </div>
   <div class="mobile-controls" :class="{ concealed: !visible, locked, desktop, expanded }" @pointerdown="reveal" @focusin="reveal">
     <p v-if="notice" class="control-notice" role="status">{{ notice }}</p>
     <div v-if="boosted" class="speed-notice" role="status">正在加速播放 · 松手恢复</div>
@@ -316,7 +374,7 @@ onBeforeUnmount(() => {
     <button v-if="expanded && !desktop" class="lock-control" type="button" :aria-label="locked ? '解锁播放控制' : '锁定播放控制'" @click="locked = !locked; reveal()"><UnlockKeyhole v-if="locked" /><LockKeyhole v-else /></button>
     <div v-if="!locked" class="control-tools">
       <button v-if="expanded" type="button" class="back-control" aria-label="返回播放页面" @click="emit('back')"><ArrowLeft /></button>
-      <span v-if="expanded" class="playing-title">{{ title }}</span>
+      <span v-if="expanded" class="playing-title"><strong>{{ title }}</strong><small v-if="episodeTitle" :title="episodeTitle">{{ episodeTitle }}</small></span>
       <span v-else class="desktop-shortcuts">空格 播放/暂停 · ← → 快退/快进</span>
       <button v-if="expanded && danmakuEnabled !== undefined" type="button" role="switch" aria-label="弹幕" :aria-checked="danmakuEnabled" @click="emit('danmaku')"><MessageSquareText /><span>弹幕</span></button>
       <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
@@ -371,7 +429,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .control-tools button[aria-checked='true'] { background: rgb(255 255 255 / .25); }
 .control-tools svg { width: 18px; height: 18px; }
 .control-tools .back-control { width: 44px; flex: 0 0 44px; padding: 10px; border-radius: 50%; }
-.playing-title { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; text-shadow: 0 1px 4px #000; }
+.playing-title { flex: 1; min-width: 0; display: grid; gap: 2px; text-shadow: 0 1px 4px #000; }
+.playing-title > * { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.playing-title strong { font-size: 14px; font-weight: 600; }
+.playing-title small { color: #e2e6ed; font-size: 11px; }
 .playback-actions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(20px, 4vw, 36px); }
 .playback-actions button { background: rgb(0 0 0 / .24); }
 .playback-actions .play-toggle { width: 52px; height: 52px; flex-basis: 52px; background: rgb(255 255 255 / .18); }
@@ -382,6 +443,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .lock-control { position: absolute; top: 50%; left: var(--control-left); transform: translateY(-50%); background: rgb(0 0 0 / .4); }
 .mobile-controls.locked { background: transparent; }
 .speed-notice { position: absolute; top: calc(var(--control-top) + 48px); left: 50%; z-index: 1; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 14px; background: rgb(0 0 0 / .8); color: #fff; border-radius: 12px; font-size: 12px; white-space: nowrap; }
+.gesture-feedback { position: absolute; top: 50%; z-index: 4; transform: translateY(-50%); pointer-events: none; display: grid; justify-items: center; gap: 6px; min-width: 92px; padding: 10px 12px; border-radius: 14px; background: rgb(12 12 15 / .85); color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
+.gesture-feedback.brightness { left: calc(64px + var(--player-inset-left, 0px)); }
+.gesture-feedback.volume { right: calc(24px + var(--player-inset-right, 0px)); }
+.gesture-feedback svg { width: 21px; height: 21px; }
+.gesture-feedback i { width: 100%; height: 3px; border-radius: 2px; background: linear-gradient(to right, #fff var(--level), rgb(255 255 255 / .3) var(--level)); }
 .transport { position: absolute; inset: auto var(--control-right) var(--control-bottom) var(--control-left); display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; column-gap: 8px; }
 .transport .time { text-align: center; }
 .seek-slider { --played: 0%; --buffered: 0%; width: 100%; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }

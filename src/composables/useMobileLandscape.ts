@@ -60,5 +60,5 @@ export function useMobileLandscape(mobile: boolean, isOpen: () => boolean, isFul
     window.visualViewport?.removeEventListener('resize', sync);
     window.visualViewport?.removeEventListener('scroll', sync);
   });
-  return { immersive, immersiveStyle, toggleWebFullscreen, resetLandscape };
+  return { immersive, immersiveStyle, landscape, toggleWebFullscreen, resetLandscape };
 }

@@ -12,6 +12,7 @@ defineExpose({ enabled, toggle });
 const expanded = ref(false);
 const opacity = ref(Math.max(.3, Math.min(1, Number(localStorage.getItem('misty_rain_danmaku_opacity')) || .75)));
 const density = ref<'low' | 'normal'>(localStorage.getItem('misty_rain_danmaku_density') === 'normal' ? 'normal' : 'low');
+const effects = ref(localStorage.getItem('misty_rain_danmaku_effects') !== 'false');
 const offset = ref(0);
 const source = ref<DanmakuSource | null>(null);
 const candidates = ref<DanmakuWork[]>([]);
@@ -26,6 +27,7 @@ const recoveryHint = ref('');
 const fetchedAt = ref(0);
 const stale = ref(false);
 const overlay = ref<HTMLElement | null>(null);
+const playing = ref(false);
 const nativeFullscreen = ref(false);
 const hiddenPage = ref(document.hidden);
 const segments = new Map<number, DanmakuSegment>();
@@ -80,7 +82,7 @@ async function render() {
     if (seq !== renderGeneration || !active.value || !overlay.value) return;
     engine?.destroy();
     engine = new Renderer({ container: overlay.value, media: props.video, engine: 'dom', speed: 100,
-      comments: displayComments([...segments.values()].flatMap(item => item.comments), density.value, offset.value) });
+      comments: displayComments([...segments.values()].flatMap(item => item.comments), density.value, offset.value, effects.value) });
   } catch { message.value = '弹幕显示暂不可用，请刷新页面'; recovery.value = 'retry'; }
 }
 function reset() {
@@ -183,17 +185,25 @@ function fullscreen() {
 }
 function beginFullscreen() { nativeFullscreen.value = true; }
 function endFullscreen() { nativeFullscreen.value = false; }
-function seek() { engine?.clear(); void loadCurrent(); }
+function syncPlaying() { playing.value = Boolean(boundVideo && !boundVideo.paused && !boundVideo.seeking && !boundVideo.ended && boundVideo.readyState >= 3); }
+function stopEffects() { playing.value = false; }
+function seek() { syncPlaying(); engine?.clear(); void loadCurrent(); }
 function rateChange() { void render(); }
+const effectStops = ['pause', 'waiting', 'seeking', 'ended', 'emptied'];
 function bindVideo(video: HTMLVideoElement | null) {
   if (boundVideo) {
     boundVideo.removeEventListener('seeked', seek); boundVideo.removeEventListener('ratechange', rateChange);
     boundVideo.removeEventListener('webkitbeginfullscreen', beginFullscreen); boundVideo.removeEventListener('webkitendfullscreen', endFullscreen);
+    boundVideo.removeEventListener('playing', syncPlaying);
+    for (const event of effectStops) boundVideo.removeEventListener(event, stopEffects);
   }
   boundVideo = video;
+  syncPlaying();
   if (video) {
     video.addEventListener('seeked', seek); video.addEventListener('ratechange', rateChange);
     video.addEventListener('webkitbeginfullscreen', beginFullscreen); video.addEventListener('webkitendfullscreen', endFullscreen);
+    video.addEventListener('playing', syncPlaying);
+    for (const event of effectStops) video.addEventListener(event, stopEffects);
   }
 }
 watch(enabled, value => {
@@ -204,9 +214,10 @@ watch(active, async value => {
   if (!value) engine?.hide();
   else { await nextTick(); await render(); void loadCurrent(); }
 });
-watch([density, opacity], () => {
+watch(opacity, value => localStorage.setItem('misty_rain_danmaku_opacity', String(value)));
+watch([density, effects], () => {
   localStorage.setItem('misty_rain_danmaku_density', density.value);
-  localStorage.setItem('misty_rain_danmaku_opacity', String(opacity.value));
+  localStorage.setItem('misty_rain_danmaku_effects', String(effects.value));
   void render();
 });
 watch(offset, () => {
@@ -233,7 +244,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport v-if="target" :to="target">
-    <div ref="overlay" class="danmaku-overlay" :style="{ opacity, visibility: active ? 'visible' : 'hidden' }" aria-hidden="true" />
+    <div ref="overlay" class="danmaku-overlay" :class="{ 'danmaku-overlay--playing': active && playing }" :style="{ opacity, visibility: active ? 'visible' : 'hidden' }" aria-hidden="true" />
   </Teleport>
   <div class="danmaku-controls">
     <div class="danmaku-row">
@@ -260,6 +271,7 @@ onBeforeUnmount(() => {
     <div v-if="enabled && expanded" class="danmaku-settings">
       <div class="danmaku-panel-heading"><strong>弹幕设置</strong><button type="button" @click="expanded = false">完成</button></div>
       <div class="danmaku-preferences">
+        <label class="danmaku-effects-toggle"><span>特效弹幕<small>高能弹幕会带光效进场</small></span><input v-model="effects" class="danmaku-effects-input" type="checkbox" role="switch" aria-label="特效弹幕" /><span class="danmaku-effects-switch" aria-hidden="true" /></label>
         <label>弹幕数量<select v-model="density" aria-label="弹幕数量"><option value="low">少一点</option><option value="normal">适中</option></select></label>
         <label>清晰程度<input v-model.number="opacity" aria-label="弹幕清晰程度" type="range" min="0.3" max="1" step="0.05" /></label>
       </div>
@@ -284,7 +296,49 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.danmaku-overlay { position: absolute; z-index: 1; inset: 10px 8px auto; height: 42%; overflow: hidden; pointer-events: none; contain: layout paint; }
+.danmaku-overlay { position: absolute; z-index: 1; inset: 10px 8px auto; height: 42%; overflow: hidden; pointer-events: none; contain: layout paint; --effects-state: paused; }
+.danmaku-overlay--playing { --effects-state: running; }
+.danmaku-overlay :deep(.danmaku-highlight) {
+  --spark: #8df8f3; --rim: #82a9ff; --tone: 31 67 123;
+  position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 6px;
+  box-sizing: border-box; max-width: min(84vw, 288px); height: 28px; margin: 3px 8px;
+  padding: 0 11px 0 9px; border: 1px solid var(--rim); border-radius: 999px;
+  background: linear-gradient(108deg, rgb(var(--tone) / .95), rgb(13 14 32 / .93) 58%, rgb(var(--tone) / .92));
+  box-shadow: 0 0 12px -3px var(--rim), inset 0 1px 0 rgb(255 255 255 / .18);
+  color: #fff; font: 700 15px/1.1 system-ui, sans-serif;
+  letter-spacing: .045em; text-shadow: 0 1px 3px #08050c;
+  overflow: hidden; vertical-align: top;
+}
+.danmaku-overlay :deep(.danmaku-highlight--reaction) { --spark: #ffd7fa; --rim: #e58bf2; --tone: 114 34 119; }
+.danmaku-overlay :deep(.danmaku-highlight--spotlight) { --spark: #fff5ba; --rim: #ffc974; --tone: 115 65 24; }
+.danmaku-overlay :deep(.danmaku-highlight-text) { overflow: hidden; text-overflow: ellipsis; }
+.danmaku-overlay :deep(.danmaku-highlight-mark) {
+  flex: 0 0 10px; height: 10px; background: var(--spark);
+  clip-path: polygon(50% 0, 64% 35%, 100% 50%, 64% 64%, 50% 100%, 35% 64%, 0 50%, 35% 35%);
+}
+.danmaku-overlay :deep(.danmaku-highlight::before) {
+  content: ''; position: absolute; z-index: -1; inset: -40% 32%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / .55), transparent);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .danmaku-overlay :deep(.danmaku-highlight::before) {
+    animation: danmaku-sheen .85s ease-out both; animation-play-state: var(--effects-state);
+  }
+  .danmaku-overlay :deep(.danmaku-highlight--spotlight) {
+    animation: danmaku-arrive .35s cubic-bezier(.2,.8,.2,1) both; animation-play-state: var(--effects-state);
+  }
+}
+@keyframes danmaku-sheen {
+  0% { opacity: 0; transform: translateX(-200%) skewX(-24deg); }
+  18% { opacity: .8; }
+  100% { opacity: 0; transform: translateX(200%) skewX(-24deg); }
+}
+@keyframes danmaku-arrive {
+  0% { opacity: .55; transform: scale(.88); }
+  64% { opacity: 1; transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
 .danmaku-controls { flex: 0 0 auto; min-width: 0; color: var(--text-primary); }
 .danmaku-row { display: flex; align-items: center; gap: 10px; padding-top: 8px; }
 .danmaku-row p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.5; }
@@ -307,6 +361,14 @@ onBeforeUnmount(() => {
 .danmaku-preferences { display: grid; gap: 12px; }
 .danmaku-preferences label { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .danmaku-preferences input[type='range'] { min-height: 44px; width: 55%; accent-color: var(--liquid-accent); }
+.danmaku-effects-toggle small { display: block; margin-top: 3px; color: var(--text-secondary); font-weight: normal; }
+.danmaku-effects-toggle { position: relative; min-height: 44px; cursor: pointer; }
+.danmaku-effects-toggle .danmaku-effects-input { position: absolute; inset: 0 0 0 auto; width: 44px; height: 44px; margin: 0; opacity: 0; cursor: pointer; }
+.danmaku-effects-switch { flex: 0 0 44px; position: relative; height: 26px; border-radius: 999px; background: var(--text-tertiary); pointer-events: none; }
+.danmaku-effects-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; }
+.danmaku-effects-input:checked + .danmaku-effects-switch { background: var(--liquid-accent-strong); }
+.danmaku-effects-input:checked + .danmaku-effects-switch::after { left: 21px; }
+.danmaku-effects-input:focus-visible + .danmaku-effects-switch { outline: 2px solid var(--liquid-accent); outline-offset: 2px; }
 .danmaku-offset { display: grid; gap: 6px; }
 .danmaku-candidates { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
 .danmaku-candidates li { display: grid; gap: 6px; }

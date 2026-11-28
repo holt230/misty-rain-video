@@ -1,7 +1,7 @@
 import { TencentCatalog, parseTencentEpisodes } from './danmaku/tencentCatalog.js';
 import { isExactWorkTitle, knownAnimeEdition } from './searchTitles.js';
 import { readWebResponseText } from './http.js';
-import { discoverOfficialPlatforms, officialPlatformUrl, OfficialPlatformCatalog } from './officialPlatforms.js';
+import { collectEpisodeTitles, discoverOfficialPlatforms, officialPlatformUrl, OfficialPlatformCatalog } from './officialPlatforms.js';
 
 const clean = value => String(value || '').replace(/<[^>]*>/g, '').trim().slice(0, 160);
 const categories = { '动漫': 'anime', '电视剧': 'tv' };
@@ -82,7 +82,7 @@ export async function confirmOfficialLatest(catalog, work) {
 
 export class OfficialProgressService {
   constructor({ fetchImpl = globalThis.fetch, timeoutMs = 3500 } = {}) { this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; }
-  async lookup(keyword, { category = 'all', signal, known = [] } = {}) {
+  async lookup(keyword, { category = 'all', signal, known = [], includeEpisodeTitles = false } = {}) {
     keyword = knownAnimeEdition(keyword, category)?.title || keyword;
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -122,8 +122,16 @@ export class OfficialProgressService {
         const batch = await Promise.allSettled(candidates.slice(start, start + 4).map(async ({ work, provider }) => {
           const key = provider + ':' + (work.id || work.url);
           if (confirming.has(key)) return; confirming.add(key);
-          const value = await (provider === 'qq' ? confirmOfficialLatest(catalog, work) : platforms.confirm(work, keyword));
-          if (!controller.signal.aborted) confirmed.push(value);
+          const remember = value => { if (!controller.signal.aborted && !confirmed.includes(value)) confirmed.push(value); };
+          const value = await (provider === 'qq' ? confirmOfficialLatest(catalog, work)
+            : platforms.confirm(work, keyword, { includeEpisodeTitles, confirmed: remember }));
+          remember(value);
+          if (provider === 'qq' && includeEpisodeTitles && value.category === 'tv' && !controller.signal.aborted) {
+            try {
+              const { episodes } = await catalog.details(`qq:2:${value.id}`, value.id);
+              if (!controller.signal.aborted) value.episodeTitles = collectEpisodeTitles(episodes, value);
+            } catch { /* Missing optional titles do not invalidate confirmed progress. */ }
+          }
         }));
         if (batch.some(result => result.status === 'rejected')) confirmationFailed = true;
       }
