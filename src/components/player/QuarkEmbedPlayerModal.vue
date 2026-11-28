@@ -1502,7 +1502,7 @@ defineExpose({ retry, dismissLayer });
               :key="videoInstanceKey"
               ref="videoRef"
               class="video-element"
-              :style="{ objectFit: pictureFit, filter: brightness === 1 ? undefined : `brightness(${brightness})` }"
+              :style="{ objectFit: pictureFit }"
               :controls="false"
               tabindex="0"
               aria-label="视频画面，可使用空格暂停，方向键调整进度"
@@ -1535,10 +1535,16 @@ defineExpose({ retry, dismissLayer });
                 :src="subtitle.url"
               />
             </video>
+            <div
+              v-if="brightness < 1"
+              class="video-brightness-veil"
+              :style="{ opacity: Math.min(0.85, Math.max(0, 1 - brightness)) }"
+              aria-hidden="true"
+            />
 
             <MobilePlaybackControls
               v-if="videoRef && phase === 'ready' && !manualPlayRequired"
-              :video="videoRef" :loading="playbackStarting" :hls="hlsRef" :username="username" :expanded="immersive" :desktop="!isMobilePlaybackDevice" :danmaku-enabled="danmakuControls?.enabled"
+              :video="videoRef" :loading="playbackStarting" :hls="hlsRef" :username="username" :expanded="immersive" :desktop="!isMobilePlaybackDevice" :danmaku-enabled="danmakuControls?.enabled" :has-episodes="episodes.length > 1"
               :title="media.title" :episode-title="currentEpisode ? episodeStatus : undefined" :picture-fit="pictureFit" :landscape="landscape" :brightness="brightness"
               @fullscreen="toggleImmersivePlayback" @danmaku="danmakuControls?.toggle()" @back="back" @picture-fit="pictureFit = pictureFit === 'contain' ? 'cover' : 'contain'"
               @episodes="openEpisodeSheet" @settings="settingsExpanded = true" @lock-change="controlsLocked = $event"
@@ -1627,7 +1633,7 @@ defineExpose({ retry, dismissLayer });
                 <span><strong>播放设置</strong><small>{{ selectedSource?.label || '自动' }} · {{ audioChannelLabel || selectedSoundEffect?.label || '原声' }}</small></span>
                 <ChevronDown class="toolbar-chevron" aria-hidden="true" />
               </button>
-              <button type="button" @click="openEpisodeSheet">
+              <button v-if="episodes.length > 1" type="button" @click="openEpisodeSheet">
                 <ListVideo aria-hidden="true" />
                 <span><strong>选集</strong></span>
               </button>
@@ -1899,6 +1905,7 @@ defineExpose({ retry, dismissLayer });
 .video-stage, .video-stage :deep(*) { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .video-element { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #000; }
 .video-element { touch-action: none; }
+.video-brightness-veil { position: absolute; inset: 0; z-index: 1; background: #000; pointer-events: none; }
 .stage-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 20px; overflow-y: auto; text-align: center; background: radial-gradient(ellipse at 50% 10%, #222831, #0c1016 75%); }
 .loading-state { isolation: isolate; }
 .stage-poster { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
@@ -1912,7 +1919,7 @@ defineExpose({ retry, dismissLayer });
 .secondary-button { color: #f1f5ff; background: rgb(255 255 255 / .045); }
 .reload-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .reload-button svg { width: 16px; height: 16px; }
-.play-prompt, .playback-starting { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
+.play-prompt, .playback-starting { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; pointer-events: none; }
 .play-prompt { background: rgb(0 0 0 / .2); }
 .stage-play-button { display: grid; min-width: 140px; justify-items: center; gap: 7px; padding: 12px 16px; border: 0; border-radius: 26px; color: #fff; background: transparent; pointer-events: auto; }
 .stage-play-icon { display: grid; width: 68px; height: 68px; place-items: center; border: 1px solid var(--divider); border-radius: 50%; color: #fff; background: linear-gradient(145deg, rgb(255 255 255 / .4), rgb(255 255 255 / .1)); box-shadow: inset 0 2px 2px rgb(255 255 255 / .6), 0 9px 28px rgb(0 0 0 / .2); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); transition: transform .2s, background .2s; }
@@ -1928,10 +1935,14 @@ defineExpose({ retry, dismissLayer });
 .loading-wave i:nth-child(2) { animation-delay: .12s; }
 .loading-wave i:nth-child(3) { animation-delay: .24s; }
 .loading-wave i:nth-child(4) { animation-delay: .36s; }
-.playback-actions { display: contents; }
-.player-toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex-shrink: 0; gap: 9px; padding: 14px 0; }
-.player-toolbar button { display: flex; min-width: 0; min-height: 60px; align-items: center; gap: 10px; padding: 9px 13px; border: 0; border-radius: 12px; color: var(--text-primary); background: var(--surface-1); text-align: left; }
-.player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); border-color: rgb(var(--accent-rgb) / .25); }
+.playback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0 4px; }
+.playback-actions :deep(.danmaku-controls) { flex: 1 1 auto; min-width: 0; }
+.playback-actions :deep(.danmaku-controls:has(.danmaku-settings)) { flex-basis: 100%; }
+.playback-actions :deep(.danmaku-row) { padding-top: 0; }
+.playback-actions :deep(.danmaku-toggle) { min-height: 48px; padding: 0 14px; border: 1px solid var(--divider); border-radius: 12px; }
+.player-toolbar { display: flex; align-items: center; flex-shrink: 0; gap: 8px; padding: 0; }
+.player-toolbar button { display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 10px; padding: 6px 14px; border: 1px solid var(--divider); border-radius: 12px; color: var(--text-primary); background: var(--surface-1); text-align: left; white-space: nowrap; }
+.player-toolbar button[aria-expanded='true'] { color: var(--liquid-accent-strong); background: var(--liquid-accent-subtle); border-color: rgb(var(--accent-rgb) / .3); }
 .player-toolbar button > svg { width: 20px; height: 20px; flex-shrink: 0; color: var(--liquid-accent); }
 .player-toolbar button > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .player-toolbar strong { font-size: .81rem; font-weight: 650; }
@@ -2026,11 +2037,11 @@ defineExpose({ retry, dismissLayer });
   .episode-panel { flex: 0 0 auto; margin: 0 calc(14px + var(--safe-area-right)) calc(20px + var(--safe-area-bottom)) calc(14px + var(--safe-area-left)); border: 0; overflow: visible; scroll-margin-top: 10px; }
   .episode-heading { padding: 19px 16px 15px; }
   .episode-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; overflow: visible; padding: 7px 14px 20px; }
-  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid transparent; border-radius: 10px; background: var(--surface-1); box-shadow: none; }
+  .episode-item { position: relative; min-height: 52px; grid-template-columns: 1fr; padding: 0; gap: 0; border: 1px solid var(--divider); border-radius: 10px; background: var(--surface-1); box-shadow: none; }
   .episode-number { width: 100%; height: 100%; min-height: 52px; padding: 0 4px; border: 0; border-radius: inherit; background: transparent; font-size: .84rem; }
   .episode-number > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .episode-item.active { border-color: rgb(255 255 255 / .35); box-shadow: none; }
-  .episode-item.active .episode-number { background: var(--glass-bg-active); color: var(--text-primary);  box-shadow: none;  border-color: rgb(var(--accent-rgb) / .2); }
+  .episode-item.active { border-color: rgb(var(--accent-rgb) / .45); box-shadow: none; }
+  .episode-item.active .episode-number { background: var(--liquid-accent-subtle); color: var(--liquid-accent-strong); box-shadow: none; }
   .episode-latest { top: -5px; right: -4px;  color: var(--accent-ink); }
   .episode-copy { display: none; }
 }
@@ -2057,33 +2068,38 @@ defineExpose({ retry, dismissLayer });
 .playback-settings { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(560px, calc(100% - 48px)); max-height: 80%; overflow: hidden; margin: 0; background: var(--surface-1); border: 1px solid var(--divider); }
 .episode-panel.sheet-open { position: absolute; z-index: 16; right: 24px; bottom: 24px; width: min(420px, calc(100% - 48px)); height: min(75%, 700px); overflow: hidden; margin: 0; border-radius: 16px; border: 1px solid var(--divider); background: var(--surface-1); }
 .episode-panel.sheet-open .episode-list { overflow-y: auto; }
-@media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(var(--player-height, 100dvh) - 200px); } }
+@media (min-width: 821px) { .player-layout { grid-template-columns: minmax(0, 1fr) 320px; } .video-stage { max-height: calc(var(--player-height, 100dvh) - 188px); } }
 @media (min-width: 821px) and (max-width: 1199px) { .player-layout { grid-template-columns: minmax(0, 1fr) 260px; } }
 @media (min-width: 1024px) {
   .player-window { max-width: 1920px; margin-inline: auto; }
-  .video-column { padding: 24px; }
-  .video-stage { max-height: calc(var(--player-height, 100dvh) - 240px); }
+  .video-column { padding: 20px 24px; }
+  .video-stage { max-height: calc(var(--player-height, 100dvh) - 196px); }
   .episode-panel { background: var(--surface-1); }
   .episode-item { border-radius: 10px; }
   .episode-heading { padding: 24px 16px 16px; }
 }
 @media (max-width: 820px) {
   .player-window { --playback-left: max(16px, var(--safe-area-left)); --playback-right: max(16px, var(--safe-area-right)); }
-  .player-header { min-height: calc(74px + var(--safe-area-top)); gap: 8px; padding: calc(var(--mobile-header-top-space, 18px) + var(--safe-area-top)) var(--playback-right) 12px var(--playback-left); }
+  .player-header { min-height: calc(56px + var(--safe-area-top)); gap: 8px; padding: calc(var(--mobile-header-top-space, 12px) + var(--safe-area-top)) var(--playback-right) 10px var(--playback-left); }
   .title-block { gap: 8px; }
+  .title-copy p { font-size: .75rem; color: var(--text-secondary); }
   .player-back-button { margin-inline-start: -8px; }
   .player-layout { display: block; scroll-padding-top: min(calc(100vw / var(--video-ratio)), calc(var(--player-height, 100dvh) * .55)); }
   .video-column { display: contents; }
   .video-stage { position: sticky; z-index: 5; top: 0; border-radius: 0; width: 100%; aspect-ratio: var(--video-ratio, 16 / 9); min-height: 0; max-height: calc(var(--player-height, 100dvh) * .55); }
-  .playback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px var(--playback-right) 12px var(--playback-left); }
+  .playback-actions { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; padding: 10px var(--playback-right) 12px var(--playback-left); }
   .playback-actions:empty { display: none; }
+  .playback-actions :deep(.danmaku-controls) { flex: 0 0 auto; }
   .playback-actions :deep(.danmaku-row) { padding-top: 0; gap: 6px; }
-  .playback-actions :deep(.danmaku-toggle[aria-checked='false']) { padding-inline: 4px; background: transparent; }
+  .playback-actions :deep(.danmaku-toggle) { min-height: 48px; padding: 0 12px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); }
+  .playback-actions :deep(.danmaku-toggle[aria-checked='true']) { border-color: rgb(var(--accent-rgb) / .3); background: var(--liquid-accent-subtle); color: var(--liquid-accent-strong); }
   .playback-actions :deep(.danmaku-controls:has(.danmaku-toggle[aria-checked='true'])) { flex-basis: 100%; }
-  .player-toolbar { flex: 1 1 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 0; }
-  .player-toolbar button { min-height: 44px; padding: 4px 8px; background: transparent; white-space: nowrap; }
+  .player-toolbar { flex: 1 1 0; min-width: 0; display: flex; align-items: stretch; gap: 8px; padding: 0; }
+  .player-toolbar button { min-height: 48px; padding: 6px 12px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); white-space: nowrap; }
+  .player-toolbar button:first-child { flex: 1 1 auto; }
+  .player-toolbar button:not(:first-child) { flex: 0 0 auto; }
   .episode-panel { margin: 0 var(--playback-right) calc(24px + var(--safe-area-bottom)) var(--playback-left); }
-  .episode-panel:not(.sheet-open) .episode-coverage { margin: 0; padding: 12px 0 0; border: 0; border-top: 1px solid var(--divider); border-radius: 0; background: transparent; }
+  .episode-panel:not(.sheet-open) .episode-coverage { margin: 0; padding: 12px 0 6px; border: 0; border-top: 1px solid var(--divider); border-radius: 0; background: transparent; }
   .episode-panel:not(.sheet-open) .episode-coverage strong { color: var(--text-secondary); font-weight: 550; }
   .episode-panel:not(.sheet-open) .episode-heading { padding: 8px 0 10px; }
   .episode-panel:not(.sheet-open) .episode-ranges { padding-inline: 0; }
@@ -2093,10 +2109,14 @@ defineExpose({ retry, dismissLayer });
   .episode-panel.sheet-open .episode-list { flex: 1; min-height: 0; overflow-y: auto; }
 }
 .landscape-inline .video-stage { position: relative; max-height: none; min-height: 0; height: 100%; }
-.landscape-inline .playback-settings { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); max-height: 100%; border-radius: 0; }
+.landscape-inline .playback-settings { display: flex; inset: 0 0 0 auto; width: min(360px, 78vw); max-height: 100%; border-radius: 0; }
 .landscape-inline .settings-panel-heading { padding: max(12px, var(--player-inset-top, 0px)) calc(16px + var(--player-inset-right, 0px)) 12px 16px; }
 .landscape-inline .settings-panel-body { padding: 16px calc(16px + var(--player-inset-right, 0px)) calc(16px + var(--player-inset-bottom, 0px)) 16px; }
-.landscape-inline .episode-panel.sheet-open { display: flex; inset: 0 0 0 auto; width: min(350px, 65%); height: 100%; border-radius: 0; }
+.landscape-inline .episode-panel.sheet-open { display: flex; inset: 0 0 0 auto; width: min(360px, 78vw); height: 100%; border-radius: 0; }
 .landscape-inline .episode-panel.sheet-open .episode-heading { padding-top: max(12px, var(--player-inset-top, 0px)); padding-right: calc(16px + var(--player-inset-right, 0px)); }
-.landscape-inline .episode-panel.sheet-open .episode-list { padding-right: calc(12px + var(--player-inset-right, 0px)); padding-bottom: calc(16px + var(--player-inset-bottom, 0px)); }
+.landscape-inline .episode-panel.sheet-open .episode-list { grid-template-columns: minmax(0, 1fr); gap: 6px; padding-right: calc(12px + var(--player-inset-right, 0px)); padding-bottom: calc(16px + var(--player-inset-bottom, 0px)); }
+.landscape-inline .episode-panel.sheet-open .episode-item { min-height: 58px; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; padding: 9px; border-color: transparent; background: transparent; }
+.landscape-inline .episode-panel.sheet-open .episode-item.active { border-color: rgb(var(--accent-rgb) / .35); background: var(--glass-bg-active); }
+.landscape-inline .episode-panel.sheet-open .episode-number { width: 40px; height: 40px; min-height: 40px; border-radius: 8px; background: var(--glass-bg); }
+.landscape-inline .episode-panel.sheet-open .episode-copy { display: grid; }
 </style>
