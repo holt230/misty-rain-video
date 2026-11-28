@@ -31,8 +31,6 @@ const speed = ref(1);
 const locked = ref(false);
 const boosted = ref(false);
 type GestureKind = 'brightness' | 'volume';
-const isIOSDevice = typeof navigator !== 'undefined'
-  && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 const swipeEnabled = computed(() => props.expanded && !props.desktop && !locked.value && !props.loading);
 const swipeFeedback = ref<{ kind: GestureKind; level?: number }>();
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
@@ -147,7 +145,29 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
   let touchTapPending = false;
   let pointerId: number | undefined;
   let swipe: { kind: GestureKind; initial: number; distance: number } | undefined;
-  let volumeReadOnly = false;
+  let canAdjustVolume: boolean | undefined;
+  const setSwipeVolume = (level: number) => {
+    try {
+      if (canAdjustVolume === undefined) {
+        // Probe a middle level without touching the playing video. Support for
+        // mute/unmute alone does not mean volume can be changed continuously.
+        const probe = video.ownerDocument.createElement('video');
+        probe.volume = 0.5;
+        canAdjustVolume = Math.abs(probe.volume - 0.5) <= .01;
+      }
+      if (!canAdjustVolume) return false;
+      video.volume = level;
+      canAdjustVolume = Math.abs(video.volume - level) <= .01;
+      if (!canAdjustVolume) return false;
+      video.muted = level === 0;
+      volume.value = video.volume;
+      muted.value = video.muted;
+      return true;
+    } catch {
+      canAdjustVolume = false;
+      return false;
+    }
+  };
   let previousTouchTap: { at: number; x: number; y: number } | undefined;
   let origin = { x: 0, y: 0 };
   const endPress = () => {
@@ -197,16 +217,7 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
       swipeFeedback.value = { kind: 'brightness', level };
     } else {
       const level = Math.round(clamp(swipe.initial + delta) * 100) / 100;
-      if (isIOSDevice) volumeReadOnly = true;
-      // iOS WebKit exposes HTMLMediaElement.volume as read-only (always 1.0); keep
-      // the direct pipeline intact and tell the user to use hardware volume keys.
-      if (!volumeReadOnly) {
-        try { video.volume = level; volumeReadOnly = Math.abs(video.volume - level) > .01; }
-        catch { volumeReadOnly = true; }
-      }
-      if (!volumeReadOnly) video.muted = level === 0;
-      else if (video.muted && delta > .08) video.muted = false;
-      swipeFeedback.value = volumeReadOnly ? { kind: 'volume' } : { kind: 'volume', level: video.volume };
+      swipeFeedback.value = { kind: 'volume', ...(setSwipeVolume(level) ? { level: video.volume } : {}) };
     }
   };
   const tap = () => {
@@ -369,7 +380,10 @@ onBeforeUnmount(() => {
       <span>{{ swipeFeedback.kind === 'brightness' ? '亮度' : '音量' }} {{ Math.round(swipeFeedback.level * 100) }}%</span>
       <i :style="{ '--level': `${swipeFeedback.level * 100}%` }" aria-hidden="true" />
     </template>
-    <span v-else>{{ muted ? '已静音 · 请用机身音量键' : '请用机身音量键调节' }}</span>
+    <template v-else>
+      <span>{{ muted ? '视频已静音' : '音量由系统控制' }}</span>
+      <small>{{ muted ? '点击扬声器取消静音' : '可在控制中心调节' }}</small>
+    </template>
   </div>
   <div class="mobile-controls" :class="{ concealed: !visible, locked, desktop, expanded }" @pointerdown="reveal" @focusin="reveal">
     <p v-if="notice" class="control-notice" role="status">{{ notice }}</p>
@@ -451,6 +465,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .gesture-feedback.brightness { left: calc(72px + var(--player-inset-left, 0px)); }
 .gesture-feedback.volume { right: calc(24px + var(--player-inset-right, 0px)); }
 .gesture-feedback svg { width: 21px; height: 21px; }
+.gesture-feedback small { color: rgb(255 255 255 / .78); font-size: 11px; }
 .gesture-feedback i { width: 100%; height: 3px; border-radius: 2px; background: linear-gradient(to right, #fff var(--level), rgb(255 255 255 / .3) var(--level)); }
 .transport { position: absolute; inset: auto var(--control-right) var(--control-bottom) var(--control-left); display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; column-gap: 8px; }
 .mobile-controls.expanded .transport { row-gap: 0; }

@@ -137,6 +137,8 @@ test('skip buttons are disabled without metadata and hidden while locked, then w
 });
 
 test('expanded swipes adjust the originating side without seeking or toggling playback, and unexpanded or locked controls ignore them', async () => {
+  const userAgent = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)' });
   const view = mount();
   const brightness = [];
   view.props.onBrightness = level => brightness.push(level);
@@ -158,16 +160,27 @@ test('expanded swipes adjust the originating side without seeking or toggling pl
     swipe(700, 180, 240); await nextTick();
     assert.ok(view.media.volume < 1); assert.match(document.querySelector('.gesture-feedback').textContent, /音量/);
     assert.equal(view.media.currentTime, 60); assert.equal(view.media.paused, false);
+    const initialVolume = view.media.volume;
+    swipe(700, 200, 170); await nextTick();
     const volume = view.media.volume;
+    assert.ok(volume > initialVolume && volume < 1);
     swipe(700, 180, 180, 790); await nextTick(); assert.equal(view.media.volume, volume);
     Object.defineProperty(view.media, 'volume', { get: () => 1, set: () => {} });
     swipe(700, 180, 255); await nextTick();
-    assert.match(document.querySelector('.gesture-feedback').textContent, /请用机身音量键调节/);
+    assert.match(document.querySelector('.gesture-feedback').textContent, /音量由系统控制.*控制中心/);
     assert.equal(view.media.muted, false);
+    view.media.muted = true; view.media.dispatchEvent(event('volumechange'));
+    swipe(700, 230, 140); await nextTick();
+    assert.match(document.querySelector('.gesture-feedback').textContent, /视频已静音/);
+    assert.equal(view.media.muted, true);
     button('锁定播放控制').click(); await nextTick();
     swipe(120, 180, 70); await nextTick(); assert.equal(brightness.length, 1);
     assert.equal(document.querySelector('.gesture-feedback'), null);
-  } finally { view.app.unmount(); }
+  } finally {
+    view.app.unmount();
+    if (userAgent) Object.defineProperty(navigator, 'userAgent', userAgent);
+    else delete navigator.userAgent;
+  }
 });
 test('playing fades controls, tapping the video reveals them, and pausing keeps controls visible', async () => {
   const originalTimeout = globalThis.setTimeout;
