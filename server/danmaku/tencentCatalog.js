@@ -42,7 +42,8 @@ export function parseTencentEpisodes(data, cid) {
       if (!/^\d{1,4}$/.test(String(info.title)) || !/^[A-Za-z0-9]{11}$/.test(info.vid || '')) continue;
       const number = Number(info.title);
       if (number < 1) continue;
-      episodes.push({ platform: 'qq', number, title: text(info.play_title || `第 ${number} 集`), url: `https://v.qq.com/x/cover/${cid}/${info.vid}.html` });
+      const subtitle = text(info.video_subtitle);
+      episodes.push({ platform: 'qq', number, title: text(info.play_title || `第 ${number} 集`), ...(subtitle ? { subtitle } : {}), url: `https://v.qq.com/x/cover/${cid}/${info.vid}.html` });
     }
   }
   return episodes;

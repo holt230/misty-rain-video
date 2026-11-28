@@ -5,7 +5,7 @@ import { apiUrl } from './appUrl';
 import { hasConflictingOfficialEditions, sameWorkEdition, searchTitleKey, seasonQuery } from '../../server/searchTitles.js';
 import { matchesResourceTitle } from './resourceTitles';
 
-export async function readOfficialProgress(title: string, category: SearchCategory, signal: AbortSignal): Promise<OfficialProgress> {
+export async function readOfficialProgress(title: string, category: SearchCategory, signal: AbortSignal, includeEpisodeTitles = false): Promise<OfficialProgress> {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   signal.addEventListener('abort', cancel, { once: true });
@@ -14,7 +14,9 @@ export async function readOfficialProgress(title: string, category: SearchCatego
   try {
     const result = await Promise.race([
       (async () => {
-        const response = await authFetch(`${apiUrl('/api/official-progress')}?${new URLSearchParams({ kw: title, category })}`, { signal: controller.signal, cache: 'no-store' });
+        const query = new URLSearchParams({ kw: title, category });
+        if (includeEpisodeTitles) query.set('episodeTitles', '1');
+        const response = await authFetch(`${apiUrl('/api/official-progress')}?${query}`, { signal: controller.signal, cache: 'no-store' });
         const body = await response.json();
         return response.ok && body.code === 0 && Array.isArray(body.data?.works) ? body.data as OfficialProgress : undefined;
       })(),
@@ -27,6 +29,21 @@ export async function readOfficialProgress(title: string, category: SearchCatego
   } catch { /* Official availability must not hide verified resource results. */ }
   finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
   return { status: 'unavailable', works: [], checkedAt: '', message: '官方进度暂未确认。' };
+}
+
+export function confirmedEpisodeTitles(data: OfficialProgress, selected: OfficialWorkProgress | undefined, title: string) {
+  if (!selected || selected.category !== 'tv' || !sameWorkEdition(title, selected.title)) return {};
+  const matching = data.works.filter(work => work !== selected && work.category === 'tv' && work.year === selected.year
+    && work.latestEpisode === selected.latestEpisode && sameWorkEdition(work.title, selected.title));
+  const alternatives: Record<number, string> = {};
+  const conflicts = new Set<number>();
+  for (const work of matching) for (const [key, name] of Object.entries(work.episodeTitles || {})) {
+    const number = Number(key);
+    if (alternatives[number] && alternatives[number] !== name) conflicts.add(number);
+    else alternatives[number] = name;
+  }
+  for (const number of conflicts) delete alternatives[number];
+  return { ...alternatives, ...selected.episodeTitles };
 }
 
 export function chooseOfficialProgress(data: OfficialProgress, title: string, category: SearchCategory, resources: ResourceItem[], year?: string): OfficialWorkProgress | undefined {

@@ -81,6 +81,42 @@ test('disabled makes no requests; enabled matches, loads and mounts the renderer
     assert.equal(document.querySelector('.danmaku-overlay').childElementCount, 0);
   } finally { view.app.unmount(); }
 });
+
+test('a highlight uses an existing slot, pauses with playback, and can be turned off without refetching', async () => {
+  const view = mount(url => url.includes('/match') ? defaultResponse(url) : { ...defaultResponse(url), comments: [
+    { time: 1, text: '普通弹幕', color: '#ffffff', mode: 'rtl' },
+    { time: 1.1, text: '<i>名场面</i>', color: '#ffffff', mode: 'top' },
+    { time: 3, text: '太燃了', color: '#ffffff', mode: 'rtl' }
+  ] });
+  try {
+    const overlay = document.querySelector('.danmaku-overlay');
+    Object.defineProperties(overlay, { offsetWidth: { value: 402 }, offsetHeight: { value: 100 } });
+    button('弹幕关').click(); await flush(); await flush();
+    Object.defineProperty(view.video, 'paused', { configurable: true, value: false });
+    Object.defineProperty(view.video, 'readyState', { configurable: true, value: 4 });
+    view.video.currentTime = 1.3;
+    view.video.dispatchEvent(new dom.window.Event('playing')); await flush();
+    assert.equal(overlay.querySelector('.danmaku-highlight').textContent, '<i>名场面</i>');
+    assert.equal(overlay.querySelector('i'), null);
+    assert.doesNotMatch(overlay.textContent, /普通弹幕/);
+    assert.ok(overlay.classList.contains('danmaku-overlay--playing'));
+
+    view.video.dispatchEvent(new dom.window.Event('waiting')); await nextTick();
+    assert.ok(!overlay.classList.contains('danmaku-overlay--playing'));
+    view.video.currentTime = 3.2;
+    view.video.dispatchEvent(new dom.window.Event('playing')); await flush();
+    assert.match(overlay.textContent, /太燃了/);
+    assert.equal(overlay.querySelectorAll('.danmaku-highlight').length, 1);
+
+    document.querySelector('button[aria-label="弹幕设置"]').click(); await nextTick();
+    const networkRequests = view.calls.length;
+    document.querySelector('input[aria-label="特效弹幕"]').click(); await flush();
+    assert.equal(localStorage.getItem('misty_rain_danmaku_effects'), 'false');
+    assert.equal(overlay.querySelector('.danmaku-highlight'), null);
+    assert.match(overlay.textContent, /太燃了/);
+    assert.equal(view.calls.length, networkRequests);
+  } finally { view.app.unmount(); }
+});
 test('turning off cancels requests and ignores a late match response', async () => {
   let finish;
   const view = mount(() => new Promise(resolve => { finish = resolve; }));

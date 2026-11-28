@@ -123,18 +123,43 @@ export function parseIqiyiWork(response, candidate, keyword) {
   return { id: String(info.albumId), title, category, year, latest, total: episodeNumber(info.videoCount) };
 }
 
-export function parseIqiyiProgress(response, work) {
+export function collectEpisodeTitles(episodes, work) {
+  const titles = new Map(), conflicts = new Set();
+  for (const { number, subtitle } of episodes) {
+    const title = clean(subtitle).replace(/\s+/gu, ' ');
+    if (!Number.isInteger(number) || number < 1 || number > work.latestEpisode || !title || title.length > 80
+      || /^(?:第?\s*\d+\s*[集话期]?|[正全]片|暂无标题)$/u.test(title) || title === work.title || ancillary.test(title)) continue;
+    if (titles.has(number) && titles.get(number) !== title) conflicts.add(number);
+    else titles.set(number, title);
+  }
+  for (const number of conflicts) titles.delete(number);
+  return Object.fromEntries(titles);
+}
+
+const isIqiyiFullEpisode = episode => {
+  if (Number(episode?.contentType) !== 1 || episode.effective !== true || ancillary.test(clean(episode.name))
+    || !/^\d{5,17}$/.test(String(episode.tvId)) || !officialPlatformUrl(episode.playUrl, 'qiyi')) return false;
+  try { return iqiyiVideoId(episode.playUrl) === String(episode.tvId); }
+  catch { return false; }
+};
+
+export function parseIqiyiProgress(response, work, includeEpisodeTitles = false) {
   const data = response?.data;
   if (response?.code !== 'A00000' || String(data?.albumId) !== work.id || !Array.isArray(data.epsodelist)
     || Number(data.latestOrder) !== work.latest) throw unavailable();
-  const last = data.epsodelist.find(episode => Number(episode.order) === work.latest && Number(episode.contentType) === 1
-    && episode.effective === true && !ancillary.test(clean(episode.name)) && /^\d{5,17}$/.test(String(episode.tvId))
-    && officialPlatformUrl(episode.playUrl, 'qiyi') && iqiyiVideoId(episode.playUrl) === String(episode.tvId));
+  const last = data.epsodelist.find(episode => Number(episode.order) === work.latest && isIqiyiFullEpisode(episode));
   if (!last) throw unavailable();
-  return { id: `qiyi:${work.id}`, title: work.title, category: work.category, year: work.year,
+  const progress = { id: `qiyi:${work.id}`, title: work.title, category: work.category, year: work.year,
     latestEpisode: work.latest, completed: false, platform: platforms.qiyi, sourceUrl: officialPlatformUrl(last.playUrl, 'qiyi') };
+  return includeEpisodeTitles && work.category === 'tv' ? { ...progress, episodeTitles: iqiyiEpisodeTitles([response], work) } : progress;
 }
 
+function iqiyiEpisodeTitles(pages, work) {
+  const episodes = pages.flatMap(page => page?.code === 'A00000' && String(page.data?.albumId) === work.id
+    && Array.isArray(page.data.epsodelist) ? page.data.epsodelist : []);
+  return collectEpisodeTitles(episodes.filter(isIqiyiFullEpisode).map(episode => ({ number: Number(episode.order), subtitle: episode.subtitle })),
+    { title: work.title, latestEpisode: work.latest });
+}
 export function parseMangoWork(response, candidate, keyword) {
   const info = response?.data?.info;
   const title = clean(info?.clipName), category = kindOf(info?.fstlvlType), year = String(info?.detail?.releaseTime || '').match(/^(?:19|20)\d{2}/)?.[0] || '';
@@ -189,15 +214,24 @@ export function parseYangshipinProgress(html, candidate, keyword) {
 
 export class OfficialPlatformCatalog {
   constructor(request) { this.request = request; }
-  async confirm(candidate, keyword) {
+  async confirm(candidate, keyword, { includeEpisodeTitles = false, confirmed } = {}) {
     if (candidate.provider === 'youku') return parseYoukuProgress(await this.request(candidate.url, {}, 'text'), candidate, keyword);
     if (candidate.provider === 'yangshipin') return parseYangshipinProgress(await this.request(candidate.url, {}, 'text'), candidate, keyword);
     if (candidate.provider === 'qiyi') {
       const info = await this.request(`https://pcw-api.iqiyi.com/video/video/baseinfo/${iqiyiVideoId(candidate.url)}`);
       const work = parseIqiyiWork(info, candidate, keyword);
       const page = Math.ceil(work.latest / 50);
-      const data = await this.request(`https://pcw-api.iqiyi.com/albums/album/avlistinfo?${new URLSearchParams({ aid: work.id, page: String(page), size: '50' })}`);
-      return parseIqiyiProgress(data, work);
+      const load = page => this.request(`https://pcw-api.iqiyi.com/albums/album/avlistinfo?${new URLSearchParams({ aid: work.id, page: String(page), size: '50' })}`);
+      const data = await load(page);
+      const progress = parseIqiyiProgress(data, work, includeEpisodeTitles);
+      // Very long lists keep a bounded fan-out. The confirmed progress and titles
+      // from the current page remain usable even if an earlier page times out.
+      if (includeEpisodeTitles && work.category === 'tv' && page > 1) {
+        confirmed?.(progress);
+        const pages = await Promise.allSettled(Array.from({ length: Math.min(page - 1, 3) }, (_, index) => load(index + 1)));
+        progress.episodeTitles = iqiyiEpisodeTitles([data, ...pages.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])], work);
+      }
+      return progress;
     }
     if (candidate.provider === 'hunantv') {
       const vid = candidate.url.match(/\/(\d+)\.html$/)?.[1];

@@ -455,7 +455,8 @@ export const handleApiRequest = async (request, response, context) => {
       const controller = createProxyRequestController(request, response);
       try {
         const known = await context.catalog?.knownPlatforms?.(keyword, category) || [];
-        sendSuccess(response, await context.officialProgress.lookup(keyword, { category, signal: controller.signal, known }));
+        const includeEpisodeTitles = category === 'tv' && query.searchParams.get('episodeTitles') === '1';
+        sendSuccess(response, await context.officialProgress.lookup(keyword, { category, signal: controller.signal, known, includeEpisodeTitles }));
       }
       finally { controller.cleanup(); }
       return true;

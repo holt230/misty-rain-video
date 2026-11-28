@@ -135,6 +135,40 @@ test('skip buttons are disabled without metadata and hidden while locked, then w
     button('解锁播放控制').click(); await nextTick(); button('快进10秒').click(); assert.equal(view.media.currentTime, 10);
   } finally { view.app.unmount(); }
 });
+
+test('landscape swipes adjust the originating side without seeking or toggling playback, and locked or portrait controls ignore them', async () => {
+  const view = mount();
+  const brightness = [];
+  view.props.onBrightness = level => brightness.push(level);
+  view.media.getBoundingClientRect = () => ({ left: 0, width: 850, height: 400 });
+  const swipe = (x, toY, toX = x) => {
+    for (const [type, clientX, clientY] of [['pointerdown', x, 180], ['pointermove', toX, toY], ['pointerup', toX, toY], ['pointerleave', toX, toY]]) {
+      view.media.dispatchEvent(Object.assign(new dom.window.Event(type, { cancelable: true }), { pointerType: 'touch', pointerId: 7, clientX, clientY }));
+    }
+  };
+  try {
+    view.props.expanded = true; view.props.title = '测试剧'; view.props.episodeTitle = '第 2 集 · 重逢';
+    await nextTick();
+    assert.equal(document.querySelector('.playing-title small').textContent, '第 2 集 · 重逢');
+    await view.media.play(); view.media.currentTime = 60;
+    swipe(120, 120); await nextTick(); assert.deepEqual(brightness, []);
+    view.props.landscape = true; await nextTick();
+    swipe(120, 120); await nextTick();
+    assert.ok(brightness[0] > 1); assert.match(document.querySelector('.gesture-feedback').textContent, /亮度/);
+    swipe(700, 240); await nextTick();
+    assert.ok(view.media.volume < 1); assert.match(document.querySelector('.gesture-feedback').textContent, /音量/);
+    assert.equal(view.media.currentTime, 60); assert.equal(view.media.paused, false);
+    const volume = view.media.volume;
+    swipe(700, 180, 790); await nextTick(); assert.equal(view.media.volume, volume);
+    Object.defineProperty(view.media, 'volume', { get: () => 1, set: () => {} });
+    swipe(700, 255); await nextTick();
+    assert.match(document.querySelector('.gesture-feedback').textContent, /请用音量键调节/);
+    assert.equal(view.media.muted, false);
+    button('锁定播放控制').click(); await nextTick();
+    swipe(120, 70); await nextTick(); assert.equal(brightness.length, 1);
+    assert.equal(document.querySelector('.gesture-feedback'), null);
+  } finally { view.app.unmount(); }
+});
 test('playing fades controls, tapping the video reveals them, and pausing keeps controls visible', async () => {
   const originalTimeout = globalThis.setTimeout;
   let hide;
