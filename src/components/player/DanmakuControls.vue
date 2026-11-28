@@ -296,24 +296,24 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.danmaku-overlay { position: absolute; z-index: 1; inset: 10px 8px auto; height: 42%; overflow: hidden; pointer-events: none; contain: layout paint; --effects-state: paused; }
+.danmaku-overlay { position: absolute; z-index: 2; inset: 10px 8px auto; height: 42%; overflow: hidden; pointer-events: none; contain: layout paint; --effects-state: paused; }
 .danmaku-overlay--playing { --effects-state: running; }
 .danmaku-overlay :deep(.danmaku-highlight) {
   --spark: #8df8f3; --rim: #82a9ff; --tone: 31 67 123;
-  position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 6px;
-  box-sizing: border-box; max-width: min(84vw, 288px); height: 28px; margin: 3px 8px;
-  padding: 0 11px 0 9px; border: 1px solid var(--rim); border-radius: 999px;
+  position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 5px;
+  box-sizing: border-box; width: max-content; height: 28px; margin: 3px 8px;
+  padding: 0 12px 0 10px; border: 1px solid var(--rim); border-radius: 999px;
   background: linear-gradient(108deg, rgb(var(--tone) / .95), rgb(13 14 32 / .93) 58%, rgb(var(--tone) / .92));
   box-shadow: 0 0 12px -3px var(--rim), inset 0 1px 0 rgb(255 255 255 / .18);
-  color: #fff; font: 700 15px/1.1 system-ui, sans-serif;
-  letter-spacing: .045em; text-shadow: 0 1px 3px #08050c;
+  color: #fff; font: 700 14px/1.1 system-ui, sans-serif;
+  letter-spacing: .02em; text-shadow: 0 1px 3px #08050c;
   overflow: hidden; vertical-align: top;
 }
 .danmaku-overlay :deep(.danmaku-highlight--reaction) { --spark: #ffd7fa; --rim: #e58bf2; --tone: 114 34 119; }
 .danmaku-overlay :deep(.danmaku-highlight--spotlight) { --spark: #fff5ba; --rim: #ffc974; --tone: 115 65 24; }
-.danmaku-overlay :deep(.danmaku-highlight-text) { overflow: hidden; text-overflow: ellipsis; }
+.danmaku-overlay :deep(.danmaku-highlight-text) { flex-shrink: 0; white-space: nowrap; }
 .danmaku-overlay :deep(.danmaku-highlight-mark) {
-  flex: 0 0 10px; height: 10px; background: var(--spark);
+  flex: 0 0 9px; height: 9px; background: var(--spark);
   clip-path: polygon(50% 0, 64% 35%, 100% 50%, 64% 64%, 50% 100%, 35% 64%, 0 50%, 35% 35%);
 }
 .danmaku-overlay :deep(.danmaku-highlight::before) {
@@ -347,8 +347,8 @@ onBeforeUnmount(() => {
 .danmaku-controls button:focus-visible, .danmaku-controls input:focus-visible, .danmaku-controls select:focus-visible { outline: 2px solid var(--liquid-accent); outline-offset: 2px; }
 .danmaku-toggle { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .danmaku-toggle span { border: 1px solid currentColor; border-radius: 4px; padding: 0 3px; }
-.danmaku-toggle[aria-checked='true'] { color: var(--liquid-accent-strong); background: var(--glass-lens); }
-.danmaku-settings { margin-top: 8px; padding: 14px; border-radius: 12px; background: var(--surface-1); display: grid; gap: 14px; }
+.danmaku-toggle[aria-checked='true'] { color: var(--liquid-accent-strong); background: var(--liquid-accent-subtle); }
+.danmaku-settings { margin-top: 8px; padding: 14px; border: 1px solid var(--divider); border-radius: 12px; background: var(--surface-1); display: grid; gap: 14px; }
 .danmaku-source { display: grid; gap: 4px; }
 .danmaku-source strong, .danmaku-candidates strong { font-size: .8rem; }
 .danmaku-source small, .danmaku-candidates small, .danmaku-help { color: var(--text-secondary); font-size: .7rem; line-height: 1.6; }

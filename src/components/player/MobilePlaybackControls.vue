@@ -4,7 +4,7 @@ import { activeSubtitleTrack, selectSubtitleTrack, subtitleTrackOptions, subtitl
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowLeft, LockKeyhole, UnlockKeyhole, ListVideo, MessageSquareText, SlidersHorizontal, Expand, Shrink, Pause, Play, RotateCcw, RotateCw, Sun, Volume2, VolumeX } from '@lucide/vue';
 
-const props = defineProps<{ video: HTMLVideoElement; expanded: boolean; landscape?: boolean; brightness?: number; loading?: boolean; desktop?: boolean; danmakuEnabled?: boolean; title?: string; episodeTitle?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>();
+const props = withDefaults(defineProps<{ video: HTMLVideoElement; expanded: boolean; landscape?: boolean; brightness?: number; loading?: boolean; desktop?: boolean; danmakuEnabled?: boolean; hasEpisodes?: boolean; title?: string; episodeTitle?: string; pictureFit?: 'contain' | 'cover'; hls?: Hls | null; username?: string }>(), { hasEpisodes: true });
 const emit = defineEmits<{ (e: 'fullscreen'): void; (e: 'danmaku'): void; (e: 'back'): void; (e: 'picture-fit'): void; (e: 'episodes'): void; (e: 'settings'): void; (e: 'lock-change', value: boolean): void; (e: 'brightness', value: number): void }>();
 const visible = ref(true);
 const paused = ref(true);
@@ -31,7 +31,9 @@ const speed = ref(1);
 const locked = ref(false);
 const boosted = ref(false);
 type GestureKind = 'brightness' | 'volume';
-const swipeEnabled = computed(() => props.expanded && props.landscape && !props.desktop && !locked.value && !props.loading);
+const isIOSDevice = typeof navigator !== 'undefined'
+  && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+const swipeEnabled = computed(() => props.expanded && !props.desktop && !locked.value && !props.loading);
 const swipeFeedback = ref<{ kind: GestureKind; level?: number }>();
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 const rates = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
@@ -190,18 +192,20 @@ watch([() => props.video, () => props.hls] as const, ([video, hls]) => {
     if (event.cancelable) event.preventDefault();
     const delta = dy / swipe.distance;
     if (swipe.kind === 'brightness') {
-      const level = Math.round(clamp(swipe.initial + delta * 1.25, .25, 1.5) * 100) / 100;
+      const level = Math.round(clamp(swipe.initial + delta, .2, 1) * 100) / 100;
       emit('brightness', level);
       swipeFeedback.value = { kind: 'brightness', level };
     } else {
       const level = Math.round(clamp(swipe.initial + delta) * 100) / 100;
-      // Some mobile WebKit builds ignore or reject assignment. Keep the direct
-      // media pipeline intact and show the system control as the next action.
+      if (isIOSDevice) volumeReadOnly = true;
+      // iOS WebKit exposes HTMLMediaElement.volume as read-only (always 1.0); keep
+      // the direct pipeline intact and tell the user to use hardware volume keys.
       if (!volumeReadOnly) {
         try { video.volume = level; volumeReadOnly = Math.abs(video.volume - level) > .01; }
         catch { volumeReadOnly = true; }
       }
       if (!volumeReadOnly) video.muted = level === 0;
+      else if (video.muted && delta > .08) video.muted = false;
       swipeFeedback.value = volumeReadOnly ? { kind: 'volume' } : { kind: 'volume', level: video.volume };
     }
   };
@@ -360,12 +364,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="swipeFeedback" class="gesture-feedback" :class="swipeFeedback.kind" role="status">
-    <Sun v-if="swipeFeedback.kind === 'brightness'" aria-hidden="true" /><Volume2 v-else aria-hidden="true" />
+    <Sun v-if="swipeFeedback.kind === 'brightness'" aria-hidden="true" /><VolumeX v-else-if="swipeFeedback.level === undefined && muted" aria-hidden="true" /><Volume2 v-else aria-hidden="true" />
     <template v-if="swipeFeedback.level !== undefined">
       <span>{{ swipeFeedback.kind === 'brightness' ? '亮度' : '音量' }} {{ Math.round(swipeFeedback.level * 100) }}%</span>
-      <i :style="{ '--level': `${(swipeFeedback.kind === 'brightness' ? (swipeFeedback.level - .25) / 1.25 : swipeFeedback.level) * 100}%` }" aria-hidden="true" />
+      <i :style="{ '--level': `${swipeFeedback.level * 100}%` }" aria-hidden="true" />
     </template>
-    <span v-else>请用音量键调节</span>
+    <span v-else>{{ muted ? '已静音 · 请用机身音量键' : '请用机身音量键调节' }}</span>
   </div>
   <div class="mobile-controls" :class="{ concealed: !visible, locked, desktop, expanded }" @pointerdown="reveal" @focusin="reveal">
     <p v-if="notice" class="control-notice" role="status">{{ notice }}</p>
@@ -377,7 +381,7 @@ onBeforeUnmount(() => {
       <span v-if="expanded" class="playing-title"><strong>{{ title }}</strong><small v-if="episodeTitle" :title="episodeTitle">{{ episodeTitle }}</small></span>
       <span v-else class="desktop-shortcuts">空格 播放/暂停 · ← → 快退/快进</span>
       <button v-if="expanded && danmakuEnabled !== undefined" type="button" role="switch" aria-label="弹幕" :aria-checked="danmakuEnabled" @click="emit('danmaku')"><MessageSquareText /><span>弹幕</span></button>
-      <button type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
+      <button v-if="hasEpisodes" type="button" aria-label="打开选集" @click="emit('episodes')"><ListVideo /><span>选集</span></button>
       <button type="button" aria-label="打开播放设置" @click="emit('settings')"><SlidersHorizontal /><span>设置</span></button>
     </div>
     <div v-if="!locked && !loading" class="playback-actions" role="group" aria-label="播放控制">
@@ -410,7 +414,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.mobile-controls { position: absolute; z-index: 3; inset: 0; color: #fff; pointer-events: none; background: linear-gradient(rgb(0 0 0 / .35), transparent 30%, transparent 48%, rgb(0 0 0 / .75)); transition: opacity .2s; }
+.mobile-controls { position: absolute; z-index: 4; inset: 0; color: #fff; pointer-events: none; background: linear-gradient(rgb(0 0 0 / .35), transparent 30%, transparent 48%, rgb(0 0 0 / .75)); transition: opacity .2s; }
 .mobile-controls { --control-left: 12px; --control-right: 12px; --control-top: 8px; --control-bottom: 4px; }
 .mobile-controls.expanded { --control-left: calc(16px + var(--player-inset-left, 0px)); --control-right: calc(16px + var(--player-inset-right, 0px)); --control-top: calc(8px + var(--player-inset-top, 0px)); --control-bottom: calc(8px + var(--player-inset-bottom, 0px)); }
 .mobile-controls.concealed:not(:has(:focus-visible)) { opacity: 0; pointer-events: none; }
@@ -432,7 +436,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .playing-title { flex: 1; min-width: 0; display: grid; gap: 2px; text-shadow: 0 1px 4px #000; }
 .playing-title > * { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .playing-title strong { font-size: 14px; font-weight: 600; }
-.playing-title small { color: #e2e6ed; font-size: 11px; }
+.playing-title small { color: #e2e6ed; font-size: 12px; }
 .playback-actions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(20px, 4vw, 36px); }
 .playback-actions button { background: rgb(0 0 0 / .24); }
 .playback-actions .play-toggle { width: 52px; height: 52px; flex-basis: 52px; background: rgb(255 255 255 / .18); }
@@ -443,12 +447,14 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .lock-control { position: absolute; top: 50%; left: var(--control-left); transform: translateY(-50%); background: rgb(0 0 0 / .4); }
 .mobile-controls.locked { background: transparent; }
 .speed-notice { position: absolute; top: calc(var(--control-top) + 48px); left: 50%; z-index: 1; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 14px; background: rgb(0 0 0 / .8); color: #fff; border-radius: 12px; font-size: 12px; white-space: nowrap; }
-.gesture-feedback { position: absolute; top: 50%; z-index: 4; transform: translateY(-50%); pointer-events: none; display: grid; justify-items: center; gap: 6px; min-width: 92px; padding: 10px 12px; border-radius: 14px; background: rgb(12 12 15 / .85); color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
-.gesture-feedback.brightness { left: calc(64px + var(--player-inset-left, 0px)); }
+.gesture-feedback { position: absolute; top: 50%; z-index: 5; transform: translateY(-50%); pointer-events: none; display: grid; justify-items: center; gap: 6px; min-width: 96px; max-width: 210px; padding: 10px 14px; border-radius: 14px; background: rgb(12 12 15 / .86); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: #fff; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.gesture-feedback.brightness { left: calc(72px + var(--player-inset-left, 0px)); }
 .gesture-feedback.volume { right: calc(24px + var(--player-inset-right, 0px)); }
 .gesture-feedback svg { width: 21px; height: 21px; }
 .gesture-feedback i { width: 100%; height: 3px; border-radius: 2px; background: linear-gradient(to right, #fff var(--level), rgb(255 255 255 / .3) var(--level)); }
 .transport { position: absolute; inset: auto var(--control-right) var(--control-bottom) var(--control-left); display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; align-items: center; column-gap: 8px; }
+.mobile-controls.expanded .transport { row-gap: 0; }
+.mobile-controls.expanded .seek-slider { height: 34px; }
 .transport .time { text-align: center; }
 .seek-slider { --played: 0%; --buffered: 0%; width: 100%; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
 .seek-slider::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, #fff var(--played), rgb(255 255 255 / .4) var(--played), rgb(255 255 255 / .4) var(--buffered), rgb(255 255 255 / .2) var(--buffered)); }
@@ -465,6 +471,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .mobile-controls:not(.expanded):not(.desktop) .secondary-controls :is(.mute-button, .fit-control, select[aria-label='影片字幕']) { display: none; }
 .mobile-controls:not(.expanded):not(.desktop) .secondary-controls select { max-width: 48px; padding: 0 4px; background: transparent; }
 .mobile-controls:not(.expanded):not(.desktop) .time { font-size: 10px; }
+@media (max-width: 520px) {
+  .mobile-controls.expanded .control-tools { gap: 6px; }
+  .mobile-controls.expanded .control-tools button:not(.back-control) { padding: 8px 10px; }
+  .mobile-controls.expanded .control-tools button span { display: none; }
+}
 @media (max-height: 320px) and (orientation: landscape) {
   .mobile-controls.expanded .transport { grid-template-columns: 36px minmax(0, 1fr) 36px auto; }
   .mobile-controls.expanded .secondary-controls { grid-column: auto; gap: 4px; }

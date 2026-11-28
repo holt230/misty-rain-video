@@ -316,3 +316,10 @@ test('stale comments remain visible while a refresh failure offers retry', async
     assert.ok(view.calls.at(-1).url.includes('refresh=1'));
   } finally { view.app.unmount(); }
 });
+
+test('highlight danmaku styles never truncate text with ellipsis', () => {
+  const sourceText = fs.readFileSync('src/components/player/DanmakuControls.vue', 'utf8');
+  assert.doesNotMatch(sourceText, /danmaku-highlight-text[^}]*text-overflow\s*:\s*ellipsis/);
+  assert.doesNotMatch(sourceText, /danmaku-highlight[^}]*max-width\s*:\s*min\(84vw,\s*288px\)/);
+  assert.match(sourceText, /danmaku-highlight-text[^}]*white-space\s*:\s*nowrap/);
+});
